@@ -1,0 +1,1 @@
+- [Expo workflow health check failure](expo-workflow-health-check.md) — restart_workflow always fails (DIDNT_OPEN_A_PORT) for Expo mobile in this env; Metro starts fine, platform health check is broken.
