@@ -1,8 +1,10 @@
 import { Feather } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import DateTimePicker, {
+  DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -23,6 +25,8 @@ function roundToNext5(d: Date): Date {
   return new Date(Math.ceil((d.getTime() + 60000) / ms) * ms);
 }
 
+type PickerMode = "date" | "time" | null;
+
 export default function AddReminderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -37,10 +41,10 @@ export default function AddReminderScreen() {
   const [date, setDate] = useState(
     existing ? new Date(existing.datetime) : roundToNext5(new Date())
   );
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [saving, setSaving] = useState(false);
   const titleRef = useRef<TextInput>(null);
+  const minDate = useMemo(() => new Date(), []);
 
   useEffect(() => {
     setTimeout(() => titleRef.current?.focus(), 300);
@@ -56,6 +60,30 @@ export default function AddReminderScreen() {
     hour: "2-digit",
     minute: "2-digit",
   });
+
+  const handlePickerChange = (
+    event: DateTimePickerEvent,
+    selected: Date | undefined
+  ) => {
+    if (Platform.OS === "android") {
+      setPickerMode(null);
+    }
+    if (event.type === "set" && selected) {
+      if (pickerMode === "date") {
+        const updated = new Date(date);
+        updated.setFullYear(
+          selected.getFullYear(),
+          selected.getMonth(),
+          selected.getDate()
+        );
+        setDate(updated);
+      } else if (pickerMode === "time") {
+        const updated = new Date(date);
+        updated.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+        setDate(updated);
+      }
+    }
+  };
 
   const handleSave = async () => {
     if (!title.trim()) {
@@ -124,7 +152,10 @@ export default function AddReminderScreen() {
     saveBtnText: {
       fontSize: 14,
       fontFamily: "Inter_600SemiBold",
-      color: saving || !title.trim() ? colors.mutedForeground : colors.primaryForeground,
+      color:
+        saving || !title.trim()
+          ? colors.mutedForeground
+          : colors.primaryForeground,
     },
     scroll: {
       flex: 1,
@@ -166,9 +197,6 @@ export default function AddReminderScreen() {
       color: colors.foreground,
       minHeight: 24,
     },
-    inputPlaceholder: {
-      color: colors.mutedForeground,
-    },
     dateRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -200,22 +228,18 @@ export default function AddReminderScreen() {
       fontFamily: "Inter_500Medium",
       color: colors.primary,
     },
-    pickerContainer: {
+    iosPicker: {
       paddingHorizontal: 8,
       paddingBottom: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-    },
-    timePickerContainer: {
-      paddingHorizontal: 8,
-      paddingBottom: 12,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
     },
     hint: {
       fontSize: 12,
       fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
       textAlign: "center",
-      marginTop: 4,
+      marginTop: 8,
     },
   });
 
@@ -282,10 +306,9 @@ export default function AddReminderScreen() {
             <View style={styles.section}>
               <Pressable
                 style={styles.dateRow}
-                onPress={() => {
-                  setShowTimePicker(false);
-                  setShowDatePicker((v) => !v);
-                }}
+                onPress={() =>
+                  setPickerMode((m) => (m === "date" ? null : "date"))
+                }
               >
                 <View style={styles.dateLabel}>
                   <Feather name="calendar" size={18} color={colors.primary} />
@@ -294,25 +317,14 @@ export default function AddReminderScreen() {
                 <Text style={styles.dateValue}>{formattedDate}</Text>
               </Pressable>
 
-              {showDatePicker && (
-                <View style={styles.pickerContainer}>
+              {pickerMode === "date" && Platform.OS === "ios" && (
+                <View style={styles.iosPicker}>
                   <DateTimePicker
                     value={date}
                     mode="date"
-                    display={Platform.OS === "ios" ? "inline" : "default"}
-                    minimumDate={new Date()}
-                    onChange={(_, selected) => {
-                      if (Platform.OS === "android") setShowDatePicker(false);
-                      if (selected) {
-                        const updated = new Date(date);
-                        updated.setFullYear(
-                          selected.getFullYear(),
-                          selected.getMonth(),
-                          selected.getDate()
-                        );
-                        setDate(updated);
-                      }
-                    }}
+                    display="inline"
+                    minimumDate={minDate}
+                    onChange={handlePickerChange}
                     themeVariant="light"
                     accentColor={colors.primary}
                   />
@@ -321,10 +333,9 @@ export default function AddReminderScreen() {
 
               <Pressable
                 style={styles.dateRowLast}
-                onPress={() => {
-                  setShowDatePicker(false);
-                  setShowTimePicker((v) => !v);
-                }}
+                onPress={() =>
+                  setPickerMode((m) => (m === "time" ? null : "time"))
+                }
               >
                 <View style={styles.dateLabel}>
                   <Feather name="clock" size={18} color={colors.primary} />
@@ -333,20 +344,13 @@ export default function AddReminderScreen() {
                 <Text style={styles.dateValue}>{formattedTime}</Text>
               </Pressable>
 
-              {showTimePicker && (
-                <View style={styles.timePickerContainer}>
+              {pickerMode === "time" && Platform.OS === "ios" && (
+                <View style={styles.iosPicker}>
                   <DateTimePicker
                     value={date}
                     mode="time"
-                    display={Platform.OS === "ios" ? "spinner" : "default"}
-                    onChange={(_, selected) => {
-                      if (Platform.OS === "android") setShowTimePicker(false);
-                      if (selected) {
-                        const updated = new Date(date);
-                        updated.setHours(selected.getHours(), selected.getMinutes());
-                        setDate(updated);
-                      }
-                    }}
+                    display="spinner"
+                    onChange={handlePickerChange}
                     themeVariant="light"
                     accentColor={colors.primary}
                   />
@@ -359,6 +363,17 @@ export default function AddReminderScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Android: render picker outside ScrollView so it appears as a system dialog */}
+      {Platform.OS === "android" && pickerMode !== null && (
+        <DateTimePicker
+          value={date}
+          mode={pickerMode}
+          display="default"
+          minimumDate={pickerMode === "date" ? minDate : undefined}
+          onChange={handlePickerChange}
+        />
+      )}
     </View>
   );
 }
