@@ -317,16 +317,17 @@ export default function AddReminderScreen() {
                 <Text style={styles.dateValue}>{formattedDate}</Text>
               </Pressable>
 
-              {pickerMode === "date" && Platform.OS === "ios" && (
+              {pickerMode === "date" && Platform.OS !== "android" && (
                 <View style={styles.iosPicker}>
                   <DateTimePicker
                     value={date}
                     mode="date"
-                    display="inline"
+                    display={Platform.OS === "ios" ? "inline" : "calendar"}
                     minimumDate={minDate}
                     onChange={handlePickerChange}
-                    themeVariant="light"
-                    accentColor={colors.primary}
+                    {...(Platform.OS === "ios"
+                      ? { themeVariant: "light", accentColor: colors.primary }
+                      : {})}
                   />
                 </View>
               )}
@@ -344,15 +345,16 @@ export default function AddReminderScreen() {
                 <Text style={styles.dateValue}>{formattedTime}</Text>
               </Pressable>
 
-              {pickerMode === "time" && Platform.OS === "ios" && (
+              {pickerMode === "time" && Platform.OS !== "android" && (
                 <View style={styles.iosPicker}>
                   <DateTimePicker
                     value={date}
                     mode="time"
                     display="spinner"
                     onChange={handlePickerChange}
-                    themeVariant="light"
-                    accentColor={colors.primary}
+                    {...(Platform.OS === "ios"
+                      ? { themeVariant: "light", accentColor: colors.primary }
+                      : {})}
                   />
                   <Text style={styles.hint}>
                     You'll get a notification at this time
