@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as chrono from "chrono-node";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -39,6 +40,36 @@ function toTimeInput(d: Date) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+function parseNaturalLanguage(text: string): { title: string; date: Date | null } {
+  if (!text.trim()) return { title: "", date: null };
+
+  const now = new Date();
+  const results = chrono.parse(text, now, { forwardDate: true });
+
+  if (results.length === 0) {
+    return { title: text.trim(), date: null };
+  }
+
+  // Use the first parsed date/time
+  const parsed = results[0];
+  const date = parsed.date();
+
+  // Strip all matched date/time strings to extract the title
+  let title = text;
+  // Remove matches in reverse order to preserve indices
+  for (let i = results.length - 1; i >= 0; i--) {
+    const r = results[i];
+    title = title.slice(0, r.index) + title.slice(r.index + r.text.length);
+  }
+  // Clean up extra whitespace, punctuation at edges
+  title = title
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
+    .trim();
+
+  return { title: title || text.trim(), date };
+}
+
 type PickerMode = "date" | "time" | null;
 
 export default function AddReminderScreen() {
@@ -50,68 +81,73 @@ export default function AddReminderScreen() {
 
   const existing = isEditing ? reminders.find((r) => r.id === id) : null;
 
-  const [title, setTitle] = useState(existing?.title ?? "");
-  const [description, setDescription] = useState(existing?.description ?? "");
-  const [date, setDate] = useState(
-    existing ? new Date(existing.datetime) : roundToNext5(new Date())
+  // Natural language input
+  const [input, setInput] = useState(
+    existing
+      ? `${existing.title}${existing.description ? " — " + existing.description : ""}`
+      : ""
   );
+
+  // Parsed/overridden values
+  const defaultDate = roundToNext5(new Date());
+  const [parsedTitle, setParsedTitle] = useState(existing?.title ?? "");
+  const [parsedDate, setParsedDate] = useState<Date>(
+    existing ? new Date(existing.datetime) : defaultDate
+  );
+  const [dateWasParsed, setDateWasParsed] = useState(false);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [saving, setSaving] = useState(false);
-  const titleRef = useRef<TextInput>(null);
-  const minDate = useMemo(() => new Date(), []);
+  const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
-    setTimeout(() => titleRef.current?.focus(), 300);
+    setTimeout(() => inputRef.current?.focus(), 300);
   }, []);
 
-  const formattedDate = date.toLocaleDateString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  const formattedTime = date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  // Re-parse whenever input changes (not in edit mode — just use existing values)
+  useEffect(() => {
+    if (isEditing) return;
+    const { title, date } = parseNaturalLanguage(input);
+    setParsedTitle(title);
+    if (date) {
+      setParsedDate(date);
+      setDateWasParsed(true);
+    } else {
+      setDateWasParsed(false);
+    }
+  }, [input, isEditing]);
 
-  const handlePickerChange = (
-    event: DateTimePickerEvent,
-    selected: Date | undefined
-  ) => {
+  const handlePickerChange = (event: DateTimePickerEvent, selected: Date | undefined) => {
     if (Platform.OS === "android") setPickerMode(null);
     if (event.type === "set" && selected) {
       if (pickerMode === "date") {
-        const updated = new Date(date);
+        const updated = new Date(parsedDate);
         updated.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate());
-        setDate(updated);
+        setParsedDate(updated);
       } else if (pickerMode === "time") {
-        const updated = new Date(date);
+        const updated = new Date(parsedDate);
         updated.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
-        setDate(updated);
+        setParsedDate(updated);
       }
     }
   };
 
   const handleSave = async () => {
+    const title = isEditing ? parsedTitle : parsedTitle || input.trim();
     if (!title.trim()) {
-      Alert.alert("Title required", "Please enter a title for your reminder.");
+      Alert.alert("Title required", 'Describe your reminder, e.g. "Call dentist tomorrow at 3pm".');
       return;
     }
     setSaving(true);
     try {
+      const payload = {
+        title: title.trim(),
+        description: "",
+        datetime: parsedDate.toISOString(),
+      };
       if (isEditing && id) {
-        await editReminder(id, {
-          title: title.trim(),
-          description: description.trim(),
-          datetime: date.toISOString(),
-        });
+        await editReminder(id, payload);
       } else {
-        await addReminder({
-          title: title.trim(),
-          description: description.trim(),
-          datetime: date.toISOString(),
-        });
+        await addReminder(payload);
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
@@ -122,11 +158,21 @@ export default function AddReminderScreen() {
     }
   };
 
+  const formattedDate = parsedDate.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const formattedTime = parsedDate.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const canSave = !saving && !!(isEditing ? parsedTitle : parsedTitle || input.trim());
+
   const styles = StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
+    container: { flex: 1, backgroundColor: colors.background },
     header: {
       flexDirection: "row",
       alignItems: "center",
@@ -155,27 +201,55 @@ export default function AddReminderScreen() {
       paddingHorizontal: 16,
       paddingVertical: 8,
       borderRadius: 20,
-      backgroundColor: saving || !title.trim() ? colors.muted : colors.primary,
+      backgroundColor: canSave ? colors.primary : colors.muted,
     },
     saveBtnText: {
       fontSize: 14,
       fontFamily: "Inter_600SemiBold",
-      color: saving || !title.trim() ? colors.mutedForeground : colors.primaryForeground,
+      color: canSave ? colors.primaryForeground : colors.mutedForeground,
     },
-    scroll: {
-      flex: 1,
-    },
+    scroll: { flex: 1 },
     scrollContent: {
       padding: 20,
       paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 20,
-      gap: 16,
+      gap: 20,
     },
-    section: {
+    inputCard: {
       backgroundColor: colors.card,
       borderRadius: 16,
-      overflow: "hidden",
       borderWidth: 1,
       borderColor: colors.border,
+      padding: 16,
+    },
+    inputHint: {
+      fontSize: 12,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginBottom: 10,
+    },
+    input: {
+      fontSize: 18,
+      fontFamily: "Inter_400Regular",
+      color: colors.foreground,
+      minHeight: 80,
+      textAlignVertical: "top",
+    },
+    examplesWrap: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+      marginTop: 12,
+    },
+    exampleChip: {
+      backgroundColor: colors.muted,
+      borderRadius: 20,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+    },
+    exampleChipText: {
+      fontSize: 12,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
     },
     sectionLabel: {
       fontSize: 12,
@@ -183,68 +257,79 @@ export default function AddReminderScreen() {
       color: colors.mutedForeground,
       textTransform: "uppercase",
       letterSpacing: 0.8,
-      marginBottom: 8,
+      marginBottom: 10,
       paddingHorizontal: 4,
     },
-    inputRow: {
+    previewCard: {
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      overflow: "hidden",
+    },
+    previewRow: {
+      flexDirection: "row",
+      alignItems: "center",
       paddingHorizontal: 16,
       paddingVertical: 14,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
+      gap: 12,
     },
-    inputRowLast: {
-      paddingHorizontal: 16,
-      paddingVertical: 14,
-    },
-    input: {
-      fontSize: 16,
-      fontFamily: "Inter_400Regular",
-      color: colors.foreground,
-      minHeight: 24,
-    },
-    dateRow: {
+    previewRowLast: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
       paddingHorizontal: 16,
       paddingVertical: 14,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
+      gap: 12,
     },
-    dateRowLast: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      paddingHorizontal: 16,
-      paddingVertical: 14,
+    previewLabel: {
+      fontSize: 13,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+      width: 44,
     },
-    dateLabel: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-    },
-    dateLabelText: {
+    previewValue: {
+      flex: 1,
       fontSize: 15,
       fontFamily: "Inter_500Medium",
       color: colors.foreground,
     },
-    dateValue: {
+    previewValueHighlight: {
+      flex: 1,
       fontSize: 15,
       fontFamily: "Inter_500Medium",
       color: colors.primary,
+    },
+    parsedBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      backgroundColor: colors.primary + "20",
+      borderRadius: 10,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    parsedBadgeText: {
+      fontSize: 11,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
+    },
+    editBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+    },
+    editBadgeText: {
+      fontSize: 12,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
     },
     pickerWrap: {
       paddingHorizontal: 16,
       paddingVertical: 12,
       borderTopWidth: 1,
       borderTopColor: colors.border,
-    },
-    hint: {
-      fontSize: 12,
-      fontFamily: "Inter_400Regular",
-      color: colors.mutedForeground,
-      textAlign: "center",
-      marginTop: 8,
     },
   });
 
@@ -262,8 +347,16 @@ export default function AddReminderScreen() {
     boxSizing: "border-box" as const,
   };
 
+  const EXAMPLES = [
+    "Team meeting tomorrow at 10am",
+    "Pay bills on Friday",
+    "Call mom in 2 hours",
+    "Doctor appointment next Monday at 9:30am",
+  ];
+
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.closeBtn} onPress={() => router.back()}>
           <Feather name="x" size={18} color={colors.foreground} />
@@ -271,11 +364,7 @@ export default function AddReminderScreen() {
         <Text style={styles.headerTitle}>
           {isEditing ? "Edit Reminder" : "New Reminder"}
         </Text>
-        <Pressable
-          style={styles.saveBtn}
-          onPress={handleSave}
-          disabled={saving || !title.trim()}
-        >
+        <Pressable style={styles.saveBtn} onPress={handleSave} disabled={!canSave}>
           <Text style={styles.saveBtnText}>{saving ? "Saving…" : "Save"}</Text>
         </Pressable>
       </View>
@@ -289,60 +378,79 @@ export default function AddReminderScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View>
-            <Text style={styles.sectionLabel}>Details</Text>
-            <View style={styles.section}>
-              <View style={styles.inputRow}>
-                <TextInput
-                  ref={titleRef}
-                  style={styles.input}
-                  placeholder="Title"
-                  placeholderTextColor={colors.mutedForeground}
-                  value={title}
-                  onChangeText={setTitle}
-                  returnKeyType="next"
-                  maxLength={100}
-                />
+          {/* Natural language input */}
+          <View style={styles.inputCard}>
+            <Text style={styles.inputHint}>Describe your reminder in plain English</Text>
+            <TextInput
+              ref={inputRef}
+              style={styles.input}
+              placeholder={`e.g. "Call dentist tomorrow at 3pm"`}
+              placeholderTextColor={colors.mutedForeground}
+              value={input}
+              onChangeText={setInput}
+              multiline
+              maxLength={300}
+              returnKeyType="done"
+              blurOnSubmit
+            />
+            {/* Example chips — only when input is empty */}
+            {!input && (
+              <View style={styles.examplesWrap}>
+                {EXAMPLES.map((ex) => (
+                  <Pressable
+                    key={ex}
+                    style={styles.exampleChip}
+                    onPress={() => setInput(ex)}
+                  >
+                    <Text style={styles.exampleChipText}>{ex}</Text>
+                  </Pressable>
+                ))}
               </View>
-              <View style={styles.inputRowLast}>
-                <TextInput
-                  style={[styles.input, { minHeight: 60 }]}
-                  placeholder="Notes (optional)"
-                  placeholderTextColor={colors.mutedForeground}
-                  value={description}
-                  onChangeText={setDescription}
-                  multiline
-                  returnKeyType="done"
-                  maxLength={300}
-                  textAlignVertical="top"
-                />
-              </View>
-            </View>
+            )}
           </View>
 
+          {/* Parsed preview */}
           <View>
-            <Text style={styles.sectionLabel}>Schedule</Text>
-            <View style={styles.section}>
-              {/* ── Date row ── */}
+            <Text style={styles.sectionLabel}>Parsed as</Text>
+            <View style={styles.previewCard}>
+              {/* Title row */}
+              <View style={styles.previewRow}>
+                <Feather name="type" size={16} color={colors.mutedForeground} />
+                <Text style={styles.previewLabel}>Title</Text>
+                <Text style={styles.previewValue} numberOfLines={2}>
+                  {parsedTitle || (input.trim() ? input.trim() : "—")}
+                </Text>
+              </View>
+
+              {/* Date row */}
               <Pressable
-                style={styles.dateRow}
+                style={styles.previewRow}
                 onPress={() => setPickerMode((m) => (m === "date" ? null : "date"))}
               >
-                <View style={styles.dateLabel}>
-                  <Feather name="calendar" size={18} color={colors.primary} />
-                  <Text style={styles.dateLabelText}>Date</Text>
-                </View>
-                <Text style={styles.dateValue}>{formattedDate}</Text>
+                <Feather name="calendar" size={16} color={colors.primary} />
+                <Text style={styles.previewLabel}>Date</Text>
+                <Text style={styles.previewValueHighlight}>{formattedDate}</Text>
+                {dateWasParsed ? (
+                  <View style={styles.parsedBadge}>
+                    <Feather name="zap" size={10} color={colors.primary} />
+                    <Text style={styles.parsedBadgeText}>auto</Text>
+                  </View>
+                ) : (
+                  <View style={styles.editBadge}>
+                    <Feather name="edit-2" size={12} color={colors.mutedForeground} />
+                    <Text style={styles.editBadgeText}>tap to set</Text>
+                  </View>
+                )}
               </Pressable>
 
-              {/* iOS inline calendar */}
-              {pickerMode === "date" && Platform.OS === "ios" && (
+              {/* iOS date picker */}
+              {pickerMode === "date" && Platform.OS === "ios" && DateTimePicker && (
                 <View style={styles.pickerWrap}>
                   <DateTimePicker
-                    value={date}
+                    value={parsedDate}
                     mode="date"
                     display="inline"
-                    minimumDate={minDate}
+                    minimumDate={new Date()}
                     onChange={handlePickerChange}
                     themeVariant="light"
                     accentColor={colors.primary}
@@ -350,20 +458,20 @@ export default function AddReminderScreen() {
                 </View>
               )}
 
-              {/* Web native date input */}
+              {/* Web date picker */}
               {pickerMode === "date" && Platform.OS === "web" && (
                 <View style={styles.pickerWrap}>
                   {React.createElement("input", {
                     type: "date",
-                    value: toDateInput(date),
-                    min: toDateInput(minDate),
+                    value: toDateInput(parsedDate),
+                    min: toDateInput(new Date()),
                     onChange: (e: any) => {
                       const val: string = e.target.value;
                       if (val) {
-                        const [y, m, d] = val.split("-").map(Number);
-                        const updated = new Date(date);
-                        updated.setFullYear(y, m - 1, d);
-                        setDate(updated);
+                        const [y, mo, d] = val.split("-").map(Number);
+                        const updated = new Date(parsedDate);
+                        updated.setFullYear(y, mo - 1, d);
+                        setParsedDate(updated);
                       }
                     },
                     style: webInputStyle,
@@ -371,51 +479,58 @@ export default function AddReminderScreen() {
                 </View>
               )}
 
-              {/* ── Time row ── */}
+              {/* Time row */}
               <Pressable
-                style={styles.dateRowLast}
+                style={styles.previewRowLast}
                 onPress={() => setPickerMode((m) => (m === "time" ? null : "time"))}
               >
-                <View style={styles.dateLabel}>
-                  <Feather name="clock" size={18} color={colors.primary} />
-                  <Text style={styles.dateLabelText}>Time</Text>
-                </View>
-                <Text style={styles.dateValue}>{formattedTime}</Text>
+                <Feather name="clock" size={16} color={colors.primary} />
+                <Text style={styles.previewLabel}>Time</Text>
+                <Text style={styles.previewValueHighlight}>{formattedTime}</Text>
+                {dateWasParsed ? (
+                  <View style={styles.parsedBadge}>
+                    <Feather name="zap" size={10} color={colors.primary} />
+                    <Text style={styles.parsedBadgeText}>auto</Text>
+                  </View>
+                ) : (
+                  <View style={styles.editBadge}>
+                    <Feather name="edit-2" size={12} color={colors.mutedForeground} />
+                    <Text style={styles.editBadgeText}>tap to set</Text>
+                  </View>
+                )}
               </Pressable>
 
-              {/* iOS inline time spinner */}
-              {pickerMode === "time" && Platform.OS === "ios" && (
+              {/* iOS time picker */}
+              {pickerMode === "time" && Platform.OS === "ios" && DateTimePicker && (
                 <View style={styles.pickerWrap}>
                   <DateTimePicker
-                    value={date}
+                    value={parsedDate}
                     mode="time"
                     display="spinner"
                     onChange={handlePickerChange}
                     themeVariant="light"
                     accentColor={colors.primary}
                   />
-                  <Text style={styles.hint}>You'll get a notification at this time</Text>
                 </View>
               )}
 
-              {/* Web native time input */}
+              {/* Web time picker */}
               {pickerMode === "time" && Platform.OS === "web" && (
                 <View style={styles.pickerWrap}>
                   {React.createElement("input", {
                     type: "time",
-                    value: toTimeInput(date),
+                    value: toTimeInput(parsedDate),
                     onChange: (e: any) => {
                       const val: string = e.target.value;
                       if (val) {
                         const [h, min] = val.split(":").map(Number);
-                        const updated = new Date(date);
+                        const updated = new Date(parsedDate);
                         updated.setHours(h, min, 0, 0);
-                        setDate(updated);
+                        setParsedDate(updated);
                       }
                     },
                     style: webInputStyle,
                   })}
-                  <Text style={styles.hint}>You'll get a notification at this time</Text>
                 </View>
               )}
             </View>
@@ -423,13 +538,13 @@ export default function AddReminderScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Android: native dialog rendered outside ScrollView */}
-      {Platform.OS === "android" && pickerMode !== null && (
+      {/* Android date/time dialog */}
+      {Platform.OS === "android" && pickerMode !== null && DateTimePicker && (
         <DateTimePicker
-          value={date}
+          value={parsedDate}
           mode={pickerMode}
           display="default"
-          minimumDate={pickerMode === "date" ? minDate : undefined}
+          minimumDate={pickerMode === "date" ? new Date() : undefined}
           onChange={handlePickerChange}
         />
       )}
