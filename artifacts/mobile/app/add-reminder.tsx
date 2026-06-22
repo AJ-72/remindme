@@ -1,7 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import DateTimePicker, {
-  DateTimePickerEvent,
-} from "@react-native-community/datetimepicker";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -20,9 +17,26 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 
+type DateTimePickerEvent = { type: string; nativeEvent: object };
+const DateTimePicker: React.ComponentType<any> | null =
+  Platform.OS !== "web"
+    ? require("@react-native-community/datetimepicker").default
+    : null;
+
 function roundToNext5(d: Date): Date {
   const ms = 1000 * 60 * 5;
   return new Date(Math.ceil((d.getTime() + 60000) / ms) * ms);
+}
+
+function toDateInput(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function toTimeInput(d: Date) {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 type PickerMode = "date" | "time" | null;
@@ -65,17 +79,11 @@ export default function AddReminderScreen() {
     event: DateTimePickerEvent,
     selected: Date | undefined
   ) => {
-    if (Platform.OS === "android") {
-      setPickerMode(null);
-    }
+    if (Platform.OS === "android") setPickerMode(null);
     if (event.type === "set" && selected) {
       if (pickerMode === "date") {
         const updated = new Date(date);
-        updated.setFullYear(
-          selected.getFullYear(),
-          selected.getMonth(),
-          selected.getDate()
-        );
+        updated.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate());
         setDate(updated);
       } else if (pickerMode === "time") {
         const updated = new Date(date);
@@ -152,10 +160,7 @@ export default function AddReminderScreen() {
     saveBtnText: {
       fontSize: 14,
       fontFamily: "Inter_600SemiBold",
-      color:
-        saving || !title.trim()
-          ? colors.mutedForeground
-          : colors.primaryForeground,
+      color: saving || !title.trim() ? colors.mutedForeground : colors.primaryForeground,
     },
     scroll: {
       flex: 1,
@@ -228,9 +233,9 @@ export default function AddReminderScreen() {
       fontFamily: "Inter_500Medium",
       color: colors.primary,
     },
-    iosPicker: {
-      paddingHorizontal: 8,
-      paddingBottom: 12,
+    pickerWrap: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
       borderTopWidth: 1,
       borderTopColor: colors.border,
     },
@@ -242,6 +247,20 @@ export default function AddReminderScreen() {
       marginTop: 8,
     },
   });
+
+  const webInputStyle = {
+    width: "100%",
+    padding: "10px 12px",
+    fontSize: "16px",
+    fontFamily: "Inter, sans-serif",
+    color: colors.foreground,
+    backgroundColor: colors.background,
+    border: `1px solid ${colors.border}`,
+    borderRadius: "8px",
+    outline: "none",
+    cursor: "pointer",
+    boxSizing: "border-box" as const,
+  };
 
   return (
     <View style={styles.container}>
@@ -304,11 +323,10 @@ export default function AddReminderScreen() {
           <View>
             <Text style={styles.sectionLabel}>Schedule</Text>
             <View style={styles.section}>
+              {/* ── Date row ── */}
               <Pressable
                 style={styles.dateRow}
-                onPress={() =>
-                  setPickerMode((m) => (m === "date" ? null : "date"))
-                }
+                onPress={() => setPickerMode((m) => (m === "date" ? null : "date"))}
               >
                 <View style={styles.dateLabel}>
                   <Feather name="calendar" size={18} color={colors.primary} />
@@ -317,26 +335,46 @@ export default function AddReminderScreen() {
                 <Text style={styles.dateValue}>{formattedDate}</Text>
               </Pressable>
 
-              {pickerMode === "date" && Platform.OS !== "android" && (
-                <View style={styles.iosPicker}>
+              {/* iOS inline calendar */}
+              {pickerMode === "date" && Platform.OS === "ios" && (
+                <View style={styles.pickerWrap}>
                   <DateTimePicker
                     value={date}
                     mode="date"
-                    display={Platform.OS === "ios" ? "inline" : "calendar"}
+                    display="inline"
                     minimumDate={minDate}
                     onChange={handlePickerChange}
-                    {...(Platform.OS === "ios"
-                      ? { themeVariant: "light", accentColor: colors.primary }
-                      : {})}
+                    themeVariant="light"
+                    accentColor={colors.primary}
                   />
                 </View>
               )}
 
+              {/* Web native date input */}
+              {pickerMode === "date" && Platform.OS === "web" && (
+                <View style={styles.pickerWrap}>
+                  {React.createElement("input", {
+                    type: "date",
+                    value: toDateInput(date),
+                    min: toDateInput(minDate),
+                    onChange: (e: any) => {
+                      const val: string = e.target.value;
+                      if (val) {
+                        const [y, m, d] = val.split("-").map(Number);
+                        const updated = new Date(date);
+                        updated.setFullYear(y, m - 1, d);
+                        setDate(updated);
+                      }
+                    },
+                    style: webInputStyle,
+                  })}
+                </View>
+              )}
+
+              {/* ── Time row ── */}
               <Pressable
                 style={styles.dateRowLast}
-                onPress={() =>
-                  setPickerMode((m) => (m === "time" ? null : "time"))
-                }
+                onPress={() => setPickerMode((m) => (m === "time" ? null : "time"))}
               >
                 <View style={styles.dateLabel}>
                   <Feather name="clock" size={18} color={colors.primary} />
@@ -345,20 +383,39 @@ export default function AddReminderScreen() {
                 <Text style={styles.dateValue}>{formattedTime}</Text>
               </Pressable>
 
-              {pickerMode === "time" && Platform.OS !== "android" && (
-                <View style={styles.iosPicker}>
+              {/* iOS inline time spinner */}
+              {pickerMode === "time" && Platform.OS === "ios" && (
+                <View style={styles.pickerWrap}>
                   <DateTimePicker
                     value={date}
                     mode="time"
                     display="spinner"
                     onChange={handlePickerChange}
-                    {...(Platform.OS === "ios"
-                      ? { themeVariant: "light", accentColor: colors.primary }
-                      : {})}
+                    themeVariant="light"
+                    accentColor={colors.primary}
                   />
-                  <Text style={styles.hint}>
-                    You'll get a notification at this time
-                  </Text>
+                  <Text style={styles.hint}>You'll get a notification at this time</Text>
+                </View>
+              )}
+
+              {/* Web native time input */}
+              {pickerMode === "time" && Platform.OS === "web" && (
+                <View style={styles.pickerWrap}>
+                  {React.createElement("input", {
+                    type: "time",
+                    value: toTimeInput(date),
+                    onChange: (e: any) => {
+                      const val: string = e.target.value;
+                      if (val) {
+                        const [h, min] = val.split(":").map(Number);
+                        const updated = new Date(date);
+                        updated.setHours(h, min, 0, 0);
+                        setDate(updated);
+                      }
+                    },
+                    style: webInputStyle,
+                  })}
+                  <Text style={styles.hint}>You'll get a notification at this time</Text>
                 </View>
               )}
             </View>
@@ -366,7 +423,7 @@ export default function AddReminderScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Android: render picker outside ScrollView so it appears as a system dialog */}
+      {/* Android: native dialog rendered outside ScrollView */}
       {Platform.OS === "android" && pickerMode !== null && (
         <DateTimePicker
           value={date}

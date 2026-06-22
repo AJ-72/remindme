@@ -91,6 +91,7 @@ export default function HomeScreen() {
       shadowOpacity: 0.3,
       shadowRadius: 8,
       elevation: 4,
+      ...(Platform.OS === "web" ? { boxShadow: "0 4px 8px rgba(99,102,241,0.3)" } : {}),
     },
     scrollContent: {
       paddingHorizontal: 20,
