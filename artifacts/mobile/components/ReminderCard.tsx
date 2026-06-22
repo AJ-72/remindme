@@ -74,6 +74,7 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
       shadowOpacity: 0.06,
       shadowRadius: 8,
       elevation: 2,
+      ...(Platform.OS === "web" ? { boxShadow: "0 2px 8px rgba(99,102,241,0.06)" } : {}),
       borderWidth: 1,
       borderColor: overdue && !reminder.completed ? "#fca5a5" : colors.border,
     },
