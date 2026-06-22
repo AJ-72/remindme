@@ -37,20 +37,43 @@ const RemindersContext = createContext<RemindersContextType | null>(null);
 
 const STORAGE_KEY = "@reminders_v1";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      ...(Platform.OS === "ios" ? { shouldShowBanner: true, shouldShowList: true } : {}),
+    }),
+  });
+} catch {
+  // expo-notifications not fully supported in Expo Go on Android SDK 53+
+}
+
+async function setupNotificationChannel() {
+  if (Platform.OS !== "android") return;
+  try {
+    await Notifications.setNotificationChannelAsync("reminders", {
+      name: "Reminders",
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: "#6366f1",
+      sound: "default",
+    });
+  } catch {
+    // ignore — channel setup not supported in this environment
+  }
+}
 
 async function requestPermissions() {
   if (Platform.OS === "web") return false;
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === "granted";
+  try {
+    await setupNotificationChannel();
+    const { status } = await Notifications.requestPermissionsAsync();
+    return status === "granted";
+  } catch {
+    return false;
+  }
 }
 
 async function scheduleNotification(
@@ -66,6 +89,7 @@ async function scheduleNotification(
         title: reminder.title,
         body: reminder.description || "Reminder!",
         sound: true,
+        ...(Platform.OS === "android" ? { channelId: "reminders" } : {}),
       },
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: trigger },
     });
