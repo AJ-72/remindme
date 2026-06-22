@@ -14,7 +14,21 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { RemindersProvider } from "@/contexts/RemindersContext";
+import {
+  RemindersProvider,
+  SNOOZE_ACTION_ID,
+  scheduleSnoozeNotification,
+  type SnoozeData,
+} from "@/contexts/RemindersContext";
+
+// eslint-disable-next-line
+let Notifications: any = null;
+try {
+  // @ts-ignore
+  Notifications = require("expo-notifications");
+} catch {
+  Notifications = null;
+}
 
 SplashScreen.preventAutoHideAsync();
 
@@ -46,6 +60,29 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
+
+  useEffect(() => {
+    if (!Notifications) return;
+    let subscription: { remove: () => void } | null = null;
+    try {
+      subscription = Notifications.addNotificationResponseReceivedListener(
+        (response: any) => {
+          if (response.actionIdentifier !== SNOOZE_ACTION_ID) return;
+          const data = response.notification.request.content
+            .data as SnoozeData | null;
+          if (!data) return;
+          scheduleSnoozeNotification(data);
+        }
+      );
+    } catch {
+      // ignore — listener may not be available in all environments
+    }
+    return () => {
+      try {
+        subscription?.remove();
+      } catch {}
+    };
+  }, []);
 
   if (!fontsLoaded && !fontError) return null;
 
