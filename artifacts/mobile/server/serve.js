@@ -108,7 +108,14 @@ const landingPageTemplate = fs.readFileSync(TEMPLATE_PATH, "utf-8");
 const appName = getAppName();
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url || "/", `http://${req.headers.host}`);
+  let url;
+  try {
+    url = new URL(req.url || "/", `http://${req.headers.host}`);
+  } catch {
+    res.writeHead(400);
+    res.end("Bad Request");
+    return;
+  }
   let pathname = url.pathname;
 
   if (basePath && pathname.startsWith(basePath)) {

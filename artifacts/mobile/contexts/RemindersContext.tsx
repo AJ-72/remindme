@@ -19,6 +19,10 @@ try {
   Notifications = null;
 }
 
+export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
+export const SNOOZE_ACTION_ID = "SNOOZE_10";
+export const SNOOZE_MINUTES = 10;
+
 export interface Reminder {
   id: string;
   title: string;
@@ -26,6 +30,7 @@ export interface Reminder {
   datetime: string;
   completed: boolean;
   notificationId?: string;
+  alarm?: boolean;
 }
 
 interface RemindersContextType {
@@ -73,8 +78,33 @@ async function setupNotificationChannel() {
       lightColor: "#6366f1",
       sound: "default",
     });
+    await Notifications.setNotificationChannelAsync("reminders-silent", {
+      name: "Reminders (Silent)",
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: null,
+      enableVibrate: false,
+      sound: null,
+    });
   } catch {
     // ignore
+  }
+}
+
+async function setupSnoozeCategory() {
+  if (Platform.OS === "web" || !Notifications) return;
+  try {
+    await Notifications.setNotificationCategoryAsync(SNOOZE_CATEGORY_ID, [
+      {
+        identifier: SNOOZE_ACTION_ID,
+        buttonTitle: `Snooze ${SNOOZE_MINUTES} min`,
+        options: {
+          isDestructive: false,
+          isAuthenticationRequired: false,
+        },
+      },
+    ]);
+  } catch {
+    // ignore — category API may not be available in all environments
   }
 }
 
@@ -82,11 +112,19 @@ async function requestPermissions(): Promise<boolean> {
   if (Platform.OS === "web" || !Notifications) return false;
   try {
     await setupNotificationChannel();
+    await setupSnoozeCategory();
     const { status } = await Notifications.requestPermissionsAsync();
     return status === "granted";
   } catch {
     return false;
   }
+}
+
+export interface SnoozeData {
+  title: string;
+  body: string;
+  alarm: boolean;
+  channelId: string;
 }
 
 async function scheduleNotification(
@@ -98,12 +136,22 @@ async function scheduleNotification(
     if (!granted) return undefined;
     const trigger = new Date(reminder.datetime);
     if (trigger <= new Date()) return undefined;
+    const alarmOn = reminder.alarm !== false;
+    const channelId = alarmOn ? "reminders" : "reminders-silent";
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: reminder.title,
         body: reminder.description || "Reminder!",
-        sound: true,
-        ...(Platform.OS === "android" ? { channelId: "reminders" } : {}),
+        sound: alarmOn,
+        categoryIdentifier: SNOOZE_CATEGORY_ID,
+        data: {
+          title: reminder.title,
+          body: reminder.description || "Reminder!",
+          alarm: alarmOn,
+          channelId,
+        } satisfies SnoozeData,
+        ...(Platform.OS === "android" ? { channelId } : {}),
+        ...(Platform.OS === "ios" && !alarmOn ? { sound: false } : {}),
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -113,6 +161,32 @@ async function scheduleNotification(
     return id;
   } catch {
     return undefined;
+  }
+}
+
+export async function scheduleSnoozeNotification(
+  data: SnoozeData
+): Promise<void> {
+  if (Platform.OS === "web" || !Notifications) return;
+  try {
+    const snoozeDate = new Date(Date.now() + SNOOZE_MINUTES * 60 * 1000);
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: data.title,
+        body: data.body,
+        sound: data.alarm,
+        categoryIdentifier: SNOOZE_CATEGORY_ID,
+        data,
+        ...(Platform.OS === "android" ? { channelId: data.channelId } : {}),
+        ...(Platform.OS === "ios" && !data.alarm ? { sound: false } : {}),
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: snoozeDate,
+      },
+    });
+  } catch {
+    // ignore
   }
 }
 

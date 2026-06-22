@@ -9,6 +9,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -96,6 +97,7 @@ export default function AddReminderScreen() {
   );
   const [dateWasParsed, setDateWasParsed] = useState(false);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
+  const [alarm, setAlarm] = useState<boolean>(existing?.alarm !== false);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
@@ -143,6 +145,7 @@ export default function AddReminderScreen() {
         title: title.trim(),
         description: "",
         datetime: parsedDate.toISOString(),
+        alarm,
       };
       if (isEditing && id) {
         await editReminder(id, payload);
@@ -331,6 +334,29 @@ export default function AddReminderScreen() {
       borderTopWidth: 1,
       borderTopColor: colors.border,
     },
+    alarmCard: {
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
+    alarmLabel: {
+      flex: 1,
+      fontSize: 15,
+      fontFamily: "Inter_500Medium",
+      color: colors.foreground,
+    },
+    alarmSubLabel: {
+      fontSize: 12,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginTop: 2,
+    },
   });
 
   const webInputStyle = {
@@ -371,11 +397,13 @@ export default function AddReminderScreen() {
 
       <KeyboardAvoidingView
         style={styles.scroll}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 44 : 0}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
         >
           {/* Natural language input */}
@@ -534,6 +562,29 @@ export default function AddReminderScreen() {
                 </View>
               )}
             </View>
+          </View>
+          {/* Alarm toggle */}
+          <View style={styles.alarmCard}>
+            <Feather
+              name={alarm ? "bell" : "bell-off"}
+              size={18}
+              color={alarm ? colors.primary : colors.mutedForeground}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.alarmLabel}>Play alarm sound</Text>
+              <Text style={styles.alarmSubLabel}>
+                {alarm ? "Notification will play a sound" : "Notification will be silent"}
+              </Text>
+            </View>
+            <Switch
+              value={alarm}
+              onValueChange={(v) => {
+                setAlarm(v);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+              thumbColor={alarm ? colors.primary : colors.mutedForeground}
+            />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
