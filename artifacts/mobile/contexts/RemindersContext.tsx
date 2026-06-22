@@ -26,6 +26,7 @@ export interface Reminder {
   datetime: string;
   completed: boolean;
   notificationId?: string;
+  alarm?: boolean;
 }
 
 interface RemindersContextType {
@@ -73,6 +74,13 @@ async function setupNotificationChannel() {
       lightColor: "#6366f1",
       sound: "default",
     });
+    await Notifications.setNotificationChannelAsync("reminders-silent", {
+      name: "Reminders (Silent)",
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: null,
+      enableVibrate: false,
+      sound: null,
+    });
   } catch {
     // ignore
   }
@@ -98,12 +106,16 @@ async function scheduleNotification(
     if (!granted) return undefined;
     const trigger = new Date(reminder.datetime);
     if (trigger <= new Date()) return undefined;
+    const alarmOn = reminder.alarm !== false;
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: reminder.title,
         body: reminder.description || "Reminder!",
-        sound: true,
-        ...(Platform.OS === "android" ? { channelId: "reminders" } : {}),
+        sound: alarmOn,
+        ...(Platform.OS === "android"
+          ? { channelId: alarmOn ? "reminders" : "reminders-silent" }
+          : {}),
+        ...(Platform.OS === "ios" && !alarmOn ? { sound: false } : {}),
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,

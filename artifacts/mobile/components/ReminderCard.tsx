@@ -94,6 +94,11 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
     content: {
       flex: 1,
     },
+    titleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
     title: {
       fontSize: 15,
       fontFamily: "Inter_600SemiBold",
@@ -140,9 +145,14 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
         </Pressable>
 
         <View style={styles.content}>
-          <Text style={styles.title} numberOfLines={1}>
-            {reminder.title}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title} numberOfLines={1}>
+              {reminder.title}
+            </Text>
+            {reminder.alarm === false && (
+              <Feather name="bell-off" size={13} color={colors.mutedForeground} />
+            )}
+          </View>
           {!!reminder.description && (
             <Text style={styles.description} numberOfLines={1}>
               {reminder.description}
