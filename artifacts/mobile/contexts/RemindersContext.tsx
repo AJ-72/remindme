@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
-import * as Notifications from "expo-notifications";
 import React, {
   createContext,
   useCallback,
@@ -9,6 +8,16 @@ import React, {
   useState,
 } from "react";
 import { Platform } from "react-native";
+
+// eslint-disable-next-line
+let Notifications: any = null;
+try {
+  // @ts-ignore
+  Notifications = require("expo-notifications");
+} catch {
+  // expo-notifications may crash on Android Expo Go SDK 53+ at module load
+  Notifications = null;
+}
 
 export interface Reminder {
   id: string;
@@ -37,21 +46,25 @@ const RemindersContext = createContext<RemindersContextType | null>(null);
 
 const STORAGE_KEY = "@reminders_v1";
 
-try {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-      ...(Platform.OS === "ios" ? { shouldShowBanner: true, shouldShowList: true } : {}),
-    }),
-  });
-} catch {
-  // expo-notifications not fully supported in Expo Go on Android SDK 53+
+if (Notifications) {
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        ...(Platform.OS === "ios"
+          ? { shouldShowBanner: true, shouldShowList: true }
+          : {}),
+      }),
+    });
+  } catch {
+    // ignore
+  }
 }
 
 async function setupNotificationChannel() {
-  if (Platform.OS !== "android") return;
+  if (Platform.OS !== "android" || !Notifications) return;
   try {
     await Notifications.setNotificationChannelAsync("reminders", {
       name: "Reminders",
@@ -61,12 +74,12 @@ async function setupNotificationChannel() {
       sound: "default",
     });
   } catch {
-    // ignore — channel setup not supported in this environment
+    // ignore
   }
 }
 
-async function requestPermissions() {
-  if (Platform.OS === "web") return false;
+async function requestPermissions(): Promise<boolean> {
+  if (Platform.OS === "web" || !Notifications) return false;
   try {
     await setupNotificationChannel();
     const { status } = await Notifications.requestPermissionsAsync();
@@ -79,6 +92,7 @@ async function requestPermissions() {
 async function scheduleNotification(
   reminder: Omit<Reminder, "id" | "completed" | "notificationId">
 ): Promise<string | undefined> {
+  if (!Notifications) return undefined;
   try {
     const granted = await requestPermissions();
     if (!granted) return undefined;
@@ -91,7 +105,10 @@ async function scheduleNotification(
         sound: true,
         ...(Platform.OS === "android" ? { channelId: "reminders" } : {}),
       },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: trigger },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: trigger,
+      },
     });
     return id;
   } catch {
@@ -100,13 +117,17 @@ async function scheduleNotification(
 }
 
 async function cancelNotification(notificationId?: string) {
-  if (!notificationId || Platform.OS === "web") return;
+  if (!notificationId || Platform.OS === "web" || !Notifications) return;
   try {
     await Notifications.cancelScheduledNotificationAsync(notificationId);
   } catch {}
 }
 
-export function RemindersProvider({ children }: { children: React.ReactNode }) {
+export function RemindersProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -126,16 +147,22 @@ export function RemindersProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addReminder = useCallback(
-    async (data: Omit<Reminder, "id" | "completed" | "notificationId">) => {
+    async (
+      data: Omit<Reminder, "id" | "completed" | "notificationId">
+    ) => {
       const notificationId = await scheduleNotification(data);
       const newReminder: Reminder = {
-        id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+        id:
+          Date.now().toString() +
+          Math.random().toString(36).substring(2, 9),
         ...data,
         completed: false,
         notificationId,
       };
       await save([newReminder, ...reminders]);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Haptics.notificationAsync(
+        Haptics.NotificationFeedbackType.Success
+      );
     },
     [reminders, save]
   );
@@ -176,7 +203,13 @@ export function RemindersProvider({ children }: { children: React.ReactNode }) {
       }
       const updated = reminders.map((r) =>
         r.id === id
-          ? { ...r, completed: !r.completed, notificationId: !r.completed ? undefined : r.notificationId }
+          ? {
+              ...r,
+              completed: !r.completed,
+              notificationId: !r.completed
+                ? undefined
+                : r.notificationId,
+            }
           : r
       );
       await save(updated);
@@ -187,7 +220,14 @@ export function RemindersProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <RemindersContext.Provider
-      value={{ reminders, addReminder, editReminder, deleteReminder, toggleComplete, loading }}
+      value={{
+        reminders,
+        addReminder,
+        editReminder,
+        deleteReminder,
+        toggleComplete,
+        loading,
+      }}
     >
       {children}
     </RemindersContext.Provider>
@@ -196,6 +236,9 @@ export function RemindersProvider({ children }: { children: React.ReactNode }) {
 
 export function useReminders() {
   const ctx = useContext(RemindersContext);
-  if (!ctx) throw new Error("useReminders must be used within RemindersProvider");
+  if (!ctx)
+    throw new Error(
+      "useReminders must be used within RemindersProvider"
+    );
   return ctx;
 }

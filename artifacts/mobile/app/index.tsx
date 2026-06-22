@@ -86,12 +86,15 @@ export default function HomeScreen() {
       backgroundColor: colors.primary,
       alignItems: "center",
       justifyContent: "center",
-      shadowColor: colors.primary,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.3,
-      shadowRadius: 8,
-      elevation: 4,
-      ...(Platform.OS === "web" ? { boxShadow: "0 4px 8px rgba(99,102,241,0.3)" } : {}),
+      ...(Platform.OS === "web"
+        ? { boxShadow: "0 4px 8px rgba(99,102,241,0.3)" }
+        : {
+            shadowColor: colors.primary,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 8,
+            elevation: 4,
+          }),
     },
     scrollContent: {
       paddingHorizontal: 20,
