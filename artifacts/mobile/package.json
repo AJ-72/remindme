@@ -57,6 +57,7 @@
   },
   "dependencies": {
     "@react-native-community/datetimepicker": "^8.4.4",
+    "chrono-node": "^2.9.1",
     "expo-notifications": "^0.32.17"
   }
 }
