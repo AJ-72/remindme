@@ -20,6 +20,7 @@ import {
   scheduleSnoozeNotification,
   type SnoozeData,
 } from "@/contexts/RemindersContext";
+import { registerRescheduleTask } from "@/tasks/rescheduleTask";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -60,6 +61,10 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
+
+  useEffect(() => {
+    registerRescheduleTask();
+  }, []);
 
   useEffect(() => {
     if (!Notifications) return;
