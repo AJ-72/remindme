@@ -56,11 +56,11 @@
     "zod-validation-error": "^3.4.0"
   },
   "dependencies": {
-    "@expo/config-plugins": "^56.0.9",
+    "@expo/config-plugins": "~54.0.4",
     "@react-native-community/datetimepicker": "^8.4.4",
     "chrono-node": "^2.9.1",
-    "expo-background-fetch": "^56.0.19",
-    "expo-notifications": "^0.32.17",
-    "expo-task-manager": "^56.0.19"
+    "expo-background-fetch": "~14.0.9",
+    "expo-notifications": "~0.32.7",
+    "expo-task-manager": "~14.0.9"
   }
 }
