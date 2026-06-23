@@ -4,18 +4,18 @@ import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import QuickAddInput from "@/components/QuickAddInput";
 import ReminderCard from "@/components/ReminderCard";
-import { Reminder, useReminders } from "@/contexts/RemindersContext";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
+import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 
 export default function HomeScreen() {
@@ -25,7 +25,6 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const { upcoming, completed } = useMemo(() => {
-    const now = new Date();
     const sorted = [...reminders].sort(
       (a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime()
     );
@@ -60,13 +59,8 @@ export default function HomeScreen() {
     header: {
       paddingTop: Platform.OS === "web" ? 67 : insets.top + 16,
       paddingHorizontal: 20,
-      paddingBottom: 16,
+      paddingBottom: 12,
       backgroundColor: colors.background,
-    },
-    headerRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
     },
     headerTitle: {
       fontSize: 28,
@@ -79,26 +73,9 @@ export default function HomeScreen() {
       color: colors.mutedForeground,
       marginTop: 2,
     },
-    addButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.primary,
-      alignItems: "center",
-      justifyContent: "center",
-      ...(Platform.OS === "web"
-        ? { boxShadow: "0 4px 8px rgba(99,102,241,0.3)" }
-        : {
-            shadowColor: colors.primary,
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.3,
-            shadowRadius: 8,
-            elevation: 4,
-          }),
-    },
     scrollContent: {
       paddingHorizontal: 20,
-      paddingTop: 8,
+      paddingTop: 4,
       paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 20,
     },
     sectionLabel: {
@@ -111,22 +88,21 @@ export default function HomeScreen() {
       marginTop: 6,
     },
     emptyWrap: {
-      flex: 1,
       alignItems: "center",
-      justifyContent: "center",
-      paddingTop: 80,
+      paddingTop: 60,
+      paddingHorizontal: 24,
     },
     emptyIcon: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
+      width: 64,
+      height: 64,
+      borderRadius: 32,
       backgroundColor: colors.muted,
       alignItems: "center",
       justifyContent: "center",
-      marginBottom: 16,
+      marginBottom: 14,
     },
     emptyTitle: {
-      fontSize: 18,
+      fontSize: 17,
       fontFamily: "Inter_600SemiBold",
       color: colors.foreground,
       marginBottom: 6,
@@ -137,51 +113,34 @@ export default function HomeScreen() {
       color: colors.mutedForeground,
       textAlign: "center",
       lineHeight: 20,
-      paddingHorizontal: 24,
-    },
-    emptyButton: {
-      marginTop: 20,
-      paddingHorizontal: 20,
-      paddingVertical: 12,
-      backgroundColor: colors.primary,
-      borderRadius: 24,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-    },
-    emptyButtonText: {
-      fontSize: 15,
-      fontFamily: "Inter_600SemiBold",
-      color: colors.primaryForeground,
-    },
-    summaryBar: {
-      flexDirection: "row",
-      gap: 10,
-      marginBottom: 20,
-    },
-    summaryCard: {
-      flex: 1,
-      backgroundColor: colors.card,
-      borderRadius: 14,
-      padding: 14,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    summaryNumber: {
-      fontSize: 24,
-      fontFamily: "Inter_700Bold",
-      color: colors.primary,
-    },
-    summaryLabel: {
-      fontSize: 12,
-      fontFamily: "Inter_500Medium",
-      color: colors.mutedForeground,
-      marginTop: 2,
     },
     loadingWrap: {
       flex: 1,
       alignItems: "center",
       justifyContent: "center",
+    },
+    sectionHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 10,
+      marginTop: 6,
+    },
+    sectionHeaderLabel: {
+      fontSize: 13,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.mutedForeground,
+      textTransform: "uppercase",
+      letterSpacing: 0.8,
+    },
+    sectionCount: {
+      fontSize: 12,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
+      backgroundColor: colors.primary + "18",
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 10,
     },
   });
 
@@ -198,94 +157,64 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.headerTitle}>Reminders</Text>
-            <Text style={styles.headerSubtitle}>
-              {upcoming.length === 0
-                ? "All caught up!"
-                : `${upcoming.length} upcoming`}
-            </Text>
-          </View>
-          <Pressable
-            style={styles.addButton}
-            onPress={() => router.push("/add-reminder")}
-          >
-            <Feather name="plus" size={22} color="#fff" />
-          </Pressable>
-        </View>
+        <Text style={styles.headerTitle}>Reminders</Text>
+        <Text style={styles.headerSubtitle}>
+          {upcoming.length === 0 ? "All caught up!" : `${upcoming.length} upcoming`}
+        </Text>
       </View>
 
-      {!hasAny ? (
-        <ScrollView
-          contentContainerStyle={[styles.scrollContent, { flexGrow: 1 }]}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={colors.primary}
-            />
-          }
-        >
+      <QuickAddInput />
+
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={[styles.scrollContent, !hasAny && { flexGrow: 1 }]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+          />
+        }
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {!hasAny ? (
           <View style={styles.emptyWrap}>
             <View style={styles.emptyIcon}>
-              <Feather name="bell" size={30} color={colors.primary} />
+              <Feather name="bell" size={28} color={colors.primary} />
             </View>
             <Text style={styles.emptyTitle}>No reminders yet</Text>
             <Text style={styles.emptyText}>
-              Tap the + button to create your first reminder and stay on top of your day.
+              Type above to add your first reminder — try "Call dentist tomorrow at 3pm".
             </Text>
-            <Pressable
-              style={styles.emptyButton}
-              onPress={() => router.push("/add-reminder")}
-            >
-              <Feather name="plus" size={16} color={colors.primaryForeground} />
-              <Text style={styles.emptyButtonText}>Add Reminder</Text>
-            </Pressable>
           </View>
-        </ScrollView>
-      ) : (
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={colors.primary}
-            />
-          }
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.summaryBar}>
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryNumber}>{upcoming.length}</Text>
-              <Text style={styles.summaryLabel}>Upcoming</Text>
-            </View>
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryNumber}>{completed.length}</Text>
-              <Text style={styles.summaryLabel}>Completed</Text>
-            </View>
-          </View>
+        ) : (
+          <>
+            {upcoming.length > 0 && (
+              <>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.sectionHeaderLabel}>Upcoming</Text>
+                  <Text style={styles.sectionCount}>{upcoming.length}</Text>
+                </View>
+                {upcoming.map((r) => (
+                  <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
+                ))}
+              </>
+            )}
 
-          {upcoming.length > 0 && (
-            <>
-              <Text style={styles.sectionLabel}>Upcoming</Text>
-              {upcoming.map((r) => (
-                <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
-              ))}
-            </>
-          )}
-
-          {completed.length > 0 && (
-            <>
-              <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Completed</Text>
-              {completed.map((r) => (
-                <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
-              ))}
-            </>
-          )}
-        </ScrollView>
-      )}
+            {completed.length > 0 && (
+              <>
+                <View style={[styles.sectionHeaderRow, { marginTop: upcoming.length > 0 ? 12 : 6 }]}>
+                  <Text style={styles.sectionHeaderLabel}>Completed</Text>
+                  <Text style={styles.sectionCount}>{completed.length}</Text>
+                </View>
+                {completed.map((r) => (
+                  <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
+                ))}
+              </>
+            )}
+          </>
+        )}
+      </KeyboardAwareScrollViewCompat>
     </View>
   );
 }
