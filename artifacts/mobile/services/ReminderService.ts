@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
+import { PermissionsAndroid, Platform } from "react-native";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -160,6 +160,24 @@ export async function scheduleSnoozeNotification(
       },
     });
   } catch {}
+}
+
+/**
+ * Checks whether the SCHEDULE_EXACT_ALARM permission is granted on Android 12+
+ * (API level 31+). Returns null on non-Android platforms or Android < 12,
+ * because the permission does not apply there.
+ */
+export async function checkExactAlarmPermission(): Promise<boolean | null> {
+  if (Platform.OS !== "android") return null;
+  if (typeof Platform.Version === "number" && Platform.Version < 31) return null;
+  try {
+    const granted = await PermissionsAndroid.check(
+      "android.permission.SCHEDULE_EXACT_ALARM" as any
+    );
+    return granted;
+  } catch {
+    return null;
+  }
 }
 
 export async function initNotifications(): Promise<void> {

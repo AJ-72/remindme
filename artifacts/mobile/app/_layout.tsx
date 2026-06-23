@@ -8,18 +8,21 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import ExactAlarmBanner from "@/components/ExactAlarmBanner";
 import {
   RemindersProvider,
   SNOOZE_ACTION_ID,
   scheduleSnoozeNotification,
   type SnoozeData,
 } from "@/contexts/RemindersContext";
+import { checkExactAlarmPermission } from "@/services/ReminderService";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
 
 // eslint-disable-next-line
@@ -56,6 +59,9 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
+  const [showAlarmBanner, setShowAlarmBanner] = useState(false);
+  const alarmChecked = useRef(false);
+
   useEffect(() => {
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync();
@@ -64,6 +70,16 @@ export default function RootLayout() {
 
   useEffect(() => {
     registerRescheduleTask();
+  }, []);
+
+  useEffect(() => {
+    if (alarmChecked.current) return;
+    alarmChecked.current = true;
+    checkExactAlarmPermission().then((granted) => {
+      if (granted === false) {
+        setShowAlarmBanner(true);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -98,7 +114,14 @@ export default function RootLayout() {
           <GestureHandlerRootView>
             <KeyboardProvider>
               <RemindersProvider>
-                <RootLayoutNav />
+                <View style={{ flex: 1 }}>
+                  {showAlarmBanner && (
+                    <ExactAlarmBanner
+                      onDismiss={() => setShowAlarmBanner(false)}
+                    />
+                  )}
+                  <RootLayoutNav />
+                </View>
               </RemindersProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>
