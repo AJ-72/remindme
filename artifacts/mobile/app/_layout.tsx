@@ -22,6 +22,7 @@ import {
   scheduleSnoozeNotification,
   type SnoozeData,
 } from "@/contexts/RemindersContext";
+import { SharedTextProvider } from "@/contexts/SharedTextContext";
 import { checkExactAlarmPermission } from "@/services/ReminderService";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
 
@@ -114,14 +115,16 @@ export default function RootLayout() {
           <GestureHandlerRootView>
             <KeyboardProvider>
               <RemindersProvider>
-                <View style={{ flex: 1 }}>
-                  {showAlarmBanner && (
-                    <ExactAlarmBanner
-                      onDismiss={() => setShowAlarmBanner(false)}
-                    />
-                  )}
-                  <RootLayoutNav />
-                </View>
+                <SharedTextProvider>
+                  <View style={{ flex: 1 }}>
+                    {showAlarmBanner && (
+                      <ExactAlarmBanner
+                        onDismiss={() => setShowAlarmBanner(false)}
+                      />
+                    )}
+                    <RootLayoutNav />
+                  </View>
+                </SharedTextProvider>
               </RemindersProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>
