@@ -46,6 +46,16 @@ export async function saveReminders(reminders: Reminder[]): Promise<void> {
 
 async function setupNotificationChannel(): Promise<void> {
   if (Platform.OS !== "android" || !Notifications) return;
+  // Remove the legacy "reminders" channel left behind when the channel ID
+  // was renamed to "reminders-alarm". Android keeps stale channels visible
+  // in Settings → App notifications indefinitely, so we delete it on every
+  // startup to prevent users from seeing two channels. The call is a no-op
+  // on devices that never had the old channel. Isolated in its own try/catch
+  // so that a deletion failure cannot prevent the active channels from being
+  // created or updated below.
+  try {
+    await Notifications.deleteNotificationChannelAsync("reminders");
+  } catch {}
   try {
     // MAX importance + custom alarm sound + DND bypass gives a true alarm
     // experience. The sound file "alarm.wav" is copied to res/raw by the
@@ -213,6 +223,10 @@ export async function initNotifications(): Promise<void> {
       }),
     });
   } catch {}
+  // Set up (and clean up stale) notification channels on every app start so
+  // the legacy "reminders" channel is removed as soon as the user upgrades,
+  // without waiting for a scheduling flow to trigger requestPermissions().
+  await setupNotificationChannel();
 }
 
 export async function addReminder(
