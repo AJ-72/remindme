@@ -9,11 +9,7 @@ Builds a real Android APK using Expo Application Services (EAS) cloud build infr
 
 ## Prerequisites
 
-**`EXPO_TOKEN` must be set as a Replit Secret.**
-
-1. Go to [expo.dev](https://expo.dev) → account menu → Settings → Access Tokens
-2. Create a new token
-3. Add it to Replit Secrets (lock icon in the sidebar) as `EXPO_TOKEN`
+`EXPO_TOKEN` is already configured as a Replit Secret and is available automatically.
 
 The app is already linked to EAS:
 - Project ID: `aa144058-8bff-44a8-9b12-3a9bd486cf07`
