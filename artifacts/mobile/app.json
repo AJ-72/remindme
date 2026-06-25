@@ -42,6 +42,13 @@
           "icon": "./assets/images/icon.png",
           "color": "#6366f1"
         }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": ["text/*"],
+          "disableIOS": true
+        }
       ]
     ],
     "experiments": {
