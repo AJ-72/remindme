@@ -9,7 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
-import { View } from "react-native";
+import { AppState, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -73,14 +73,29 @@ export default function RootLayout() {
     registerRescheduleTask();
   }, []);
 
+  // Initial check on mount
   useEffect(() => {
     if (alarmChecked.current) return;
     alarmChecked.current = true;
     checkExactAlarmPermission().then((granted) => {
-      if (granted === false) {
-        setShowAlarmBanner(true);
+      if (granted === false) setShowAlarmBanner(true);
+    });
+  }, []);
+
+  // Re-check when user returns from Settings so banner clears automatically
+  // once the permission is granted, without requiring an app restart.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        checkExactAlarmPermission().then((granted) => {
+          // granted === false  → still missing, show banner
+          // granted === true   → just granted, clear banner
+          // granted === null   → not applicable, clear banner
+          setShowAlarmBanner(granted === false);
+        });
       }
     });
+    return () => sub.remove();
   }, []);
 
   useEffect(() => {

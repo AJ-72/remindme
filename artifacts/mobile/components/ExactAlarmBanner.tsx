@@ -14,11 +14,18 @@ export default function ExactAlarmBanner({ onDismiss }: Props) {
   if (Platform.OS !== "android") return null;
 
   const handleOpenSettings = () => {
-    try {
-      Linking.openURL("android.settings.REQUEST_SCHEDULE_EXACT_ALARM").catch(
-        () => Linking.openSettings()
+    // Linking.sendIntent launches an Android Intent by action name directly —
+    // correct way to open "Special app access → Alarms & reminders" on Android 12+.
+    // openURL("android.settings.REQUEST_SCHEDULE_EXACT_ALARM") has no scheme so
+    // it always throws and falls back to generic notification settings instead.
+    const sendIntent = (Linking as any).sendIntent as
+      | ((action: string) => Promise<void>)
+      | undefined;
+    if (sendIntent) {
+      sendIntent("android.settings.REQUEST_SCHEDULE_EXACT_ALARM").catch(() =>
+        Linking.openSettings()
       );
-    } catch {
+    } else {
       Linking.openSettings();
     }
   };

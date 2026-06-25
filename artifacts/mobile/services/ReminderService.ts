@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { PermissionsAndroid, Platform } from "react-native";
+import { Platform } from "react-native";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -163,18 +163,25 @@ export async function scheduleSnoozeNotification(
 }
 
 /**
- * Checks whether the SCHEDULE_EXACT_ALARM permission is granted on Android 12+
- * (API level 31+). Returns null on non-Android platforms or Android < 12,
- * because the permission does not apply there.
+ * Checks whether exact alarm scheduling is available on Android 12+
+ * (API level 31+). Returns null on non-Android platforms or Android < 12.
+ *
+ * Uses Notifications.getPermissionsAsync() whose android.alarm field
+ * reflects AlarmManager.canScheduleExactAlarms() — the correct native API.
+ * PermissionsAndroid.check() is wrong for this permission because
+ * SCHEDULE_EXACT_ALARM is a special app-access permission, not a runtime
+ * permission, and PermissionsAndroid always returns false for it regardless
+ * of actual grant state.
  */
 export async function checkExactAlarmPermission(): Promise<boolean | null> {
   if (Platform.OS !== "android") return null;
   if (typeof Platform.Version === "number" && Platform.Version < 31) return null;
+  if (!Notifications) return null;
   try {
-    const granted = await PermissionsAndroid.check(
-      "android.permission.SCHEDULE_EXACT_ALARM" as any
-    );
-    return granted;
+    const permissions = await Notifications.getPermissionsAsync();
+    const alarm = permissions?.android?.alarm;
+    if (typeof alarm !== "boolean") return null;
+    return alarm;
   } catch {
     return null;
   }
