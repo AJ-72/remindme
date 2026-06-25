@@ -22,7 +22,8 @@
         "android.permission.USE_EXACT_ALARM",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.POST_NOTIFICATIONS"
-      ]
+      ],
+      "package": "com.curios.remindme"
     },
     "web": {
       "favicon": "./assets/images/icon.png"
@@ -46,7 +47,9 @@
       [
         "expo-share-intent",
         {
-          "androidIntentFilters": ["text/*"],
+          "androidIntentFilters": [
+            "text/*"
+          ],
           "disableIOS": true
         }
       ]
@@ -54,6 +57,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "aa144058-8bff-44a8-9b12-3a9bd486cf07"
+      }
+    },
+    "owner": "anandj82"
   }
 }
