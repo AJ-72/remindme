@@ -47,12 +47,20 @@ export async function saveReminders(reminders: Reminder[]): Promise<void> {
 async function setupNotificationChannel(): Promise<void> {
   if (Platform.OS !== "android" || !Notifications) return;
   try {
+    // MAX importance + custom alarm sound + DND bypass gives a true alarm
+    // experience. The sound file "alarm.wav" is copied to res/raw by the
+    // expo-notifications plugin at EAS build time (configured in app.json).
+    // On Expo Go it falls back to the system default sound gracefully.
     await Notifications.setNotificationChannelAsync("reminders", {
-      name: "Reminders",
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 250, 250],
+      name: "Reminders (Alarm)",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 400, 200, 400],
       lightColor: "#6366f1",
-      sound: "default",
+      sound: "alarm.wav",
+      bypassDnd: true,
+      lockscreenVisibility:
+        Notifications.AndroidNotificationVisibility.PUBLIC,
+      showBadge: true,
     });
     await Notifications.setNotificationChannelAsync("reminders-silent", {
       name: "Reminders (Silent)",
