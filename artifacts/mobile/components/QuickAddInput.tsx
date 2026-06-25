@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -17,6 +16,14 @@ import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
 
+type DateTimePickerEvent = { type: string; nativeEvent: object };
+const DateTimePicker: React.ComponentType<any> | null =
+  Platform.OS !== "web"
+    ? require("@react-native-community/datetimepicker").default
+    : null;
+
+type PickerMode = "date" | "time" | null;
+
 function roundToNextHour(d: Date): Date {
   const result = new Date(d);
   result.setMinutes(0, 0, 0);
@@ -30,6 +37,17 @@ function roundToNextHour(d: Date): Date {
 function roundToNext5(d: Date): Date {
   const ms = 1000 * 60 * 5;
   return new Date(Math.ceil((d.getTime() + 60000) / ms) * ms);
+}
+
+function toDateInput(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function toTimeInput(d: Date): string {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 function parseNaturalLanguage(text: string): { title: string; date: Date | null } {
@@ -96,7 +114,7 @@ export default function QuickAddInput({ onSaved }: Props) {
 
   const [showNoTimeSheet, setShowNoTimeSheet] = useState(false);
   const [suggestedTime, setSuggestedTime] = useState<Date>(roundToNextHour(new Date()));
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [pickerMode, setPickerMode] = useState<PickerMode>(null);
 
   const pillAnim = useRef(new Animated.Value(0)).current;
   const pillTranslate = useRef(new Animated.Value(-6)).current;
@@ -164,15 +182,62 @@ export default function QuickAddInput({ onSaved }: Props) {
   };
 
   const handleConfirmNoTime = async () => {
+    setPickerMode(null);
     setShowNoTimeSheet(false);
     await doSave(suggestedTime);
   };
 
   const handleCancelNoTime = () => {
+    setPickerMode(null);
     setShowNoTimeSheet(false);
   };
 
+  const handlePickerChange = (event: DateTimePickerEvent, date: Date | undefined) => {
+    if (Platform.OS === "android") {
+      if (event.type === "dismissed" || !date) {
+        setPickerMode(null);
+        return;
+      }
+      if (pickerMode === "date") {
+        const updated = new Date(suggestedTime);
+        updated.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+        setSuggestedTime(updated);
+        setPickerMode("time");
+      } else if (pickerMode === "time") {
+        const updated = new Date(suggestedTime);
+        updated.setHours(date.getHours(), date.getMinutes(), 0, 0);
+        setSuggestedTime(updated);
+        setPickerMode(null);
+      }
+    } else {
+      if (date) setSuggestedTime(date);
+    }
+  };
+
+  const handleChangePress = () => {
+    if (Platform.OS === "android") {
+      setPickerMode("date");
+    } else {
+      setPickerMode((m) => (m !== null ? null : "date"));
+    }
+  };
+
   const canSave = !saving && !!(parsedTitle || input.trim());
+
+  const webInputStyle = {
+    width: "100%",
+    padding: "8px 12px",
+    fontSize: "15px",
+    fontFamily: "Inter, sans-serif",
+    color: colors.foreground,
+    backgroundColor: colors.background,
+    border: `1px solid ${colors.border}`,
+    borderRadius: "8px",
+    outline: "none",
+    cursor: "pointer",
+    boxSizing: "border-box" as const,
+    marginBottom: "8px",
+  };
 
   const styles = StyleSheet.create({
     wrapper: {
@@ -325,6 +390,9 @@ export default function QuickAddInput({ onSaved }: Props) {
       fontFamily: "Inter_600SemiBold",
       color: colors.primaryForeground,
     },
+    webPickerWrap: {
+      marginBottom: 16,
+    },
   });
 
   return (
@@ -408,25 +476,62 @@ export default function QuickAddInput({ onSaved }: Props) {
 
             <Pressable
               style={styles.sheetTimeRow}
-              onPress={() => setShowTimePicker(true)}
+              onPress={handleChangePress}
             >
               <Text style={styles.sheetTimeText}>
                 {formatSuggestedTime(suggestedTime)}
               </Text>
-              <Text style={styles.sheetTimeEdit}>Change</Text>
+              {Platform.OS !== "web" && (
+                <Text style={styles.sheetTimeEdit}>
+                  {pickerMode !== null ? "Done" : "Change"}
+                </Text>
+              )}
             </Pressable>
 
-            {showTimePicker && (
+            {/* iOS: single inline datetime spinner */}
+            {pickerMode !== null && Platform.OS === "ios" && DateTimePicker && (
               <DateTimePicker
                 value={suggestedTime}
                 mode="datetime"
-                display={Platform.OS === "ios" ? "spinner" : "default"}
+                display="spinner"
                 minimumDate={new Date()}
-                onChange={(_event, date) => {
-                  setShowTimePicker(Platform.OS === "ios");
-                  if (date) setSuggestedTime(date);
-                }}
+                onChange={handlePickerChange}
               />
+            )}
+
+            {/* Web: inline date + time inputs */}
+            {Platform.OS === "web" && (
+              <View style={styles.webPickerWrap}>
+                {React.createElement("input", {
+                  type: "date",
+                  value: toDateInput(suggestedTime),
+                  min: toDateInput(new Date()),
+                  onChange: (e: any) => {
+                    const val: string = e.target.value;
+                    if (val) {
+                      const [y, mo, d] = val.split("-").map(Number);
+                      const updated = new Date(suggestedTime);
+                      updated.setFullYear(y, mo - 1, d);
+                      setSuggestedTime(updated);
+                    }
+                  },
+                  style: webInputStyle,
+                })}
+                {React.createElement("input", {
+                  type: "time",
+                  value: toTimeInput(suggestedTime),
+                  onChange: (e: any) => {
+                    const val: string = e.target.value;
+                    if (val) {
+                      const [h, min] = val.split(":").map(Number);
+                      const updated = new Date(suggestedTime);
+                      updated.setHours(h, min, 0, 0);
+                      setSuggestedTime(updated);
+                    }
+                  },
+                  style: webInputStyle,
+                })}
+              </View>
             )}
 
             <View style={styles.sheetBtnRow}>
@@ -444,6 +549,17 @@ export default function QuickAddInput({ onSaved }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Android: dialog pickers rendered outside Modal to avoid nesting issues */}
+      {Platform.OS === "android" && pickerMode !== null && DateTimePicker && (
+        <DateTimePicker
+          value={suggestedTime}
+          mode={pickerMode}
+          display="default"
+          minimumDate={pickerMode === "date" ? new Date() : undefined}
+          onChange={handlePickerChange}
+        />
+      )}
     </View>
   );
 }
