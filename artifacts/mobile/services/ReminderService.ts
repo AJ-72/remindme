@@ -51,7 +51,11 @@ async function setupNotificationChannel(): Promise<void> {
     // experience. The sound file "alarm.wav" is copied to res/raw by the
     // expo-notifications plugin at EAS build time (configured in app.json).
     // On Expo Go it falls back to the system default sound gracefully.
-    await Notifications.setNotificationChannelAsync("reminders", {
+    // Channel ID changed from "reminders" to "reminders-alarm" so Android
+    // creates a fresh channel with these settings. Android permanently caches
+    // channel config (importance, sound, vibration) keyed by ID — updating
+    // the settings on an existing ID is silently ignored.
+    await Notifications.setNotificationChannelAsync("reminders-alarm", {
       name: "Reminders (Alarm)",
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 400, 200, 400],
@@ -110,7 +114,7 @@ export async function scheduleNotification(
     const trigger = new Date(reminder.datetime);
     if (trigger <= new Date()) return undefined;
     const alarmOn = reminder.alarm !== false;
-    const channelId = alarmOn ? "reminders" : "reminders-silent";
+    const channelId = alarmOn ? "reminders-alarm" : "reminders-silent";
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: reminder.title,
