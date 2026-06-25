@@ -3,7 +3,7 @@ const colors = {
     text: "#1a1a2e",
     tint: "#6366f1",
 
-    background: "#F5F4FF",
+    background: "#F7F7F8",
     foreground: "#1a1a2e",
 
     card: "#ffffff",
@@ -15,7 +15,7 @@ const colors = {
     secondary: "#ede9fe",
     secondaryForeground: "#4338ca",
 
-    muted: "#f0efff",
+    muted: "#F0F0F2",
     mutedForeground: "#7c7c9d",
 
     accent: "#818cf8",
@@ -24,8 +24,8 @@ const colors = {
     destructive: "#ef4444",
     destructiveForeground: "#ffffff",
 
-    border: "#e4e3f8",
-    input: "#e4e3f8",
+    border: "#E4E4E7",
+    input: "#E4E4E7",
 
     success: "#10b981",
     successForeground: "#ffffff",

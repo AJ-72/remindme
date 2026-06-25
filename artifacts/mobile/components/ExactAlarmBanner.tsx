@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import React from "react";
 import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
 
@@ -10,6 +11,7 @@ interface Props {
 
 export default function ExactAlarmBanner({ onDismiss }: Props) {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
 
   if (Platform.OS !== "android") return null;
 
@@ -37,6 +39,7 @@ export default function ExactAlarmBanner({ onDismiss }: Props) {
         {
           backgroundColor: "#fffbeb",
           borderColor: colors.warning,
+          paddingTop: insets.top + 10,
         },
       ]}
     >
