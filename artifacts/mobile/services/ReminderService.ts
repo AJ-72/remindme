@@ -137,12 +137,12 @@ export async function scheduleNotification(
           alarm: alarmOn,
           channelId,
         } satisfies SnoozeData,
-        ...(Platform.OS === "android" ? { channelId } : {}),
         ...(Platform.OS === "ios" && !alarmOn ? { sound: false } : {}),
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: trigger,
+        ...(Platform.OS === "android" ? { channelId } : {}),
       },
     });
     return id;
@@ -173,12 +173,12 @@ export async function scheduleSnoozeNotification(
         sound: data.alarm,
         categoryIdentifier: SNOOZE_CATEGORY_ID,
         data,
-        ...(Platform.OS === "android" ? { channelId: data.channelId } : {}),
         ...(Platform.OS === "ios" && !data.alarm ? { sound: false } : {}),
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: snoozeDate,
+        ...(Platform.OS === "android" ? { channelId: data.channelId } : {}),
       },
     });
   } catch {}
