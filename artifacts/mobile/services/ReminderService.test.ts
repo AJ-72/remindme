@@ -1,6 +1,8 @@
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
+  ALARM_EARLY_OFFSET_MS,
+  SNOOZE_MINUTES,
   addReminder,
   deleteReminder,
   editReminder,
@@ -114,18 +116,40 @@ describe("toggleComplete", () => {
 });
 
 describe("notification scheduling", () => {
-  it("addReminder schedules with trigger date matching the reminder's datetime", async () => {
+  it("addReminder schedules the trigger ALARM_EARLY_OFFSET_MS before the reminder's datetime", async () => {
     await addReminder([], {
       title: "A",
       description: "",
       datetime: FUTURE,
       alarm: true,
     });
+    const expectedTriggerDate = new Date(
+      new Date(FUTURE).getTime() - ALARM_EARLY_OFFSET_MS
+    );
     expect(scheduleNotificationAsync).toHaveBeenCalledWith(
       expect.objectContaining({
-        trigger: { type: "date", date: new Date(FUTURE) },
+        trigger: { type: "date", date: expectedTriggerDate },
       })
     );
+  });
+
+  it("does not offset the trigger into the past for a reminder due sooner than the offset", async () => {
+    const almostNow = new Date(
+      Date.now() + ALARM_EARLY_OFFSET_MS / 2
+    ).toISOString();
+    const before = Date.now();
+    await addReminder([], {
+      title: "A",
+      description: "",
+      datetime: almostNow,
+      alarm: true,
+    });
+    const after = Date.now();
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    const triggerMs = call.trigger.date.getTime();
+    expect(triggerMs).toBeGreaterThanOrEqual(before);
+    expect(triggerMs).toBeLessThanOrEqual(after);
   });
 
   it("addReminder does not schedule for past-dated reminders", async () => {
@@ -148,9 +172,12 @@ describe("notification scheduling", () => {
       alarm: true,
     });
     expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("old-notif");
+    const expectedTriggerDate = new Date(
+      new Date(NEW_FUTURE).getTime() - ALARM_EARLY_OFFSET_MS
+    );
     expect(scheduleNotificationAsync).toHaveBeenCalledWith(
       expect.objectContaining({
-        trigger: { type: "date", date: new Date(NEW_FUTURE) },
+        trigger: { type: "date", date: expectedTriggerDate },
       })
     );
   });
@@ -174,7 +201,7 @@ describe("notification scheduling", () => {
     expect(scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 
-  it("scheduleSnoozeNotification schedules at now + SNOOZE_MINUTES", async () => {
+  it("scheduleSnoozeNotification schedules at now + SNOOZE_MINUTES minus the early offset", async () => {
     const before = Date.now();
     const data: SnoozeData = {
       title: "Snoozed",
@@ -188,8 +215,13 @@ describe("notification scheduling", () => {
     expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
     const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
     const triggerMs = call.trigger.date.getTime();
-    expect(triggerMs).toBeGreaterThanOrEqual(before + 10 * 60 * 1000);
-    expect(triggerMs).toBeLessThanOrEqual(after + 10 * 60 * 1000);
+    const snoozeMs = SNOOZE_MINUTES * 60 * 1000;
+    expect(triggerMs).toBeGreaterThanOrEqual(
+      before + snoozeMs - ALARM_EARLY_OFFSET_MS
+    );
+    expect(triggerMs).toBeLessThanOrEqual(
+      after + snoozeMs - ALARM_EARLY_OFFSET_MS
+    );
   });
 });
 

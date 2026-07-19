@@ -15,6 +15,12 @@ export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 export const SNOOZE_ACTION_ID = "SNOOZE_10";
 export const SNOOZE_MINUTES = 10;
 
+// Android's setExactAndAllowWhileIdle (used natively by expo-notifications)
+// is documented to defer delivery by up to ~1 minute under normal operation,
+// and longer under Doze. Scheduling the native trigger this much earlier
+// keeps the notification's actual arrival close to the time the user picked.
+export const ALARM_EARLY_OFFSET_MS = 60 * 1000;
+
 export interface Reminder {
   id: string;
   title: string;
@@ -122,7 +128,11 @@ export async function scheduleNotification(
     const granted = await requestPermissions();
     if (!granted) return undefined;
     const trigger = new Date(reminder.datetime);
-    if (trigger <= new Date()) return undefined;
+    const now = new Date();
+    if (trigger <= now) return undefined;
+    const earlyTrigger = new Date(
+      Math.max(now.getTime(), trigger.getTime() - ALARM_EARLY_OFFSET_MS)
+    );
     const alarmOn = reminder.alarm !== false;
     const channelId = alarmOn ? "reminders-alarm" : "reminders-silent";
     const id = await Notifications.scheduleNotificationAsync({
@@ -141,7 +151,7 @@ export async function scheduleNotification(
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: trigger,
+        date: earlyTrigger,
         ...(Platform.OS === "android" ? { channelId } : {}),
       },
     });
@@ -165,7 +175,9 @@ export async function scheduleSnoozeNotification(
 ): Promise<void> {
   if (Platform.OS === "web" || !Notifications) return;
   try {
-    const snoozeDate = new Date(Date.now() + SNOOZE_MINUTES * 60 * 1000);
+    const snoozeDate = new Date(
+      Date.now() + SNOOZE_MINUTES * 60 * 1000 - ALARM_EARLY_OFFSET_MS
+    );
     await Notifications.scheduleNotificationAsync({
       content: {
         title: data.title,
