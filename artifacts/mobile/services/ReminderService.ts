@@ -11,6 +11,7 @@ try {
 }
 
 export const STORAGE_KEY = "@reminders_v1";
+export const DEFAULT_ALARM_KEY = "@default_alarm_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 export const SNOOZE_ACTION_ID = "SNOOZE_10";
 export const SNOOZE_MINUTES = 10;
@@ -48,6 +49,18 @@ export async function loadReminders(): Promise<Reminder[]> {
 
 export async function saveReminders(reminders: Reminder[]): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(reminders));
+}
+
+export async function getDefaultAlarmEnabled(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(DEFAULT_ALARM_KEY);
+    if (raw !== null) return JSON.parse(raw) as boolean;
+  } catch {}
+  return true;
+}
+
+export async function setDefaultAlarmEnabled(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(enabled));
 }
 
 async function setupNotificationChannel(): Promise<void> {

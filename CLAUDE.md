@@ -32,6 +32,13 @@ Mobile dev runs via Expo on Replit with specific env vars (`REPLIT_EXPO_DEV_DOMA
 
 Android builds use EAS: `pnpm --filter @workspace/mobile run build:android` (preview), `build:android:prod` (production), `build:android:dev` (dev client).
 
+**Deploying from a local machine (not Replit):** `EXPO_TOKEN` used to come from a Replit Secret and isn't present outside Replit. Get a token from expo.dev → your account → Settings → Access Tokens, then:
+```bash
+export EXPO_TOKEN=<your-token>
+cd artifacts/mobile && npx eas-cli build --platform android --profile preview --non-interactive
+```
+`export` only lasts for the current shell session — add it to `~/.zshrc` (or your shell's profile) if you want it to persist across sessions. `npx eas-cli` works without installing it as a project dependency. Note: building via expo.dev's GitHub integration (rather than the CLI) doesn't work out of the box here — see the "Gotchas" section below.
+
 Required env: `DATABASE_URL` — Postgres connection string (for api-server and db push).
 
 ## Architecture decisions
@@ -62,6 +69,7 @@ Screens import from `@/` which maps to the project root (configured in tsconfig 
 - Android requires explicit notification channel setup; see `setupNotificationChannel()` in `ReminderService.ts` — there's a legacy channel migration to handle.
 - Use `pnpm` only — the root `package.json` preinstall hook rejects npm/yarn.
 - `react` and `react-dom` are pinned to `19.1.0` exactly (Expo requires specific versions); do not bump without checking Expo SDK compatibility.
+- expo.dev's GitHub App integration (triggering builds from the dashboard instead of the `eas-cli` CLI) fails with `ERR_PNPM_NO_LOCKFILE` when "Base directory" is set to `artifacts/mobile` — it only exposes that subdirectory to the build, but `pnpm-lock.yaml`/`pnpm-workspace.yaml` live at the repo root (pnpm workspace). Build from the CLI (`eas-cli build`, see above) instead; this is a known rough edge (matches expo/eas-cli#3247), not something fixable via eas.json/app.json config.
 
 ## Pointers
 

@@ -2,12 +2,15 @@ import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ALARM_EARLY_OFFSET_MS,
+  DEFAULT_ALARM_KEY,
   SNOOZE_MINUTES,
   addReminder,
   deleteReminder,
   editReminder,
+  getDefaultAlarmEnabled,
   rescheduleAllFutureReminders,
   scheduleSnoozeNotification,
+  setDefaultAlarmEnabled,
   toggleComplete,
   type Reminder,
   type SnoozeData,
@@ -297,5 +300,33 @@ describe("rescheduleAllFutureReminders", () => {
     );
     await rescheduleAllFutureReminders();
     expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe("default alarm setting", () => {
+  it("getDefaultAlarmEnabled defaults to true when unset", async () => {
+    const result = await getDefaultAlarmEnabled();
+    expect(result).toBe(true);
+  });
+
+  it("setDefaultAlarmEnabled persists false, and getDefaultAlarmEnabled reflects it", async () => {
+    await setDefaultAlarmEnabled(false);
+    const result = await getDefaultAlarmEnabled();
+    expect(result).toBe(false);
+  });
+
+  it("setDefaultAlarmEnabled persists true after being set to false", async () => {
+    await setDefaultAlarmEnabled(false);
+    await setDefaultAlarmEnabled(true);
+    const result = await getDefaultAlarmEnabled();
+    expect(result).toBe(true);
+  });
+
+  it("setDefaultAlarmEnabled writes under DEFAULT_ALARM_KEY", async () => {
+    await setDefaultAlarmEnabled(false);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      DEFAULT_ALARM_KEY,
+      JSON.stringify(false)
+    );
   });
 });

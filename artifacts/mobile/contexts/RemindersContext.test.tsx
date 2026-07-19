@@ -7,7 +7,7 @@ import {
   useReminders,
   type Reminder,
 } from "@/contexts/RemindersContext";
-import { STORAGE_KEY } from "@/services/ReminderService";
+import { DEFAULT_ALARM_KEY, STORAGE_KEY } from "@/services/ReminderService";
 
 jest.mock("expo-haptics");
 
@@ -26,12 +26,27 @@ function makeReminder(overrides: Partial<Reminder> = {}): Reminder {
 }
 
 function Probe() {
-  const { reminders, loading, addReminder, editReminder, deleteReminder, toggleComplete } =
-    useReminders();
+  const {
+    reminders,
+    loading,
+    addReminder,
+    editReminder,
+    deleteReminder,
+    toggleComplete,
+    defaultAlarmEnabled,
+    setDefaultAlarmEnabled,
+  } = useReminders();
   return (
     <View>
       <Text testID="loading">{String(loading)}</Text>
       <Text testID="count">{reminders.length}</Text>
+      <Text testID="default-alarm-enabled">{String(defaultAlarmEnabled)}</Text>
+      <Text
+        testID="disable-default-alarm"
+        onPress={() => setDefaultAlarmEnabled(false)}
+      >
+        disable default alarm
+      </Text>
       {reminders.map((r) => (
         <Text key={r.id} testID={`reminder-${r.id}`}>
           {r.title}|{String(r.completed)}
@@ -165,6 +180,51 @@ describe("RemindersProvider", () => {
 
     await waitFor(() =>
       expect(getByTestId("reminder-r1").props.children.join("")).toBe("Test reminder|true")
+    );
+  });
+
+  it("defaultAlarmEnabled defaults to true when nothing is stored", async () => {
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+
+    expect(getByTestId("default-alarm-enabled").props.children).toBe("true");
+  });
+
+  it("defaultAlarmEnabled reflects a previously stored false value on load", async () => {
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
+
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+
+    expect(getByTestId("default-alarm-enabled").props.children).toBe("false");
+  });
+
+  it("setDefaultAlarmEnabled updates context state and persists to storage", async () => {
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+
+    await act(async () => {
+      getByTestId("disable-default-alarm").props.onPress();
+    });
+
+    await waitFor(() =>
+      expect(getByTestId("default-alarm-enabled").props.children).toBe("false")
+    );
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      DEFAULT_ALARM_KEY,
+      JSON.stringify(false)
     );
   });
 });

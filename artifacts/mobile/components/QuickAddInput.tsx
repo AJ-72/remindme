@@ -103,13 +103,13 @@ interface Props {
 
 export default function QuickAddInput({ onSaved }: Props) {
   const colors = useColors();
-  const { addReminder } = useReminders();
+  const { addReminder, defaultAlarmEnabled } = useReminders();
   const { sharedText, clearSharedText } = useSharedText();
 
   const [input, setInput] = useState("");
   const [parsedTitle, setParsedTitle] = useState("");
   const [parsedDate, setParsedDate] = useState<Date | null>(null);
-  const [alarm, setAlarm] = useState(true);
+  const [alarm, setAlarm] = useState(defaultAlarmEnabled);
   const [saving, setSaving] = useState(false);
 
   const [showNoTimeSheet, setShowNoTimeSheet] = useState(false);

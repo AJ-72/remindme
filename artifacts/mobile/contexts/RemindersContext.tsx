@@ -13,8 +13,10 @@ import {
   addReminder as serviceAdd,
   deleteReminder as serviceDelete,
   editReminder as serviceEdit,
+  getDefaultAlarmEnabled,
   initNotifications,
   loadReminders,
+  setDefaultAlarmEnabled as serviceSetDefaultAlarmEnabled,
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
 
@@ -38,6 +40,8 @@ interface RemindersContextType {
   deleteReminder: (id: string) => Promise<void>;
   toggleComplete: (id: string) => Promise<void>;
   loading: boolean;
+  defaultAlarmEnabled: boolean;
+  setDefaultAlarmEnabled: (enabled: boolean) => Promise<void>;
 }
 
 const RemindersContext = createContext<RemindersContextType | null>(null);
@@ -51,12 +55,21 @@ export function RemindersProvider({
 }) {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [defaultAlarmEnabled, setDefaultAlarmEnabledState] = useState(true);
 
   useEffect(() => {
-    loadReminders()
-      .then((loaded) => setReminders(loaded))
+    Promise.all([loadReminders(), getDefaultAlarmEnabled()])
+      .then(([loadedReminders, defaultAlarm]) => {
+        setReminders(loadedReminders);
+        setDefaultAlarmEnabledState(defaultAlarm);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, []);
+
+  const setDefaultAlarmEnabled = useCallback(async (enabled: boolean) => {
+    await serviceSetDefaultAlarmEnabled(enabled);
+    setDefaultAlarmEnabledState(enabled);
   }, []);
 
   const addReminder = useCallback(
@@ -107,6 +120,8 @@ export function RemindersProvider({
         deleteReminder,
         toggleComplete,
         loading,
+        defaultAlarmEnabled,
+        setDefaultAlarmEnabled,
       }}
     >
       {children}

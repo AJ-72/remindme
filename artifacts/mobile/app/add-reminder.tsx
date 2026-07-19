@@ -76,7 +76,7 @@ type PickerMode = "date" | "time" | null;
 export default function AddReminderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { reminders, addReminder, editReminder } = useReminders();
+  const { reminders, addReminder, editReminder, defaultAlarmEnabled } = useReminders();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const isEditing = !!id;
 
@@ -97,7 +97,9 @@ export default function AddReminderScreen() {
   );
   const [dateWasParsed, setDateWasParsed] = useState(false);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
-  const [alarm, setAlarm] = useState<boolean>(existing?.alarm !== false);
+  const [alarm, setAlarm] = useState<boolean>(
+    existing ? existing.alarm !== false : defaultAlarmEnabled
+  );
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
