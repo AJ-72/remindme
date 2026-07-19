@@ -1,9 +1,10 @@
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
+import { openExactAlarmSettings } from "@/services/ReminderService";
 
 interface Props {
   onDismiss: () => void;
@@ -14,23 +15,6 @@ export default function ExactAlarmBanner({ onDismiss }: Props) {
   const insets = useSafeAreaInsets();
 
   if (Platform.OS !== "android") return null;
-
-  const handleOpenSettings = () => {
-    // Linking.sendIntent launches an Android Intent by action name directly —
-    // correct way to open "Special app access → Alarms & reminders" on Android 12+.
-    // openURL("android.settings.REQUEST_SCHEDULE_EXACT_ALARM") has no scheme so
-    // it always throws and falls back to generic notification settings instead.
-    const sendIntent = (Linking as any).sendIntent as
-      | ((action: string) => Promise<void>)
-      | undefined;
-    if (sendIntent) {
-      sendIntent("android.settings.REQUEST_SCHEDULE_EXACT_ALARM").catch(() =>
-        Linking.openSettings()
-      );
-    } else {
-      Linking.openSettings();
-    }
-  };
 
   return (
     <View
@@ -53,7 +37,7 @@ export default function ExactAlarmBanner({ onDismiss }: Props) {
         Exact alarm permission is off — reminders may fire late.{" "}
         <Text
           style={[styles.link, { color: colors.warning }]}
-          onPress={handleOpenSettings}
+          onPress={openExactAlarmSettings}
         >
           Fix in Settings
         </Text>

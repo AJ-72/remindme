@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
+import { Linking, Platform } from "react-native";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -12,6 +12,7 @@ try {
 
 export const STORAGE_KEY = "@reminders_v1";
 export const DEFAULT_ALARM_KEY = "@default_alarm_v1";
+export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 export const SNOOZE_ACTION_ID = "SNOOZE_10";
 export const SNOOZE_MINUTES = 10;
@@ -61,6 +62,18 @@ export async function getDefaultAlarmEnabled(): Promise<boolean> {
 
 export async function setDefaultAlarmEnabled(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(enabled));
+}
+
+export async function hasCompletedPermissionOnboarding(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(PERMISSION_ONBOARDING_KEY)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+export async function markPermissionOnboardingComplete(): Promise<void> {
+  await AsyncStorage.setItem(PERMISSION_ONBOARDING_KEY, "true");
 }
 
 async function setupNotificationChannel(): Promise<void> {
@@ -121,7 +134,7 @@ async function setupSnoozeCategory(): Promise<void> {
   } catch {}
 }
 
-async function requestPermissions(): Promise<boolean> {
+export async function requestNotificationPermissions(): Promise<boolean> {
   if (Platform.OS === "web" || !Notifications) return false;
   try {
     await setupNotificationChannel();
@@ -138,7 +151,7 @@ export async function scheduleNotification(
 ): Promise<string | undefined> {
   if (!Notifications) return undefined;
   try {
-    const granted = await requestPermissions();
+    const granted = await requestNotificationPermissions();
     if (!granted) return undefined;
     const trigger = new Date(reminder.datetime);
     const now = new Date();
@@ -231,6 +244,26 @@ export async function checkExactAlarmPermission(): Promise<boolean | null> {
     return alarm;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Opens Android 12+'s "Special app access → Alarms & reminders" screen for
+ * this app. sendIntent is the correct API here — openURL with the
+ * "android.settings.REQUEST_SCHEDULE_EXACT_ALARM" action has no scheme so it
+ * always throws; sendIntent launches the Android Intent by action name
+ * directly. Falls back to generic app notification settings if unavailable.
+ */
+export function openExactAlarmSettings(): void {
+  const sendIntent = (Linking as any).sendIntent as
+    | ((action: string) => Promise<void>)
+    | undefined;
+  if (sendIntent) {
+    sendIntent("android.settings.REQUEST_SCHEDULE_EXACT_ALARM").catch(() =>
+      Linking.openSettings()
+    );
+  } else {
+    Linking.openSettings();
   }
 }
 

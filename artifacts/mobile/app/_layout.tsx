@@ -24,7 +24,13 @@ import {
   type SnoozeData,
 } from "@/contexts/RemindersContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
-import { checkExactAlarmPermission } from "@/services/ReminderService";
+import {
+  checkExactAlarmPermission,
+  hasCompletedPermissionOnboarding,
+  markPermissionOnboardingComplete,
+  openExactAlarmSettings,
+  requestNotificationPermissions,
+} from "@/services/ReminderService";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
 
 // eslint-disable-next-line
@@ -80,6 +86,22 @@ export default function RootLayout() {
     alarmChecked.current = true;
     checkExactAlarmPermission().then((granted) => {
       if (granted === false) setShowAlarmBanner(true);
+    });
+  }, []);
+
+  // First-launch onboarding: proactively request the notification permission
+  // (rather than waiting for the user's first reminder save) and, on
+  // Android 12+, send them straight to the exact-alarm settings screen if
+  // it isn't already granted. Runs once per install, tracked in AsyncStorage.
+  useEffect(() => {
+    hasCompletedPermissionOnboarding().then(async (completed) => {
+      if (completed) return;
+      await requestNotificationPermissions();
+      const exactAlarmGranted = await checkExactAlarmPermission();
+      if (exactAlarmGranted === false) {
+        openExactAlarmSettings();
+      }
+      await markPermissionOnboardingComplete();
     });
   }, []);
 

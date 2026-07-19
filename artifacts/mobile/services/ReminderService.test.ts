@@ -3,11 +3,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ALARM_EARLY_OFFSET_MS,
   DEFAULT_ALARM_KEY,
+  PERMISSION_ONBOARDING_KEY,
   SNOOZE_MINUTES,
   addReminder,
   deleteReminder,
   editReminder,
   getDefaultAlarmEnabled,
+  hasCompletedPermissionOnboarding,
+  markPermissionOnboardingComplete,
+  requestNotificationPermissions,
   rescheduleAllFutureReminders,
   scheduleSnoozeNotification,
   setDefaultAlarmEnabled,
@@ -15,7 +19,11 @@ import {
   type Reminder,
   type SnoozeData,
 } from "@/services/ReminderService";
-import { scheduleNotificationAsync, cancelScheduledNotificationAsync } from "expo-notifications";
+import {
+  scheduleNotificationAsync,
+  cancelScheduledNotificationAsync,
+  requestPermissionsAsync,
+} from "expo-notifications";
 
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 const PAST = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -328,5 +336,48 @@ describe("default alarm setting", () => {
       DEFAULT_ALARM_KEY,
       JSON.stringify(false)
     );
+  });
+});
+
+describe("permission onboarding", () => {
+  it("hasCompletedPermissionOnboarding is false when unset", async () => {
+    const result = await hasCompletedPermissionOnboarding();
+    expect(result).toBe(false);
+  });
+
+  it("markPermissionOnboardingComplete persists completion under PERMISSION_ONBOARDING_KEY", async () => {
+    await markPermissionOnboardingComplete();
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      PERMISSION_ONBOARDING_KEY,
+      "true"
+    );
+  });
+
+  it("hasCompletedPermissionOnboarding reflects a completed onboarding", async () => {
+    await markPermissionOnboardingComplete();
+    const result = await hasCompletedPermissionOnboarding();
+    expect(result).toBe(true);
+  });
+
+  it("requestNotificationPermissions returns true when the OS grants the request", async () => {
+    (requestPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "granted",
+    });
+    const result = await requestNotificationPermissions();
+    expect(result).toBe(true);
+  });
+
+  it("requestNotificationPermissions returns false when the OS denies the request", async () => {
+    (requestPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+    });
+    const result = await requestNotificationPermissions();
+    expect(result).toBe(false);
+  });
+
+  it("requestNotificationPermissions returns false on web", async () => {
+    jest.replaceProperty(Platform, "OS", "web");
+    const result = await requestNotificationPermissions();
+    expect(result).toBe(false);
   });
 });
