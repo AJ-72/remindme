@@ -21,6 +21,7 @@ import {
   rescheduleAllFutureReminders,
   scheduleSnoozeNotification,
   setDefaultAlarmEnabled,
+  snoozeReminder,
   toggleComplete,
   updateSnoozeById,
   type Reminder,
@@ -446,6 +447,32 @@ describe("markDoneById", () => {
 
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].completed).toBe(false);
+  });
+});
+
+describe("snoozeReminder", () => {
+  it("cancels the old notification, schedules a new one, and updates datetime+notificationId", async () => {
+    const r = makeReminder({ id: "r1", notificationId: "old-notif" });
+    const before = Date.now();
+
+    const result = await snoozeReminder([r], "r1");
+
+    const after = Date.now();
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("old-notif");
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+
+    const updated = result.find((x) => x.id === "r1")!;
+    expect(updated.notificationId).toBe("mock-notif-id");
+    const updatedMs = new Date(updated.datetime).getTime();
+    const snoozeMs = SNOOZE_MINUTES * 60 * 1000;
+    expect(updatedMs).toBeGreaterThanOrEqual(before + snoozeMs);
+    expect(updatedMs).toBeLessThanOrEqual(after + snoozeMs);
+  });
+
+  it("returns the list unchanged for an unknown id", async () => {
+    const r = makeReminder({ id: "r1" });
+    const result = await snoozeReminder([r], "unknown-id");
+    expect(result).toEqual([r]);
   });
 });
 

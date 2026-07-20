@@ -215,13 +215,13 @@ export async function cancelNotification(
 
 export async function scheduleSnoozeNotification(
   data: NotificationData
-): Promise<void> {
-  if (Platform.OS === "web" || !Notifications) return;
+): Promise<string | undefined> {
+  if (Platform.OS === "web" || !Notifications) return undefined;
   try {
     const snoozeDate = new Date(
       Date.now() + SNOOZE_MINUTES * 60 * 1000 - ALARM_EARLY_OFFSET_MS
     );
-    await Notifications.scheduleNotificationAsync({
+    const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: data.title,
         body: data.body,
@@ -236,7 +236,10 @@ export async function scheduleSnoozeNotification(
         ...(Platform.OS === "android" ? { channelId: data.channelId } : {}),
       },
     });
-  } catch {}
+    return id;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -364,6 +367,29 @@ export async function toggleComplete(
           notificationId: !r.completed ? undefined : r.notificationId,
         }
       : r
+  );
+  await saveReminders(reminders);
+  return reminders;
+}
+
+export async function snoozeReminder(
+  current: Reminder[],
+  id: string
+): Promise<Reminder[]> {
+  const target = current.find((r) => r.id === id);
+  if (!target) return current;
+  await cancelNotification(target.notificationId);
+  const alarmOn = target.alarm !== false;
+  const notificationId = await scheduleSnoozeNotification({
+    reminderId: id,
+    title: target.title,
+    body: target.description || "Reminder!",
+    alarm: alarmOn,
+    channelId: channelIdForAlarm(alarmOn),
+  });
+  const datetime = new Date(Date.now() + SNOOZE_MINUTES * 60 * 1000).toISOString();
+  const reminders = current.map((r) =>
+    r.id === id ? { ...r, datetime, notificationId } : r
   );
   await saveReminders(reminders);
   return reminders;
