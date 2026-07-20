@@ -15,6 +15,7 @@ export const DEFAULT_ALARM_KEY = "@default_alarm_v1";
 export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 export const SNOOZE_ACTION_ID = "SNOOZE_10";
+export const MARK_DONE_ACTION_ID = "MARK_DONE";
 export const SNOOZE_MINUTES = 10;
 
 // Android's setExactAndAllowWhileIdle (used natively by expo-notifications)
@@ -129,6 +130,15 @@ async function setupSnoozeCategory(): Promise<void> {
         options: {
           isDestructive: false,
           isAuthenticationRequired: false,
+        },
+      },
+      {
+        identifier: MARK_DONE_ACTION_ID,
+        buttonTitle: "Mark Done",
+        options: {
+          isDestructive: false,
+          isAuthenticationRequired: false,
+          opensAppToForeground: false,
         },
       },
     ]);

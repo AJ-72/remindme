@@ -4,6 +4,9 @@ import {
   ALARM_EARLY_OFFSET_MS,
   DEFAULT_ALARM_KEY,
   PERMISSION_ONBOARDING_KEY,
+  SNOOZE_CATEGORY_ID,
+  SNOOZE_ACTION_ID,
+  MARK_DONE_ACTION_ID,
   SNOOZE_MINUTES,
   addReminder,
   channelIdForAlarm,
@@ -24,6 +27,7 @@ import {
   scheduleNotificationAsync,
   cancelScheduledNotificationAsync,
   requestPermissionsAsync,
+  setNotificationCategoryAsync,
 } from "expo-notifications";
 
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
@@ -392,6 +396,20 @@ describe("permission onboarding", () => {
     jest.replaceProperty(Platform, "OS", "web");
     const result = await requestNotificationPermissions();
     expect(result).toBe(false);
+  });
+
+  it("registers both Snooze and Mark Done tray actions, with Mark Done set to not foreground the app", async () => {
+    await requestNotificationPermissions();
+    expect(setNotificationCategoryAsync).toHaveBeenCalledWith(
+      SNOOZE_CATEGORY_ID,
+      expect.arrayContaining([
+        expect.objectContaining({ identifier: SNOOZE_ACTION_ID }),
+        expect.objectContaining({
+          identifier: MARK_DONE_ACTION_ID,
+          options: expect.objectContaining({ opensAppToForeground: false }),
+        }),
+      ])
+    );
   });
 });
 
