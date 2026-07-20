@@ -4,7 +4,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import SettingsScreen from "@/app/(tabs)/settings";
 import { RemindersProvider } from "@/contexts/RemindersContext";
-import { DEFAULT_ALARM_KEY } from "@/services/ReminderService";
+import { DEFAULT_ALARM_KEY, SHOW_DESCRIPTION_KEY } from "@/services/ReminderService";
 
 jest.mock("expo-haptics");
 
@@ -30,23 +30,23 @@ beforeEach(async () => {
 
 describe("SettingsScreen", () => {
   it("shows the alarm switch on, with 'plays a sound' copy, when no default is stored", async () => {
-    const { findByText, findByRole } = renderScreen();
+    const { findByText, findByTestId } = renderScreen();
     expect(await findByText("Notification will play a sound")).toBeTruthy();
-    const switchEl = await findByRole("switch");
+    const switchEl = await findByTestId("default-alarm-switch");
     expect(switchEl.props.value).toBe(true);
   });
 
   it("shows the alarm switch off, with 'silent' copy, when the stored default is false", async () => {
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
-    const { findByText, findByRole } = renderScreen();
+    const { findByText, findByTestId } = renderScreen();
     expect(await findByText("Notification will be silent")).toBeTruthy();
-    const switchEl = await findByRole("switch");
+    const switchEl = await findByTestId("default-alarm-switch");
     expect(switchEl.props.value).toBe(false);
   });
 
   it("toggling the switch persists the new default to storage", async () => {
-    const { findByRole } = renderScreen();
-    const switchEl = await findByRole("switch");
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("default-alarm-switch");
 
     fireEvent(switchEl, "valueChange", false);
 
@@ -54,6 +54,37 @@ describe("SettingsScreen", () => {
       expect(AsyncStorage.setItem).toHaveBeenCalledWith(
         DEFAULT_ALARM_KEY,
         JSON.stringify(false)
+      )
+    );
+  });
+
+  it("shows the description switch off, with title-only copy, when no setting is stored", async () => {
+    const { findByText, findByTestId } = renderScreen();
+    expect(await findByText("Notification shows only the reminder title")).toBeTruthy();
+    const switchEl = await findByTestId("show-description-switch");
+    expect(switchEl.props.value).toBe(false);
+  });
+
+  it("shows the description switch on, with lock-screen copy, when the stored setting is true", async () => {
+    await AsyncStorage.setItem(SHOW_DESCRIPTION_KEY, JSON.stringify(true));
+    const { findByText, findByTestId } = renderScreen();
+    expect(
+      await findByText("Description appears on the lock screen and notification shade")
+    ).toBeTruthy();
+    const switchEl = await findByTestId("show-description-switch");
+    expect(switchEl.props.value).toBe(true);
+  });
+
+  it("toggling the description switch persists the new setting to storage", async () => {
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("show-description-switch");
+
+    fireEvent(switchEl, "valueChange", true);
+
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        SHOW_DESCRIPTION_KEY,
+        JSON.stringify(true)
       )
     );
   });

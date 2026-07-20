@@ -8,7 +8,12 @@ import { useColors } from "@/hooks/useColors";
 export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { defaultAlarmEnabled, setDefaultAlarmEnabled } = useReminders();
+  const {
+    defaultAlarmEnabled,
+    setDefaultAlarmEnabled,
+    showDescriptionInNotifications,
+    setShowDescriptionInNotifications,
+  } = useReminders();
 
   const styles = StyleSheet.create({
     container: {
@@ -53,6 +58,9 @@ export default function SettingsScreen() {
       color: colors.mutedForeground,
       marginTop: 2,
     },
+    descriptionCard: {
+      marginTop: 12,
+    },
   });
 
   return (
@@ -76,10 +84,37 @@ export default function SettingsScreen() {
             </Text>
           </View>
           <Switch
+            testID="default-alarm-switch"
             value={defaultAlarmEnabled}
             onValueChange={(v) => setDefaultAlarmEnabled(v)}
             trackColor={{ false: colors.muted, true: colors.primary + "66" }}
             thumbColor={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
+          />
+        </View>
+        <View style={[styles.alarmCard, styles.descriptionCard]}>
+          <Feather
+            name={showDescriptionInNotifications ? "eye" : "eye-off"}
+            size={18}
+            color={
+              showDescriptionInNotifications ? colors.primary : colors.mutedForeground
+            }
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alarmLabel}>Show description in notifications</Text>
+            <Text style={styles.alarmSubLabel}>
+              {showDescriptionInNotifications
+                ? "Description appears on the lock screen and notification shade"
+                : "Notification shows only the reminder title"}
+            </Text>
+          </View>
+          <Switch
+            testID="show-description-switch"
+            value={showDescriptionInNotifications}
+            onValueChange={(v) => setShowDescriptionInNotifications(v)}
+            trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+            thumbColor={
+              showDescriptionInNotifications ? colors.primary : colors.mutedForeground
+            }
           />
         </View>
       </View>

@@ -21,6 +21,7 @@ import {
   rescheduleAllFutureReminders,
   scheduleSnoozeNotification,
   setDefaultAlarmEnabled,
+  setShowDescriptionEnabled,
   snoozeReminder,
   toggleComplete,
   updateSnoozeById,
@@ -254,6 +255,57 @@ describe("notification scheduling", () => {
     expect(triggerMs).toBeLessThanOrEqual(
       after + snoozeMs - ALARM_EARLY_OFFSET_MS
     );
+  });
+});
+
+describe("notification body consent gate", () => {
+  it("falls back to 'Reminder!' when the show-description setting is off (default)", async () => {
+    await addReminder([], {
+      title: "A",
+      description: "Buy milk and eggs",
+      datetime: FUTURE,
+      alarm: true,
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.body).toBe("Reminder!");
+    expect(call.content.data.body).toBe("Reminder!");
+  });
+
+  it("uses the description when the show-description setting is on", async () => {
+    await setShowDescriptionEnabled(true);
+    await addReminder([], {
+      title: "A",
+      description: "Buy milk and eggs",
+      datetime: FUTURE,
+      alarm: true,
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.body).toBe("Buy milk and eggs");
+    expect(call.content.data.body).toBe("Buy milk and eggs");
+  });
+
+  it("falls back to 'Reminder!' when enabled but there is no description", async () => {
+    await setShowDescriptionEnabled(true);
+    await addReminder([], {
+      title: "A",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.body).toBe("Reminder!");
+  });
+
+  it("snoozeReminder respects the setting too", async () => {
+    await setShowDescriptionEnabled(true);
+    const r = makeReminder({
+      id: "r1",
+      description: "Buy milk and eggs",
+      notificationId: "notif-r1",
+    });
+    await snoozeReminder([r], "r1");
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.body).toBe("Buy milk and eggs");
   });
 });
 

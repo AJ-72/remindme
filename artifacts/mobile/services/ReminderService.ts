@@ -12,6 +12,7 @@ try {
 
 export const STORAGE_KEY = "@reminders_v1";
 export const DEFAULT_ALARM_KEY = "@default_alarm_v1";
+export const SHOW_DESCRIPTION_KEY = "@show_description_v1";
 export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 export const SNOOZE_ACTION_ID = "SNOOZE_10";
@@ -64,6 +65,26 @@ export async function getDefaultAlarmEnabled(): Promise<boolean> {
 
 export async function setDefaultAlarmEnabled(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(enabled));
+}
+
+export async function getShowDescriptionEnabled(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(SHOW_DESCRIPTION_KEY);
+    if (raw !== null) return JSON.parse(raw) as boolean;
+  } catch {}
+  return false;
+}
+
+export async function setShowDescriptionEnabled(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(SHOW_DESCRIPTION_KEY, JSON.stringify(enabled));
+}
+
+export async function resolveNotificationBody(
+  description?: string
+): Promise<string> {
+  const showDescription = await getShowDescriptionEnabled();
+  if (showDescription && description) return description;
+  return "Reminder!";
 }
 
 export async function hasCompletedPermissionOnboarding(): Promise<boolean> {
@@ -177,16 +198,17 @@ export async function scheduleNotification(
     );
     const alarmOn = reminder.alarm !== false;
     const channelId = channelIdForAlarm(alarmOn);
+    const body = await resolveNotificationBody(reminder.description);
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: reminder.title,
-        body: reminder.description || "Reminder!",
+        body,
         sound: alarmOn,
         categoryIdentifier: SNOOZE_CATEGORY_ID,
         data: {
           reminderId,
           title: reminder.title,
-          body: reminder.description || "Reminder!",
+          body,
           alarm: alarmOn,
           channelId,
         } satisfies NotificationData,
@@ -380,10 +402,11 @@ export async function snoozeReminder(
   if (!target) return current;
   await cancelNotification(target.notificationId);
   const alarmOn = target.alarm !== false;
+  const body = await resolveNotificationBody(target.description);
   const notificationId = await scheduleSnoozeNotification({
     reminderId: id,
     title: target.title,
-    body: target.description || "Reminder!",
+    body,
     alarm: alarmOn,
     channelId: channelIdForAlarm(alarmOn),
   });

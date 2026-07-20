@@ -15,9 +15,11 @@ import {
   deleteReminder as serviceDelete,
   editReminder as serviceEdit,
   getDefaultAlarmEnabled,
+  getShowDescriptionEnabled,
   initNotifications,
   loadReminders,
   setDefaultAlarmEnabled as serviceSetDefaultAlarmEnabled,
+  setShowDescriptionEnabled as serviceSetShowDescriptionEnabled,
   snoozeReminder as serviceSnooze,
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
@@ -45,6 +47,8 @@ interface RemindersContextType {
   loading: boolean;
   defaultAlarmEnabled: boolean;
   setDefaultAlarmEnabled: (enabled: boolean) => Promise<void>;
+  showDescriptionInNotifications: boolean;
+  setShowDescriptionInNotifications: (enabled: boolean) => Promise<void>;
 }
 
 const RemindersContext = createContext<RemindersContextType | null>(null);
@@ -59,12 +63,19 @@ export function RemindersProvider({
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [defaultAlarmEnabled, setDefaultAlarmEnabledState] = useState(true);
+  const [showDescriptionInNotifications, setShowDescriptionInNotificationsState] =
+    useState(false);
 
   useEffect(() => {
-    Promise.all([loadReminders(), getDefaultAlarmEnabled()])
-      .then(([loadedReminders, defaultAlarm]) => {
+    Promise.all([
+      loadReminders(),
+      getDefaultAlarmEnabled(),
+      getShowDescriptionEnabled(),
+    ])
+      .then(([loadedReminders, defaultAlarm, showDescription]) => {
         setReminders(loadedReminders);
         setDefaultAlarmEnabledState(defaultAlarm);
+        setShowDescriptionInNotificationsState(showDescription);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -83,6 +94,14 @@ export function RemindersProvider({
     await serviceSetDefaultAlarmEnabled(enabled);
     setDefaultAlarmEnabledState(enabled);
   }, []);
+
+  const setShowDescriptionInNotifications = useCallback(
+    async (enabled: boolean) => {
+      await serviceSetShowDescriptionEnabled(enabled);
+      setShowDescriptionInNotificationsState(enabled);
+    },
+    []
+  );
 
   const addReminder = useCallback(
     async (data: Omit<Reminder, "id" | "completed" | "notificationId">) => {
@@ -144,6 +163,8 @@ export function RemindersProvider({
         loading,
         defaultAlarmEnabled,
         setDefaultAlarmEnabled,
+        showDescriptionInNotifications,
+        setShowDescriptionInNotifications,
       }}
     >
       {children}
