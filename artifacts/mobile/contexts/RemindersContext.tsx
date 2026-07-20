@@ -9,7 +9,7 @@ import React, {
 
 import {
   type Reminder,
-  type SnoozeData,
+  type NotificationData,
   addReminder as serviceAdd,
   deleteReminder as serviceDelete,
   editReminder as serviceEdit,
@@ -20,7 +20,7 @@ import {
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
 
-export type { Reminder, SnoozeData };
+export type { Reminder, NotificationData };
 export {
   SNOOZE_ACTION_ID,
   SNOOZE_CATEGORY_ID,

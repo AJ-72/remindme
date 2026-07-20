@@ -17,7 +17,7 @@ import {
   setDefaultAlarmEnabled,
   toggleComplete,
   type Reminder,
-  type SnoozeData,
+  type NotificationData,
 } from "@/services/ReminderService";
 import {
   scheduleNotificationAsync,
@@ -78,6 +78,17 @@ describe("addReminder", () => {
       alarm: true,
     });
     expect(added.completed).toBe(false);
+  });
+
+  it("generates the reminder id before scheduling, and includes it as reminderId in the notification payload", async () => {
+    const { added } = await addReminder([], {
+      title: "A",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.data.reminderId).toBe(added.id);
   });
 });
 
@@ -214,7 +225,8 @@ describe("notification scheduling", () => {
 
   it("scheduleSnoozeNotification schedules at now + SNOOZE_MINUTES minus the early offset", async () => {
     const before = Date.now();
-    const data: SnoozeData = {
+    const data: NotificationData = {
+      reminderId: "r1",
       title: "Snoozed",
       body: "body",
       alarm: true,

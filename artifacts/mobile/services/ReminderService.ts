@@ -33,7 +33,8 @@ export interface Reminder {
   alarm?: boolean;
 }
 
-export interface SnoozeData {
+export interface NotificationData {
+  reminderId: string;
   title: string;
   body: string;
   alarm: boolean;
@@ -146,8 +147,13 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   }
 }
 
+export function channelIdForAlarm(alarm: boolean): string {
+  return alarm ? "reminders-alarm" : "reminders-silent";
+}
+
 export async function scheduleNotification(
-  reminder: Pick<Reminder, "title" | "description" | "datetime" | "alarm">
+  reminder: Pick<Reminder, "title" | "description" | "datetime" | "alarm">,
+  reminderId: string
 ): Promise<string | undefined> {
   if (!Notifications) return undefined;
   try {
@@ -160,7 +166,7 @@ export async function scheduleNotification(
       Math.max(now.getTime(), trigger.getTime() - ALARM_EARLY_OFFSET_MS)
     );
     const alarmOn = reminder.alarm !== false;
-    const channelId = alarmOn ? "reminders-alarm" : "reminders-silent";
+    const channelId = channelIdForAlarm(alarmOn);
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: reminder.title,
@@ -168,11 +174,12 @@ export async function scheduleNotification(
         sound: alarmOn,
         categoryIdentifier: SNOOZE_CATEGORY_ID,
         data: {
+          reminderId,
           title: reminder.title,
           body: reminder.description || "Reminder!",
           alarm: alarmOn,
           channelId,
-        } satisfies SnoozeData,
+        } satisfies NotificationData,
         ...(Platform.OS === "ios" && !alarmOn ? { sound: false } : {}),
       },
       trigger: {
@@ -197,7 +204,7 @@ export async function cancelNotification(
 }
 
 export async function scheduleSnoozeNotification(
-  data: SnoozeData
+  data: NotificationData
 ): Promise<void> {
   if (Platform.OS === "web" || !Notifications) return;
   try {
@@ -291,9 +298,10 @@ export async function addReminder(
   current: Reminder[],
   data: Omit<Reminder, "id" | "completed" | "notificationId">
 ): Promise<{ reminders: Reminder[]; added: Reminder }> {
-  const notificationId = await scheduleNotification(data);
+  const id = Date.now().toString() + Math.random().toString(36).substring(2, 9);
+  const notificationId = await scheduleNotification(data, id);
   const added: Reminder = {
-    id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+    id,
     ...data,
     completed: false,
     notificationId,
@@ -310,7 +318,7 @@ export async function editReminder(
 ): Promise<Reminder[]> {
   const old = current.find((r) => r.id === id);
   await cancelNotification(old?.notificationId);
-  const notificationId = await scheduleNotification(data);
+  const notificationId = await scheduleNotification(data, id);
   const reminders = current.map((r) =>
     r.id === id ? { ...r, ...data, notificationId } : r
   );
@@ -363,7 +371,7 @@ export async function rescheduleAllFutureReminders(): Promise<void> {
       // Cancel any previously scheduled notification to prevent duplicates,
       // then schedule a fresh one with the updated ID.
       await cancelNotification(reminder.notificationId);
-      const notificationId = await scheduleNotification(reminder);
+      const notificationId = await scheduleNotification(reminder, reminder.id);
       if (notificationId !== undefined) {
         changed = true;
         return { ...reminder, notificationId };
