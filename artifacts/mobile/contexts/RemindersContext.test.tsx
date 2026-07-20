@@ -1,5 +1,5 @@
 import React from "react";
-import { Text, View } from "react-native";
+import { AppState, Text, View } from "react-native";
 import { render, waitFor, act } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -33,6 +33,7 @@ function Probe() {
     editReminder,
     deleteReminder,
     toggleComplete,
+    snoozeReminder,
     defaultAlarmEnabled,
     setDefaultAlarmEnabled,
   } = useReminders();
@@ -73,6 +74,9 @@ function Probe() {
       </Text>
       <Text testID="toggle-r1" onPress={() => toggleComplete("r1")}>
         toggle
+      </Text>
+      <Text testID="snooze-r1" onPress={() => snoozeReminder("r1")}>
+        snooze
       </Text>
     </View>
   );
@@ -226,5 +230,65 @@ describe("RemindersProvider", () => {
       DEFAULT_ALARM_KEY,
       JSON.stringify(false)
     );
+  });
+
+  it("snoozeReminder updates the reminder's datetime and notificationId in storage", async () => {
+    const seeded = [makeReminder({ id: "r1", notificationId: "old-notif" })];
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+
+    await act(async () => {
+      getByTestId("snooze-r1").props.onPress();
+    });
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored[0].notificationId).toBe("mock-notif-id");
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].datetime).not.toBe(FUTURE);
+  });
+
+  it("reloads reminders from storage when the app returns to foreground", async () => {
+    const seeded = [makeReminder({ id: "r1", title: "Before" })];
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+
+    let foregroundListener: ((state: string) => void) | undefined;
+    const addEventListenerSpy = jest
+      .spyOn(AppState, "addEventListener")
+      .mockImplementation((event: string, listener: any) => {
+        if (event === "change") foregroundListener = listener;
+        return { remove: jest.fn() } as any;
+      });
+
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+    expect(getByTestId("reminder-r1").props.children.join("")).toBe("Before|false");
+
+    // Simulate a headless tray action (Mark Done/Snooze) writing directly to
+    // AsyncStorage while the app is backgrounded, bypassing context state.
+    const updated = [makeReminder({ id: "r1", title: "After" })];
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+
+    expect(foregroundListener).toBeDefined();
+    await act(async () => {
+      foregroundListener!("active");
+    });
+
+    await waitFor(() =>
+      expect(getByTestId("reminder-r1").props.children.join("")).toBe("After|false")
+    );
+
+    addEventListenerSpy.mockRestore();
   });
 });

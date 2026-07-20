@@ -6,6 +6,7 @@ import React, {
   useEffect,
   useState,
 } from "react";
+import { AppState } from "react-native";
 
 import {
   type Reminder,
@@ -17,6 +18,7 @@ import {
   initNotifications,
   loadReminders,
   setDefaultAlarmEnabled as serviceSetDefaultAlarmEnabled,
+  snoozeReminder as serviceSnooze,
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
 
@@ -39,6 +41,7 @@ interface RemindersContextType {
   ) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
   toggleComplete: (id: string) => Promise<void>;
+  snoozeReminder: (id: string) => Promise<void>;
   loading: boolean;
   defaultAlarmEnabled: boolean;
   setDefaultAlarmEnabled: (enabled: boolean) => Promise<void>;
@@ -65,6 +68,15 @@ export function RemindersProvider({
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        loadReminders().then(setReminders);
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   const setDefaultAlarmEnabled = useCallback(async (enabled: boolean) => {
@@ -111,6 +123,15 @@ export function RemindersProvider({
     [reminders]
   );
 
+  const snoozeReminder = useCallback(
+    async (id: string) => {
+      const updated = await serviceSnooze(reminders, id);
+      setReminders(updated);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    },
+    [reminders]
+  );
+
   return (
     <RemindersContext.Provider
       value={{
@@ -119,6 +140,7 @@ export function RemindersProvider({
         editReminder,
         deleteReminder,
         toggleComplete,
+        snoozeReminder,
         loading,
         defaultAlarmEnabled,
         setDefaultAlarmEnabled,
