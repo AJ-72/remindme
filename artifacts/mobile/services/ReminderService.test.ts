@@ -6,6 +6,7 @@ import {
   PERMISSION_ONBOARDING_KEY,
   SNOOZE_MINUTES,
   addReminder,
+  channelIdForAlarm,
   deleteReminder,
   editReminder,
   getDefaultAlarmEnabled,
@@ -391,5 +392,15 @@ describe("permission onboarding", () => {
     jest.replaceProperty(Platform, "OS", "web");
     const result = await requestNotificationPermissions();
     expect(result).toBe(false);
+  });
+});
+
+describe("channelIdForAlarm", () => {
+  it("returns the alarm channel when alarm is true", () => {
+    expect(channelIdForAlarm(true)).toBe("reminders-alarm");
+  });
+
+  it("returns the silent channel when alarm is false", () => {
+    expect(channelIdForAlarm(false)).toBe("reminders-silent");
   });
 });
