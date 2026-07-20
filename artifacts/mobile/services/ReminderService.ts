@@ -393,3 +393,14 @@ export async function rescheduleAllFutureReminders(): Promise<void> {
     await saveReminders(updated);
   }
 }
+
+export async function markDoneById(id: string): Promise<void> {
+  const reminders = await loadReminders();
+  const target = reminders.find((r) => r.id === id);
+  if (!target) return;
+  await cancelNotification(target.notificationId);
+  const updated = reminders.map((r) =>
+    r.id === id ? { ...r, completed: true, notificationId: undefined } : r
+  );
+  await saveReminders(updated);
+}

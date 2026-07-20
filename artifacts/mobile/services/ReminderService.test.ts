@@ -8,12 +8,14 @@ import {
   SNOOZE_ACTION_ID,
   MARK_DONE_ACTION_ID,
   SNOOZE_MINUTES,
+  STORAGE_KEY,
   addReminder,
   channelIdForAlarm,
   deleteReminder,
   editReminder,
   getDefaultAlarmEnabled,
   hasCompletedPermissionOnboarding,
+  markDoneById,
   markPermissionOnboardingComplete,
   requestNotificationPermissions,
   rescheduleAllFutureReminders,
@@ -420,5 +422,28 @@ describe("channelIdForAlarm", () => {
 
   it("returns the silent channel when alarm is false", () => {
     expect(channelIdForAlarm(false)).toBe("reminders-silent");
+  });
+});
+
+describe("markDoneById", () => {
+  it("marks the target reminder completed and cancels its notification, reading/writing AsyncStorage directly", async () => {
+    const r = makeReminder({ id: "r1", completed: false, notificationId: "notif-r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await markDoneById("r1");
+
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("notif-r1");
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].completed).toBe(true);
+  });
+
+  it("no-ops safely when the id does not exist", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await expect(markDoneById("unknown")).resolves.toBeUndefined();
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].completed).toBe(false);
   });
 });
