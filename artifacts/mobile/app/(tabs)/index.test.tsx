@@ -3,7 +3,7 @@ import { Alert } from "react-native";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import HomeScreen from "@/app/index";
+import HomeScreen from "@/app/(tabs)/index";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
 import { STORAGE_KEY, type Reminder } from "@/services/ReminderService";
