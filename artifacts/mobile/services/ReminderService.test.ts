@@ -22,6 +22,7 @@ import {
   scheduleSnoozeNotification,
   setDefaultAlarmEnabled,
   toggleComplete,
+  updateSnoozeById,
   type Reminder,
   type NotificationData,
 } from "@/services/ReminderService";
@@ -445,5 +446,28 @@ describe("markDoneById", () => {
 
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].completed).toBe(false);
+  });
+});
+
+describe("updateSnoozeById", () => {
+  it("updates datetime and notificationId for the target reminder, reading/writing AsyncStorage directly", async () => {
+    const r = makeReminder({ id: "r1", notificationId: "old-notif" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    const NEW_DATETIME = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+    await updateSnoozeById("r1", NEW_DATETIME, "new-notif");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].datetime).toBe(NEW_DATETIME);
+    expect(stored[0].notificationId).toBe("new-notif");
+  });
+
+  it("no-ops safely when the id does not exist", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await expect(
+      updateSnoozeById("unknown", new Date().toISOString(), "x")
+    ).resolves.toBeUndefined();
   });
 });

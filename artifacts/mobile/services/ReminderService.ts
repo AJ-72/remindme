@@ -404,3 +404,17 @@ export async function markDoneById(id: string): Promise<void> {
   );
   await saveReminders(updated);
 }
+
+export async function updateSnoozeById(
+  id: string,
+  datetime: string,
+  notificationId: string | undefined
+): Promise<void> {
+  const reminders = await loadReminders();
+  const target = reminders.find((r) => r.id === id);
+  if (!target) return;
+  const updated = reminders.map((r) =>
+    r.id === id ? { ...r, datetime, notificationId } : r
+  );
+  await saveReminders(updated);
+}
