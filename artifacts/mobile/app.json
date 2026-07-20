@@ -23,7 +23,11 @@
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.POST_NOTIFICATIONS"
       ],
-      "package": "com.curios.remindme"
+      "package": "com.curios.remindme",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#6366f1"
+      }
     },
     "web": {
       "favicon": "./assets/images/icon.png"
@@ -40,7 +44,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/icon.png",
+          "icon": "./assets/images/notification-icon.png",
           "color": "#6366f1",
           "sounds": ["./assets/sounds/alarm.wav"]
         }
