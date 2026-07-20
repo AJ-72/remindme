@@ -401,7 +401,7 @@ export default function QuickAddInput({ onSaved }: Props) {
         <Feather name="plus-circle" size={18} color={colors.mutedForeground} />
         <TextInput
           style={styles.textInput}
-          placeholder='Add a reminder… "Call mom tomorrow at 3pm"'
+          placeholder="Add a reminder…"
           placeholderTextColor={colors.mutedForeground}
           value={input}
           onChangeText={setInput}
