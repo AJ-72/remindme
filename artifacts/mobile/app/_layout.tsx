@@ -17,12 +17,8 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ExactAlarmBanner from "@/components/ExactAlarmBanner";
-import {
-  RemindersProvider,
-  SNOOZE_ACTION_ID,
-  scheduleSnoozeNotification,
-  type SnoozeData,
-} from "@/contexts/RemindersContext";
+import NotificationResponseHandler from "@/components/NotificationResponseHandler";
+import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
 import {
   checkExactAlarmPermission,
@@ -32,15 +28,6 @@ import {
   requestNotificationPermissions,
 } from "@/services/ReminderService";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
-
-// eslint-disable-next-line
-let Notifications: any = null;
-try {
-  // @ts-ignore
-  Notifications = require("expo-notifications");
-} catch {
-  Notifications = null;
-}
 
 SplashScreen.preventAutoHideAsync();
 
@@ -52,6 +39,10 @@ function RootLayoutNav() {
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen
         name="add-reminder"
+        options={{ headerShown: false, presentation: "modal" }}
+      />
+      <Stack.Screen
+        name="reminder-detail"
         options={{ headerShown: false, presentation: "modal" }}
       />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -121,29 +112,6 @@ export default function RootLayout() {
     return () => sub.remove();
   }, []);
 
-  useEffect(() => {
-    if (!Notifications) return;
-    let subscription: { remove: () => void } | null = null;
-    try {
-      subscription = Notifications.addNotificationResponseReceivedListener(
-        (response: any) => {
-          if (response.actionIdentifier !== SNOOZE_ACTION_ID) return;
-          const data = response.notification.request.content
-            .data as SnoozeData | null;
-          if (!data) return;
-          scheduleSnoozeNotification(data);
-        }
-      );
-    } catch {
-      // ignore — listener may not be available in all environments
-    }
-    return () => {
-      try {
-        subscription?.remove();
-      } catch {}
-    };
-  }, []);
-
   if (!fontsLoaded && !fontError) return null;
 
   return (
@@ -154,6 +122,7 @@ export default function RootLayout() {
           <GestureHandlerRootView>
             <KeyboardProvider>
               <RemindersProvider>
+                <NotificationResponseHandler />
                 <SharedTextProvider>
                   <View style={{ flex: 1 }}>
                     {showAlarmBanner && (
