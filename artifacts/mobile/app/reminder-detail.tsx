@@ -1,0 +1,254 @@
+import { Feather } from "@expo/vector-icons";
+import { router, useLocalSearchParams } from "expo-router";
+import React from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { useReminders } from "@/contexts/RemindersContext";
+import { useColors } from "@/hooks/useColors";
+import { formatDatetime } from "@/utils/formatDatetime";
+
+function goBack() {
+  if (router.canGoBack()) {
+    router.back();
+  } else {
+    router.replace("/(tabs)");
+  }
+}
+
+export default function ReminderDetailScreen() {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const { reminders, loading, toggleComplete, snoozeReminder, deleteReminder } =
+    useReminders();
+  const { id } = useLocalSearchParams<{ id: string }>();
+
+  const reminder = reminders.find((r) => r.id === id);
+
+  const handleMarkDone = async () => {
+    await toggleComplete(id);
+    goBack();
+  };
+
+  const handleSnooze = async () => {
+    await snoozeReminder(id);
+    goBack();
+  };
+
+  const handleEdit = () => {
+    router.push({ pathname: "/add-reminder", params: { id } });
+  };
+
+  const handleDelete = () => {
+    Alert.alert("Delete Reminder", "Are you sure you want to delete this reminder?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          await deleteReminder(id);
+          goBack();
+        },
+      },
+    ]);
+  };
+
+  const styles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingTop: Platform.OS === "web" ? 67 : insets.top + 12,
+      paddingHorizontal: 20,
+      paddingBottom: 12,
+      backgroundColor: colors.background,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    headerTitle: {
+      fontSize: 17,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.foreground,
+    },
+    closeBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.muted,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    content: {
+      flex: 1,
+      padding: 20,
+      paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 20,
+    },
+    loadingWrap: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    title: {
+      fontSize: 22,
+      fontFamily: "Inter_700Bold",
+      color: colors.foreground,
+      marginBottom: 8,
+    },
+    description: {
+      fontSize: 15,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginBottom: 12,
+    },
+    timeRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginBottom: 24,
+    },
+    timeText: {
+      fontSize: 14,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+    },
+    actionsWrap: { gap: 12 },
+    actionBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      borderRadius: 14,
+      paddingVertical: 14,
+    },
+    primaryBtn: { backgroundColor: colors.primary },
+    secondaryBtn: {
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    destructiveBtn: {
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: "#fca5a5",
+    },
+    primaryBtnText: {
+      fontSize: 15,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primaryForeground,
+    },
+    secondaryBtnText: {
+      fontSize: 15,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.foreground,
+    },
+    destructiveBtnText: {
+      fontSize: 15,
+      fontFamily: "Inter_600SemiBold",
+      color: "#ef4444",
+    },
+    handledWrap: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 24,
+    },
+    handledText: {
+      fontSize: 15,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+      textAlign: "center",
+      marginBottom: 16,
+    },
+    handledLinkText: {
+      fontSize: 15,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
+    },
+  });
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Pressable style={styles.closeBtn} onPress={goBack} testID="close-button">
+          <Feather name="x" size={18} color={colors.foreground} />
+        </Pressable>
+        <Text style={styles.headerTitle}>Reminder</Text>
+        <View style={{ width: 36 }} />
+      </View>
+
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator
+            size="large"
+            color={colors.primary}
+            testID="loading-indicator"
+          />
+        </View>
+      ) : !reminder || reminder.completed ? (
+        <View style={styles.handledWrap}>
+          <Text style={styles.handledText}>
+            This reminder was already completed or removed.
+          </Text>
+          <Pressable onPress={() => router.replace("/(tabs)")}>
+            <Text style={styles.handledLinkText}>Back to list</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.content}>
+          <Text style={styles.title}>{reminder.title}</Text>
+          {!!reminder.description && (
+            <Text style={styles.description}>{reminder.description}</Text>
+          )}
+          <View style={styles.timeRow}>
+            <Feather name="clock" size={14} color={colors.mutedForeground} />
+            <Text style={styles.timeText}>{formatDatetime(reminder.datetime)}</Text>
+          </View>
+
+          <View style={styles.actionsWrap}>
+            <Pressable
+              style={[styles.actionBtn, styles.primaryBtn]}
+              onPress={handleMarkDone}
+              testID="mark-done-button"
+            >
+              <Feather name="check" size={16} color={colors.primaryForeground} />
+              <Text style={styles.primaryBtnText}>Mark Done</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.actionBtn, styles.secondaryBtn]}
+              onPress={handleSnooze}
+              testID="snooze-button"
+            >
+              <Feather name="clock" size={16} color={colors.foreground} />
+              <Text style={styles.secondaryBtnText}>Snooze 10 min</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.actionBtn, styles.secondaryBtn]}
+              onPress={handleEdit}
+              testID="edit-button"
+            >
+              <Feather name="edit-2" size={16} color={colors.foreground} />
+              <Text style={styles.secondaryBtnText}>Edit</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.actionBtn, styles.destructiveBtn]}
+              onPress={handleDelete}
+              testID="delete-button"
+            >
+              <Feather name="trash-2" size={16} color="#ef4444" />
+              <Text style={styles.destructiveBtnText}>Delete</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
