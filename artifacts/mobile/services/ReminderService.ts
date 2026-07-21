@@ -233,6 +233,13 @@ export async function cancelNotification(
   try {
     await Notifications.cancelScheduledNotificationAsync(notificationId);
   } catch {}
+  // cancelScheduledNotificationAsync only prevents a pending trigger from
+  // firing; a notification that's already been delivered and is sitting in
+  // the tray (e.g. the one the user just tapped "Mark Done" on) needs to be
+  // dismissed separately, or it lingers after the reminder is completed.
+  try {
+    await Notifications.dismissNotificationAsync(notificationId);
+  } catch {}
 }
 
 export async function scheduleSnoozeNotification(

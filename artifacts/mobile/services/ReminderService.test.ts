@@ -31,6 +31,7 @@ import {
 import {
   scheduleNotificationAsync,
   cancelScheduledNotificationAsync,
+  dismissNotificationAsync,
   requestPermissionsAsync,
   setNotificationCategoryAsync,
 } from "expo-notifications";
@@ -487,6 +488,7 @@ describe("markDoneById", () => {
     await markDoneById("r1");
 
     expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("notif-r1");
+    expect(dismissNotificationAsync).toHaveBeenCalledWith("notif-r1");
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].completed).toBe(true);
   });

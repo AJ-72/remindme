@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Market Analysis & Play Store Fit: remindme — 2026-07-20</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f8f8fb;
+      --surface: #ffffff;
+      --border: #e4e4e7;
+      --text: #1a1a2e;
+      --muted: #6b7280;
+      --primary: #6366f1;
+      --primary-light: #eef2ff;
+      --high: #dc2626;
+      --high-bg: #fef2f2;
+      --medium: #d97706;
+      --medium-bg: #fffbeb;
+      --low: #2563eb;
+      --low-bg: #eff6ff;
+      --strength: #059669;
+      --strength-bg: #ecfdf5;
+      --na: #6b7280;
+      --na-bg: #f9fafb;
+      --radius: 10px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.05);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      font-size: 15px;
+      padding: 0 0 80px;
+    }
+
+    /* ── Header ── */
+    .page-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 32px 40px 28px;
+    }
+    .page-header h1 {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.5px;
+    }
+    .meta-row {
+      display: flex;
+      gap: 24px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    .meta-item {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .meta-item strong { color: var(--text); font-weight: 600; }
+
+    /* ── Layout ── */
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── Section headers ── */
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 48px 0 16px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid var(--border);
+    }
+    h3 {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 28px 0 10px;
+    }
+    p { margin: 0 0 14px; color: var(--text); }
+    ul, ol { margin: 0 0 14px; padding-left: 22px; }
+    li { margin-bottom: 6px; }
+
+    /* ── Verdict banner ── */
+    .verdict {
+      background: var(--primary-light);
+      border: 1px solid var(--primary);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin: 20px 0 8px;
+    }
+    .verdict .label {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--primary);
+      background: var(--surface);
+      border: 1px solid var(--primary);
+      border-radius: 999px;
+      padding: 3px 10px;
+      margin-bottom: 10px;
+    }
+    .verdict p:last-child { margin-bottom: 0; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px 20px;
+      margin-bottom: 14px;
+    }
+    .card h4 {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+    .card p:last-child { margin-bottom: 0; }
+
+    .card-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 640px) {
+      .card-row { grid-template-columns: 1fr; }
+    }
+
+    .card.strength { border-left: 4px solid var(--strength); }
+    .card.strength .badge { background: var(--strength-bg); color: var(--strength); }
+    .card.gap { border-left: 4px solid var(--high); }
+    .card.gap .badge { background: var(--high-bg); color: var(--high); }
+
+    .badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      border-radius: 999px;
+      padding: 2px 9px;
+      margin-bottom: 8px;
+    }
+
+    /* ── Tiers ── */
+    .tier {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px 20px;
+      margin-bottom: 12px;
+    }
+    .tier h4 {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 4px;
+    }
+    .tier .examples {
+      font-size: 12.5px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      font-style: italic;
+    }
+    .tier.your-position {
+      border: 1.5px solid var(--primary);
+      background: var(--primary-light);
+    }
+
+    /* ── Matrix table ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      margin: 16px 0 20px;
+    }
+    th, td {
+      text-align: left;
+      padding: 12px 16px;
+      font-size: 13.5px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      background: var(--bg);
+      font-weight: 700;
+      font-size: 11.5px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    tr:last-child td { border-bottom: none; }
+    td.rec-go { color: var(--strength); font-weight: 700; }
+    td.rec-no { color: var(--high); font-weight: 700; }
+    td.rec-neutral { color: var(--medium); font-weight: 700; }
+
+    /* ── Priority list ── */
+    .priority-list { list-style: none; padding: 0; margin: 0 0 20px; }
+    .priority-item {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 14px 18px;
+      margin-bottom: 10px;
+    }
+    .priority-rank {
+      flex: 0 0 auto;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .priority-item .content h4 { font-size: 14px; margin-bottom: 4px; }
+    .priority-item .content p { font-size: 13.5px; margin-bottom: 0; color: var(--muted); }
+
+    /* ── Caveat box ── */
+    .caveat {
+      background: var(--medium-bg);
+      border: 1px solid var(--medium);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      margin: 20px 0;
+      font-size: 13.5px;
+    }
+    .caveat strong { color: var(--medium); }
+
+    footer {
+      max-width: 960px;
+      margin: 60px auto 0;
+      padding: 20px 24px 0;
+      border-top: 1px solid var(--border);
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="page-header">
+    <div class="container" style="padding:0;">
+      <h1>Market Analysis &amp; Play Store Fit — remindme</h1>
+      <div class="meta-row">
+        <span class="meta-item"><strong>Date:</strong> 2026-07-20</span>
+        <span class="meta-item"><strong>App:</strong> Reminders (com.curios.remindme)</span>
+        <span class="meta-item"><strong>Purpose:</strong> Go/no-go on public Play Store launch</span>
+        <span class="meta-item"><strong>Analyst:</strong> Claude Code (structural analysis, no live market data)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <div class="caveat">
+      <strong>Data caveat:</strong> this analysis has no live web/App Store search access. Competitive tiers,
+      naming, and category dynamics are based on general knowledge of the reminder/to-do app market, not
+      current install counts, ratings, or pricing. Treat competitor specifics as directional, not sourced.
+    </div>
+
+    <h2>Recommendation</h2>
+    <div class="verdict">
+      <span class="label">Conditional go</span>
+      <p>
+        Launch as a beta / closed-track release, but only once local-only data risk is addressed (backup,
+        or explicit disclosure) and positioned narrowly as a <strong>fast, multi-modal capture, alarm-grade
+        reminder app</strong> — not a general to-do app. Don't compete on feature breadth with Todoist/TickTick;
+        don't compete on distribution with Google Tasks/Keep. Compete on capture speed + delivery reliability,
+        a niche neither tier serves well today.
+      </p>
+    </div>
+
+    <h2>Current App Snapshot</h2>
+    <p>
+      Core loop: natural-language quick-add (<code>chrono-node</code>, on-device, no network) → local
+      notification via <code>expo-notifications</code> → tray actions for Snooze (10 min) / Mark Done → tap
+      opens a reminder-detail screen. Local-first storage (AsyncStorage); the API server exists but the
+      mobile app doesn't use it yet.
+    </p>
+
+    <div class="card-row">
+      <div>
+        <div class="card strength">
+          <span class="badge">Strength — shipped</span>
+          <h4>Alarm-grade delivery</h4>
+          <p>
+            Exact-alarm Android permissions, permission-nag banner, 60s early-scheduling offset to counter
+            Doze deferral, genuine alarm sound (not a notification chime), per-reminder alarm on/off. More
+            aggressive than Google Tasks/Keep's soft reminders.
+          </p>
+        </div>
+        <div class="card strength">
+          <span class="badge">Strength — shipped</span>
+          <h4>Frictionless text capture</h4>
+          <p>
+            Single-line natural-language input beats multi-field "add task" forms used by most competitors
+            for speed of logging a reminder.
+          </p>
+        </div>
+        <div class="card strength">
+          <span class="badge">Strength — shipped</span>
+          <h4>Share-into-app</h4>
+          <p>Android share-intent receiver (text/*) lets text from other apps prefill a reminder.</p>
+        </div>
+        <div class="card strength">
+          <span class="badge">Strength — roadmap</span>
+          <h4>Voice &amp; photo capture (planned, backlog #2)</h4>
+          <p>
+            Multi-modal capture (say it or photograph it, not just type it) would be the strongest
+            differentiator versus other alarm-specialist apps, which tend to have clunky add-flows themselves.
+            Not yet built — a roadmap strength, not a current one.
+          </p>
+        </div>
+      </div>
+      <div>
+        <div class="card gap">
+          <span class="badge">Gap</span>
+          <h4>No recurring reminders</h4>
+          <p>Data model has no recurrence field at all — every reminder is one-off.</p>
+        </div>
+        <div class="card gap">
+          <span class="badge">Gap</span>
+          <h4>No lists / categories / tags</h4>
+          <p>Flat single list — no work/personal separation or grouping.</p>
+        </div>
+        <div class="card gap">
+          <span class="badge">Gap — highest risk</span>
+          <h4>No cloud sync / backup</h4>
+          <p>
+            AsyncStorage only (backlog #1, unbuilt). Uninstall or phone swap = silent data loss. This
+            directly undercuts a "reliability" pitch and is the fastest path to 1-star reviews.
+          </p>
+        </div>
+        <div class="card gap">
+          <span class="badge">Gap</span>
+          <h4>No cross-device story</h4>
+          <p>No confirmed iOS parity, no web. Single developer, no monetization or analytics wired in.</p>
+        </div>
+      </div>
+    </div>
+
+    <h2>Competitive Landscape (Structural)</h2>
+    <p>The Android reminder/to-do space splits into four rough tiers:</p>
+
+    <div class="tier">
+      <h4>Tier 1 — OS-bundled, zero-friction, free</h4>
+      <div class="examples">Google Tasks, Google Keep, Samsung Reminder</div>
+      <p>Win on distribution (pre-installed) and sync. Deliberately soft: snoozable notification, not
+      alarm-grade, no NL capture, no voice/photo-to-reminder.</p>
+    </div>
+
+    <div class="tier">
+      <h4>Tier 2 — Full task-management suites</h4>
+      <div class="examples">Todoist, TickTick, Microsoft To Do, Any.do</div>
+      <p>Feature-rich: recurrence, projects, collaboration, cross-platform sync, often freemium. Steeper
+      setup cost — overkill for a quick "remind me to call mom tomorrow."</p>
+    </div>
+
+    <div class="tier">
+      <h4>Tier 3 — Alarm/reminder specialists</h4>
+      <div class="examples">apps branded around "won't let you forget" — loud alarms, exact timing, dismiss-to-stop UX</div>
+      <p>This is the tier the app's exact-alarm handling and alarm-sound work actually competes in — not
+      Tier 1 or 2. Rarely NL-first; add-flows tend to be clunky.</p>
+    </div>
+
+    <div class="tier">
+      <h4>Tier 4 — NL-capture-first</h4>
+      <div class="examples">closest analog: voice-assistant capture bolted onto Tasks/Keep</div>
+      <p>Few dedicated players. Where it exists, it's an assistant feature on a Tier 1 app, not a product's
+      core identity.</p>
+    </div>
+
+    <div class="tier your-position">
+      <h4>&#9656; Where remindme sits today</h4>
+      <p>
+        Straddles Tier 3 (alarm reliability) and Tier 4 (NL speed), with no single incumbent doing both
+        well. Adding voice/photo capture (backlog #2) pushes further into "capture speed" as the core
+        identity — a real, currently-open gap.
+      </p>
+    </div>
+
+    <h2>Recommended Niche</h2>
+    <p>
+      Position as: <strong>"the fastest way to capture a reminder in whatever form it occurs to you (type,
+      speak, or photograph), delivered with alarm-grade certainty you won't miss it."</strong> This targets
+      people who already tried Tier 1 apps and found reminders too easy to dismiss or miss, and who find
+      typing into multi-field forms annoying enough that they just don't log reminders at all — a real,
+      identifiable frustration (it's why alarm-style reminder apps exist as a category).
+    </p>
+    <p>Scope implications:</p>
+    <ul>
+      <li>Recurring reminders — <strong>not required</strong> for this niche; deprioritize relative to backlog.</li>
+      <li>Cloud sync/backup (backlog #1) — <strong>more important than it looks</strong>; not for multi-device use, but because silent data loss breaks the reliability pitch and kills word-of-mouth.</li>
+      <li>Voice/photo capture (backlog #2) — <strong>prioritize</strong>; the most defensible differentiator vs. other alarm specialists.</li>
+    </ul>
+
+    <h2>Decision Matrix</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:45%;">Your situation</th>
+          <th>Recommendation</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Can commit ongoing time (bug fixes, Play Store policy upkeep, occasional feature work) for 6–12+ months</td>
+          <td class="rec-go">Go — niche is real and reachable via low-cost channels (ASO around "alarm reminder," "voice reminder," r/androidapps, Product Hunt)</td>
+        </tr>
+        <tr>
+          <td>One-time build, no bandwidth for maintenance</td>
+          <td class="rec-no">No-go on public launch — Play Store apps need ongoing policy-compliance upkeep (target SDK bumps, permission justifications, periodic re-review); an abandoned app with fading reviews hurts more than not publishing</td>
+        </tr>
+        <tr>
+          <td>Comfortable with near-zero users for months before any traction</td>
+          <td class="rec-go">Go — realistic for a solo dev with no ad budget; growth will be slow and organic</td>
+        </tr>
+        <tr>
+          <td>Expecting meaningful users/installs quickly without paid acquisition or an existing audience</td>
+          <td class="rec-neutral">Recalibrate expectations, not a no-go — traction in this space is a 6–18 month grind, not weeks</td>
+        </tr>
+        <tr>
+          <td>No cloud backup shipped before launch</td>
+          <td class="rec-neutral">Delay launch until backlog #1 lands, or launch with explicit "local-only, use at your own risk on phone swap" disclosure — silently losing users' data is the fastest way to earn 1-star reviews</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Priorities Implied by This Analysis</h2>
+    <ol class="priority-list">
+      <li class="priority-item">
+        <div class="priority-rank">1</div>
+        <div class="content">
+          <h4>Cloud backup/sync (backlog #1)</h4>
+          <p>Highest risk to the reliability pitch; either ship before public launch or disclose the limitation clearly.</p>
+        </div>
+      </li>
+      <li class="priority-item">
+        <div class="priority-rank">2</div>
+        <div class="content">
+          <h4>Voice &amp; photo capture (backlog #2)</h4>
+          <p>Most defensible differentiator vs. other Tier 3 alarm specialists; core to the recommended positioning.</p>
+        </div>
+      </li>
+      <li class="priority-item">
+        <div class="priority-rank">3</div>
+        <div class="content">
+          <h4>Store listing &amp; positioning copy</h4>
+          <p>Write description/screenshots around "capture speed + alarm-grade delivery," not generic to-do language — avoid inviting Tier 2 comparisons.</p>
+        </div>
+      </li>
+      <li class="priority-item">
+        <div class="priority-rank">4</div>
+        <div class="content">
+          <h4>Recurring reminders, lists/tags</h4>
+          <p>Deprioritized — not required for the target niche; revisit only if user feedback post-launch demands it.</p>
+        </div>
+      </li>
+      <li class="priority-item">
+        <div class="priority-rank">5</div>
+        <div class="content">
+          <h4>Publish-to-Play-Store logistics (backlog #8)</h4>
+          <p>Sequence after items 1–3 above, not before — a beta track is fine for early validation once the reliability gap is closed or disclosed.</p>
+        </div>
+      </li>
+    </ol>
+
+  </div>
+
+  <footer>
+    Generated by Claude Code via the brainstorming workflow, 2026-07-20. Structural analysis based on
+    repository inspection (git history, <code>ReminderService.ts</code>, <code>app.json</code>,
+    existing design specs) — not live market data.
+  </footer>
+
+</body>
+</html>
