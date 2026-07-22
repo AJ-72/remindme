@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -15,6 +16,13 @@ import * as chrono from "chrono-node";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
+import {
+  ensureOfflineModelReady,
+  getMicPermissionStatus,
+  requestMicPermission,
+  startListening,
+  stopListening,
+} from "@/services/SpeechService";
 
 type DateTimePickerEvent = { type: string; nativeEvent: object };
 const DateTimePicker: React.ComponentType<any> | null =
@@ -113,6 +121,9 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [notesVisible, setNotesVisible] = useState(false);
   const [description, setDescription] = useState("");
+  const [listening, setListening] = useState(false);
+  const [micNotice, setMicNotice] = useState<string | null>(null);
+  const micPulse = useRef(new Animated.Value(1)).current;
 
   const [showNoTimeSheet, setShowNoTimeSheet] = useState(false);
   const [suggestedTime, setSuggestedTime] = useState<Date>(roundToNextHour(new Date()));
@@ -226,6 +237,66 @@ export default function QuickAddInput({ onSaved }: Props) {
     }
   };
 
+  const startMicPulse = () => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(micPulse, { toValue: 1.15, duration: 400, useNativeDriver: true }),
+        Animated.timing(micPulse, { toValue: 1, duration: 400, useNativeDriver: true }),
+      ])
+    ).start();
+  };
+
+  const stopMicPulse = () => {
+    micPulse.stopAnimation();
+    micPulse.setValue(1);
+  };
+
+  const handleMicPress = async () => {
+    if (listening) {
+      stopListening();
+      setListening(false);
+      stopMicPulse();
+      return;
+    }
+
+    setMicNotice(null);
+    const { granted, canAskAgain } = await getMicPermissionStatus();
+    if (!granted) {
+      if (!canAskAgain) {
+        Linking.openSettings();
+        return;
+      }
+      const nowGranted = await requestMicPermission();
+      if (!nowGranted) return;
+    }
+
+    const modelStatus = await ensureOfflineModelReady("en-US");
+    if (modelStatus === "preparing") {
+      setMicNotice("Preparing voice recognition — try again in a moment");
+      return;
+    }
+
+    const { busy } = startListening(
+      input,
+      (fullText) => setInput(fullText),
+      () => {
+        setListening(false);
+        stopMicPulse();
+      },
+      () => {
+        setListening(false);
+        stopMicPulse();
+        setMicNotice("Couldn't hear that — try again or type it in.");
+      }
+    );
+    if (busy) {
+      setMicNotice("Still transcribing the shared audio…");
+      return;
+    }
+    setListening(true);
+    startMicPulse();
+  };
+
   const canSave = !saving && !!(parsedTitle || input.trim());
 
   const webInputStyle = {
@@ -327,6 +398,13 @@ export default function QuickAddInput({ onSaved }: Props) {
       fontSize: 12,
       color: colors.mutedForeground,
       fontFamily: "Inter_400Regular",
+    },
+    micNoticeText: {
+      fontSize: 12,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_400Regular",
+      marginTop: 6,
+      paddingHorizontal: 4,
     },
     modalOverlay: {
       flex: 1,
@@ -445,6 +523,20 @@ export default function QuickAddInput({ onSaved }: Props) {
         </Pressable>
         <Pressable
           style={styles.alarmBtn}
+          onPress={handleMicPress}
+          hitSlop={8}
+          testID="quick-add-mic"
+        >
+          <Animated.View style={{ transform: [{ scale: micPulse }] }}>
+            <Feather
+              name="mic"
+              size={16}
+              color={listening ? colors.primary : colors.mutedForeground}
+            />
+          </Animated.View>
+        </Pressable>
+        <Pressable
+          style={styles.alarmBtn}
           onPress={() => {
             setAlarm((a) => !a);
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -467,6 +559,10 @@ export default function QuickAddInput({ onSaved }: Props) {
           <Feather name="check" size={16} color={canSave ? colors.primaryForeground : colors.mutedForeground} />
         </Pressable>
       </View>
+
+      {micNotice && (
+        <Text style={styles.micNoticeText}>{micNotice}</Text>
+      )}
 
       {notesVisible && (
         <TextInput
