@@ -57,6 +57,13 @@
           ],
           "disableIOS": true
         }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow Reminders to use the microphone to add reminders by voice.",
+          "speechRecognitionPermission": "Allow Reminders to transcribe speech into reminder text."
+        }
       ]
     ],
     "experiments": {
