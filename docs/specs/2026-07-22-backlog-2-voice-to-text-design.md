@@ -165,12 +165,12 @@ tracks this explicitly:
   `ReminderService.ts`). Note: this reflects OS-version eligibility only,
   not format/codec support — see the WhatsApp-codec risk above; a `true`
   result does not guarantee a given file will actually transcribe.
-- `transcribeAudioFile(uri: string): Promise<{ busy: boolean } | { text: string } | { failed: true }>`
+- `transcribeAudioFile(uri: string, fileName: string): Promise<{ busy: boolean } | { text: string } | { failed: true }>`
   — if `activeMode !== null`, resolves `{ busy: true }` immediately
   without starting anything. Otherwise sets `activeMode = "file"`, copies
   the input `uri` to the app's cache directory first via
-  `expo-file-system`'s `copyAsync` (see "Content-URI handling" below),
-  then calls `ExpoSpeechRecognitionModule.start({ audioSource: { uri: cachedUri }, requiresOnDeviceRecognition: true })`.
+  `expo-file-system` (see "Content-URI handling" below), then calls
+  `ExpoSpeechRecognitionModule.start({ audioSource: { uri: cachedUri }, requiresOnDeviceRecognition: true })`.
   Registers the same `addListener` subscriptions as `startListening`, but
   resolves the returned Promise on the first terminal event instead of
   invoking ongoing callbacks: `"result"` with a final (non-interim) flag →
@@ -189,10 +189,24 @@ type has both `contentUri` and `filePath`; the hook's normalized
 `ShareIntentFile.path` may resolve to either depending on the sending
 app). `transcribeAudioFile` does not assume the input `uri` is directly
 usable — it always copies the source into the app's own cache directory
-first via `expo-file-system`'s `copyAsync({ from: uri, to: <cacheDirectory> + fileName })`
-and passes the resulting guaranteed-`file://` cache URI to the native
-module. `expo-file-system` is a new dependency this feature introduces
-(not previously used in this app) — add it alongside `expo-speech-recognition`.
+first, using `expo-file-system`'s **current class-based API** (the legacy
+`FileSystem.copyAsync({ from, to })` function-style API — importable only
+from `expo-file-system/legacy` — throws at runtime when called from the
+main `expo-file-system` import as of the `19.0.x` line shipped with SDK
+54; do not use it):
+  ```ts
+  import { File, Paths } from "expo-file-system";
+  const source = new File(uri);
+  const cached = new File(Paths.cache, fileName);
+  source.copy(cached);
+  // cached.uri is the resulting guaranteed-file:// path
+  ```
+  `expo-file-system` (`19.0.x`, matching the SDK 54 line) is a new
+  dependency this feature introduces (not previously used in this app) —
+  add it alongside `expo-speech-recognition`. Its `content://` support was
+  added incrementally in the `19.0.x` line and may not cover every edge
+  case at the exact pinned version — treat this copy step as part of the
+  real-device spike (see below), not an assumption to build on blindly.
 
 ### `components/QuickAddInput.tsx`
 
@@ -274,7 +288,7 @@ an audio mime type (`audio/*`):
   1. If `SpeechService.isFileTranscriptionSupported()` is `false`: call
      `onText(file.fileName)` immediately (skip transcription entirely —
      known-unsupported OS version).
-  2. Otherwise call `SpeechService.transcribeAudioFile(file.path)`.
+  2. Otherwise call `SpeechService.transcribeAudioFile(file.path, file.fileName)`.
      - `{ busy: true }` (mic was already active): call
        `onText(file.fileName)` as the safe fallback for this pass — do
        not queue the file for later (queuing is a possible future
