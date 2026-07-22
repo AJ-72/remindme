@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
+import { File, Paths } from "expo-file-system";
 
 export async function getMicPermissionStatus(): Promise<{
   granted: boolean;
@@ -70,4 +71,40 @@ export function stopListening(): void {
   if (activeMode === null) return;
   ExpoSpeechRecognitionModule.stop();
   clearActiveSession();
+}
+
+export function isFileTranscriptionSupported(): boolean {
+  if (Platform.OS === "ios") return true;
+  if (Platform.OS !== "android") return false;
+  return typeof Platform.Version === "number" && Platform.Version >= 33;
+}
+
+export function transcribeAudioFile(
+  uri: string,
+  fileName: string
+): Promise<{ busy: boolean } | { text: string } | { failed: true }> {
+  if (activeMode !== null) return Promise.resolve({ busy: true });
+  activeMode = "file";
+
+  const source = new File(uri);
+  const cached = new File(Paths.cache, fileName);
+  source.copy(cached);
+
+  return new Promise((resolve) => {
+    const resultSub = ExpoSpeechRecognitionModule.addListener("result", (event: any) => {
+      if (!event.isFinal) return;
+      clearActiveSession();
+      resolve({ text: event.results?.[0]?.transcript ?? "" });
+    });
+    const errorSub = ExpoSpeechRecognitionModule.addListener("error", () => {
+      clearActiveSession();
+      resolve({ failed: true });
+    });
+    activeSubscriptions = [resultSub, errorSub];
+
+    ExpoSpeechRecognitionModule.start({
+      audioSource: { uri: cached.uri },
+      requiresOnDeviceRecognition: true,
+    } as any);
+  });
 }
