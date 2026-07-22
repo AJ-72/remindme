@@ -6,7 +6,7 @@
 6. Make the textboxes cleaner. The place holder text is overflowing today. [FIXED 2026-07-20]
 7. Get a better icon for reminder app
 8. How to publish to playstore for beta
-9. Branding - Name of company should be CuriosMind Labs. Get an icon as well. Add an about tab and show an icon plus name as CuriousMind Labs
+9. Branding - Name of company should be CuriosMind Labs. Get an icon as well. Add an about tab and show an icon plus name as CuriousMind Labs [FIXED 2026-07-22 — placeholder icon only, app icon itself tracked separately in item 7]
 10. Bug - Editing and saving the description is not working. I don't see the updated text saved when i open the reminder again. [FIXED 2026-07-21]
 11. Bug - Tapping on mark as done in push notification doesn't make the push notificaiton disappear [FIXED 2026-07-21]
 12. To be triaged bug - The reminder doesn't work the first time unless I do an edit and save again. This is not always true, but noticed once or twice. Do a a systematic analysis of code to check that everyhing is correct.  [FIXED 2026-07-21 — likely cause; please re-verify on a fresh install]
