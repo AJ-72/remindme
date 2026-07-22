@@ -103,18 +103,21 @@ failure).
 On-device recognition (`requiresOnDeviceRecognition: true`, required by
 the "no cloud" decision) needs a per-locale language model downloaded to
 the device first. This is not automatic — the app must explicitly trigger
-it via `ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload({ locale })`.
-The call resolves with a status: `"opened_dialog"` (Android 13 — shows a
-system dialog), `"download_success"` (Android 14+ — downloaded
-immediately), or `"download_scheduled"` (queued — **not usable yet**, e.g.
-waiting for WiFi).
+it via `ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload({ locale })`,
+which resolves `Promise<{ status: "opened_dialog" | "download_success" | "download_canceled"; message: string }>`
+(verified against the package's TypeScript source — field name is
+`status`, not `state`). `"opened_dialog"` (Android 13 — a system dialog is
+shown; the model isn't necessarily ready by the time the promise
+resolves) and `"download_canceled"` (Android 14+, user dismissed the
+dialog) both mean **not usable yet**; only `"download_success"`
+(Android 14+ immediate success) confirms readiness.
 
 **Design implication**: the first mic tap on a fresh install must trigger
 this check/download before (or instead of) calling `start()`. If the
-model isn't ready yet, the mic button shows a distinct **"Preparing voice
-recognition — try again in a moment"** state — separate from the
-transcription-failure message, so a not-ready-yet model doesn't look like
-a broken microphone.
+resolved status is anything other than `"download_success"`, the mic
+button shows a distinct **"Preparing voice recognition — try again in a
+moment"** state — separate from the transcription-failure message, so a
+not-yet-ready model doesn't look like a broken microphone.
 
 ## Design
 
@@ -126,7 +129,13 @@ etc.) for consistency. **Uses the module's plain event-emitter API
 (`ExpoSpeechRecognitionModule.addListener`), not the `useSpeechRecognitionEvent`
 hook** — the hook can only run during component render, and this service
 is invoked imperatively from event handlers, so the hook-based API is not
-usable here.
+usable here. `addListener(eventName, listener): { remove(): void }` is a
+real, callable method on `ExpoSpeechRecognitionModule` (confirmed via the
+package's source) — it's inherited from the underlying `NativeModule`/
+`EventEmitter` base class from `expo-modules-core` rather than declared in
+the package's own type file directly, so don't be alarmed if it isn't
+visible by grepping `expo-speech-recognition`'s own `.d.ts` — it resolves
+correctly via TypeScript's inherited-member resolution regardless.
 
 The module is a native singleton with one global recognition session and
 one global event stream — a second `start()` call while one is already
@@ -141,7 +150,7 @@ tracks this explicitly:
   `requestPermissionsAsync()`, returns whether now granted.
 - `ensureOfflineModelReady(locale: string): Promise<"ready" | "preparing">`
   — wraps `androidTriggerOfflineModelDownload({ locale })`; on Android,
-  maps `"download_success"` → `"ready"`, `"opened_dialog"`/`"download_scheduled"`
+  maps `"download_success"` → `"ready"`, `"opened_dialog"`/`"download_canceled"`
   → `"preparing"`. On iOS (no offline-model concept), always resolves
   `"ready"`.
 - `startListening(baseline: string, onResult: (fullText: string) => void, onEnd: () => void, onError: (message: string) => void): { busy: boolean }`
@@ -151,11 +160,17 @@ tracks this explicitly:
   calls `ExpoSpeechRecognitionModule.start({ continuous: true, interimResults: true, requiresOnDeviceRecognition: true })`,
   and registers `addListener("result", ...)` / `addListener("end", ...)` /
   `addListener("error", ...)` subscriptions (stored in
-  `activeSubscriptions`). Each `"result"` event's cumulative transcript is
-  combined as `baseline + " " + transcript` (trimmed) and passed to
-  `onResult`. `"end"`/`"error"` both call `stopListening()` internally
-  (clearing `activeMode` and removing subscriptions) before invoking the
-  caller's `onEnd`/`onError`. Returns `{ busy: false }`.
+  `activeSubscriptions`). Each `"result"` event resolves to
+  `{ isFinal: boolean; results: ExpoSpeechRecognitionResult[] }` (both
+  interim and final results fire the same event — distinguished only by
+  `isFinal`, not a separate event name); the top result's transcript
+  (`event.results[0]?.transcript ?? ""`) is combined as
+  `baseline + " " + transcript` (trimmed) and passed to `onResult`
+  regardless of `isFinal` (interim results still update the field live —
+  see "Append vs. replace" below for the UX rationale). `"end"`/`"error"`
+  both call `stopListening()` internally (clearing `activeMode` and
+  removing subscriptions) before invoking the caller's `onEnd`/`onError`.
+  Returns `{ busy: false }`.
 - `stopListening(): void` — calls `.stop()`, removes all
   `activeSubscriptions`, clears them, and sets `activeMode = null`.
   Safe to call even if not currently listening (no-op).
@@ -173,10 +188,12 @@ tracks this explicitly:
   `ExpoSpeechRecognitionModule.start({ audioSource: { uri: cachedUri }, requiresOnDeviceRecognition: true })`.
   Registers the same `addListener` subscriptions as `startListening`, but
   resolves the returned Promise on the first terminal event instead of
-  invoking ongoing callbacks: `"result"` with a final (non-interim) flag →
-  resolves `{ text: transcript }`; `"error"` → resolves `{ failed: true }`
-  (this function never rejects — every path is a resolved variant, so
-  callers don't need try/catch). Always calls `stopListening()`-equivalent
+  invoking ongoing callbacks: a `"result"` event with `isFinal: true` →
+  resolves `{ text: event.results[0]?.transcript ?? "" }`; `"error"` →
+  resolves `{ failed: true }` (this function never rejects — every path is
+  a resolved variant, so callers don't need try/catch). Interim
+  (`isFinal: false`) results are ignored for this one-shot path — only the
+  final result resolves the promise. Always calls `stopListening()`-equivalent
   cleanup (clear `activeMode`, remove subscriptions) before resolving,
   on every path.
 
