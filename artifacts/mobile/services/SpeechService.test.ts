@@ -13,8 +13,15 @@ import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 // so it wins.
 jest.mock("expo-file-system", () => jest.requireActual("../__mocks__/expo-file-system"));
 
+import {
+  constructedFiles,
+  resetConstructedFiles,
+  makeNextCopyThrow,
+} from "../__mocks__/expo-file-system";
+
 beforeEach(() => {
   jest.clearAllMocks();
+  resetConstructedFiles();
   jest.replaceProperty(Platform, "OS", "android");
 });
 
@@ -203,6 +210,9 @@ describe("transcribeAudioFile", () => {
         requiresOnDeviceRecognition: true,
       })
     );
+    // The source File instance is constructed first, then the cached destination File.
+    const [source, cached] = constructedFiles;
+    expect(source.copy).toHaveBeenCalledWith(cached);
   });
 
   it("resolves failed: true (never rejects) when an error event fires", async () => {
@@ -248,5 +258,25 @@ describe("transcribeAudioFile", () => {
 
     const second = await secondPromise;
     expect(second).not.toEqual({ busy: true });
+  });
+
+  it("resolves failed: true (never rejects) when copy() throws, and clears the active session", async () => {
+    // Simulate a source copy failure (e.g. revoked content:// read permission).
+    makeNextCopyThrow();
+
+    const result = await transcribeAudioFile("content://some/audio", "note.opus");
+
+    expect(result).toEqual({ failed: true });
+    expect(ExpoSpeechRecognitionModule.start).not.toHaveBeenCalled();
+
+    // activeMode must have been cleared by the failure, not left wedged: a fresh call
+    // should proceed normally (not report busy: true).
+    const second = transcribeAudioFile("content://some/audio", "note2.opus");
+    const errorListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls
+      .filter((call) => call[0] === "error")
+      .pop();
+    errorListenerCall[1]({ message: "fail" });
+    const secondResult = await second;
+    expect(secondResult).not.toEqual({ busy: true });
   });
 });

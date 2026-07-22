@@ -86,11 +86,19 @@ export function transcribeAudioFile(
   if (activeMode !== null) return Promise.resolve({ busy: true });
   activeMode = "file";
 
-  const source = new File(uri);
-  const cached = new File(Paths.cache, fileName);
-  source.copy(cached);
-
   return new Promise((resolve) => {
+    let cachedUri: string;
+    try {
+      const source = new File(uri);
+      const cached = new File(Paths.cache, fileName);
+      source.copy(cached);
+      cachedUri = cached.uri;
+    } catch {
+      clearActiveSession();
+      resolve({ failed: true });
+      return;
+    }
+
     const resultSub = ExpoSpeechRecognitionModule.addListener("result", (event: any) => {
       if (!event.isFinal) return;
       clearActiveSession();
@@ -103,7 +111,7 @@ export function transcribeAudioFile(
     activeSubscriptions = [resultSub, errorSub];
 
     ExpoSpeechRecognitionModule.start({
-      audioSource: { uri: cached.uri },
+      audioSource: { uri: cachedUri },
       requiresOnDeviceRecognition: true,
     } as any);
   });
