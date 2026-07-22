@@ -22,16 +22,20 @@ Structural clone of `app/(tabs)/settings.tsx`'s pattern (`useColors()`,
 `useSafeAreaInsets()`, same header treatment: `headerTitle` = "About").
 
 Content, centered in the body below the header:
-1. A placeholder circular icon badge (Feather `"info"`, matching the empty
-   state pattern already used in `app/(tabs)/index.tsx:95-103`) — not the
-   real app icon, since no final company logo exists yet.
+1. A placeholder circular icon badge (Feather `"compass"`, matching the
+   empty state pattern already used in `app/(tabs)/index.tsx:95-103`) — not
+   the real app icon, since no final company logo exists yet. (Distinct from
+   the tab-bar icon below, which uses `"info"`/`"info.circle"` — the two are
+   intentionally different glyphs for different UI locations.)
 2. **"CuriousMind Labs"** — heading, `Inter_700Bold`.
 3. **"Be Curious"** — tagline, muted-foreground, smaller text below the
    heading.
-4. **"Version X.Y.Z"** — read via `Constants.expoConfig?.version` from
-   `expo-constants` (already a project dependency), which reflects
-   `app.json`'s `expo.version` (currently `1.0.0`) — the user-facing version,
-   not `package.json`'s internal `0.0.0`.
+4. **"Version X.Y.Z"** — read via a direct `app.json` import (not
+   `expo-constants`'s `Constants.expoConfig?.version`, which resolves to
+   `undefined` under this project's Jest setup with no manifest available —
+   confirmed by direct experiment during planning). Reflects `app.json`'s
+   `expo.version` (currently `1.0.0`) — the user-facing version, not
+   `package.json`'s internal `0.0.0`.
 
 ### Tab registration: `app/(tabs)/_layout.tsx`
 
