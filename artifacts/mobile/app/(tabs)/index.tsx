@@ -25,13 +25,13 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const { upcoming, completed } = useMemo(() => {
-    const sorted = [...reminders].sort(
-      (a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime()
-    );
-    return {
-      upcoming: sorted.filter((r) => !r.completed),
-      completed: sorted.filter((r) => r.completed),
-    };
+    const upcoming = reminders
+      .filter((r) => !r.completed)
+      .sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
+    const completed = reminders
+      .filter((r) => r.completed)
+      .sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
+    return { upcoming, completed };
   }, [reminders]);
 
   const handleDelete = (id: string) => {

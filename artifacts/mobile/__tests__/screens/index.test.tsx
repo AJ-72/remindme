@@ -80,6 +80,26 @@ describe("HomeScreen", () => {
     expect(await findByText("Done")).toBeTruthy();
   });
 
+  it("sorts completed reminders newest-first, independent of upcoming's earliest-first order", async () => {
+    const OLDER = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const NEWER = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({ id: "r1", title: "Completed older", completed: true, datetime: OLDER }),
+        makeReminder({ id: "r2", title: "Completed newer", completed: true, datetime: NEWER }),
+      ])
+    );
+    const { findByText, UNSAFE_getAllByType } = renderScreen();
+    await findByText("Completed newer");
+
+    const Text = require("react-native").Text;
+    const titles = UNSAFE_getAllByType(Text)
+      .map((node: any) => node.props.children)
+      .filter((c: any) => c === "Completed older" || c === "Completed newer");
+    expect(titles).toEqual(["Completed newer", "Completed older"]);
+  });
+
   it("deleting a reminder removes it from the visible list", async () => {
     const alertSpy = jest
       .spyOn(Alert, "alert")
