@@ -112,7 +112,7 @@ interface Props {
 export default function QuickAddInput({ onSaved }: Props) {
   const colors = useColors();
   const { addReminder, defaultAlarmEnabled } = useReminders();
-  const { sharedText, clearSharedText } = useSharedText();
+  const { sharedText, clearSharedText, sharedAudioTranscribing } = useSharedText();
 
   const [input, setInput] = useState("");
   const [parsedTitle, setParsedTitle] = useState("");
@@ -131,6 +131,17 @@ export default function QuickAddInput({ onSaved }: Props) {
 
   const pillAnim = useRef(new Animated.Value(0)).current;
   const pillTranslate = useRef(new Animated.Value(-6)).current;
+
+  useEffect(() => {
+    if (sharedAudioTranscribing) {
+      setListening(true);
+      startMicPulse();
+      setMicNotice(null);
+    } else {
+      setListening(false);
+      stopMicPulse();
+    }
+  }, [sharedAudioTranscribing]);
 
   useEffect(() => {
     if (sharedText) {

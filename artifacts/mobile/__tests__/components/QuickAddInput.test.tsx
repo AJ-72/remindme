@@ -1,15 +1,31 @@
 import React from "react";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Feather } from "@expo/vector-icons";
 import QuickAddInput from "@/components/QuickAddInput";
 import { RemindersProvider } from "@/contexts/RemindersContext";
-import { SharedTextProvider } from "@/contexts/SharedTextContext";
+import { SharedTextProvider, useSharedText } from "@/contexts/SharedTextContext";
 import { STORAGE_KEY } from "@/services/ReminderService";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { Linking, Platform } from "react-native";
 import { stopListening } from "@/services/SpeechService";
 
 jest.mock("expo-haptics");
+
+// Mock the whole module for this file so individual tests can control
+// `sharedAudioTranscribing` directly, without plumbing a fake
+// `expo-share-intent` native event through `SharedTextProvider`. The real
+// `SharedTextProvider` is passed through unchanged (it's a harmless no-op
+// under jest, since `expo-share-intent` isn't installed there) — only
+// `useSharedText` is replaced, since that's the only surface QuickAddInput
+// actually consumes.
+jest.mock("@/contexts/SharedTextContext", () => {
+  const actual = jest.requireActual("@/contexts/SharedTextContext");
+  return {
+    ...actual,
+    useSharedText: jest.fn(),
+  };
+});
 
 function renderComponent() {
   return render(
@@ -24,6 +40,11 @@ function renderComponent() {
 beforeEach(async () => {
   jest.clearAllMocks();
   await (AsyncStorage as any).clear();
+  (useSharedText as jest.Mock).mockReturnValue({
+    sharedText: "",
+    clearSharedText: jest.fn(),
+    sharedAudioTranscribing: false,
+  });
 });
 
 describe("QuickAddInput", () => {
@@ -134,5 +155,39 @@ describe("QuickAddInput — mic button", () => {
 
     expect(await findByText(/Preparing voice recognition/i)).toBeTruthy();
     expect(ExpoSpeechRecognitionModule.start).not.toHaveBeenCalled();
+  });
+
+  it("shows the listening pulse animation while a shared audio file transcribes", async () => {
+    (useSharedText as jest.Mock).mockReturnValue({
+      sharedText: "",
+      clearSharedText: jest.fn(),
+      sharedAudioTranscribing: true,
+    });
+
+    const { UNSAFE_getAllByType } = renderComponent();
+
+    await waitFor(() => {
+      const micIcon = UNSAFE_getAllByType(Feather).find(
+        (node) => node.props.name === "mic"
+      );
+      expect(micIcon?.props.color).toBe("#6366f1");
+    });
+  });
+
+  it("stops the listening pulse animation once shared audio transcription finishes", async () => {
+    (useSharedText as jest.Mock).mockReturnValue({
+      sharedText: "",
+      clearSharedText: jest.fn(),
+      sharedAudioTranscribing: false,
+    });
+
+    const { UNSAFE_getAllByType } = renderComponent();
+
+    await waitFor(() => {
+      const micIcon = UNSAFE_getAllByType(Feather).find(
+        (node) => node.props.name === "mic"
+      );
+      expect(micIcon?.props.color).toBe("#7c7c9d");
+    });
   });
 });
