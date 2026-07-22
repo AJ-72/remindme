@@ -27,6 +27,8 @@
 
 ### Task 0: Real-device spike — WhatsApp Opus voice note on Android 13+
 
+**STATUS: deferred, human-only — not part of the subagent execution run.** This task needs a physical Android 13+ device and an EAS dev-client build; no subagent can perform it. It does not block Tasks 1-5 (the design already treats transcription failure as a first-class path), so subagent execution starts at Task 1. Run this task yourself whenever convenient — its only dependency (installing `expo-speech-recognition` and adding its config plugin) has been duplicated into Task 1's Step 1 so Task 1 doesn't wait on this one.
+
 **Purpose:** De-risk the single biggest unknown before writing any production code: does `expo-speech-recognition`'s Android file-transcription path actually decode a real WhatsApp voice note (Opus codec), or does it reliably fail and fall through to the filename fallback? This determines nothing about *how* later tasks are built (the design already treats failure as a first-class path), but the answer determines what to tell the user about the feature's real-world behavior once shipped.
 
 **Files:**
@@ -214,7 +216,7 @@ EOF
 - Test: `artifacts/mobile/services/SpeechService.test.ts`
 
 **Interfaces:**
-- Consumes: `expo-speech-recognition`'s `ExpoSpeechRecognitionModule` (installed in Task 0).
+- Consumes: `expo-speech-recognition`'s `ExpoSpeechRecognitionModule` (installed in Step 1 below).
 - Produces (for Task 2 and Task 3 to consume):
   - `getMicPermissionStatus(): Promise<{ granted: boolean; canAskAgain: boolean }>`
   - `requestMicPermission(): Promise<boolean>`
@@ -222,7 +224,43 @@ EOF
   - `startListening(baseline: string, onResult: (fullText: string) => void, onEnd: () => void, onError: (message: string) => void): { busy: boolean }`
   - `stopListening(): void`
 
-- [ ] **Step 1: Write the mock module**
+**Note:** this plan's original Task 0 (a real-device spike forwarding a WhatsApp voice note, to de-risk whether Android's file-transcription path can decode Opus audio) has been deferred — it needs a physical Android 13+ device and an EAS dev-client build, which no subagent can perform. It does not block this task or any other: the design already treats transcription failure as a first-class path (the filename fallback), so nothing here changes based on the spike's eventual result. Step 1 below folds in the parts of Task 0 this task actually depends on (the package install and config plugin entry) so this task remains self-contained.
+
+- [ ] **Step 1: Install `expo-speech-recognition` and add its config plugin**
+
+```bash
+cd artifacts/mobile
+export PATH="/private/tmp/pnpm-shim:$PATH"
+pnpm add expo-speech-recognition@sdk-54
+```
+
+Expected: `package.json` gains `"expo-speech-recognition"` pinned to the `sdk-54` dist-tag (resolves to v3.1.3) — **never** install the unqualified `latest` tag (it targets SDK 56 and raises iOS's native floor to 16.4). If this fails with an `ERR_PNPM_MINIMUM_RELEASE_AGE`-style error, the published version is too new for the `minimumReleaseAge: 1440` gate in the root `pnpm-workspace.yaml` — report this rather than editing `pnpm-workspace.yaml`'s `minimumReleaseAgeExclude` without explicit approval.
+
+Then edit `artifacts/mobile/app.json`'s `expo.plugins` array, appending:
+
+```json
+    [
+      "expo-speech-recognition",
+      {
+        "microphonePermission": "Allow Reminders to use the microphone to add reminders by voice.",
+        "speechRecognitionPermission": "Allow Reminders to transcribe speech into reminder text."
+      }
+    ]
+```
+
+Commit this setup on its own before continuing:
+
+```bash
+git add artifacts/mobile/package.json artifacts/mobile/pnpm-lock.yaml "artifacts/mobile/app.json"
+git commit -m "$(cat <<'EOF'
+chore(mobile): add expo-speech-recognition dependency and config plugin
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+- [ ] **Step 2: Write the mock module**
 
 Create `artifacts/mobile/__mocks__/expo-speech-recognition.ts`:
 
@@ -248,7 +286,7 @@ export const ExpoSpeechRecognitionModule = {
 };
 ```
 
-- [ ] **Step 2: Write failing tests for permissions and offline model**
+- [ ] **Step 3: Write failing tests for permissions and offline model**
 
 Create `artifacts/mobile/services/SpeechService.test.ts`:
 
@@ -337,7 +375,7 @@ describe("ensureOfflineModelReady", () => {
 });
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [ ] **Step 4: Run tests to verify they fail**
 
 ```bash
 cd artifacts/mobile
@@ -347,7 +385,7 @@ pnpm test -- SpeechService.test
 
 Expected: FAIL — `Cannot find module '@/services/SpeechService'` (file doesn't exist yet).
 
-- [ ] **Step 4: Write the permissions/offline-model implementation**
+- [ ] **Step 5: Write the permissions/offline-model implementation**
 
 Create `artifacts/mobile/services/SpeechService.ts`:
 
@@ -379,7 +417,7 @@ export async function ensureOfflineModelReady(
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 6: Run tests to verify they pass**
 
 ```bash
 cd artifacts/mobile
@@ -389,7 +427,7 @@ pnpm test -- SpeechService.test
 
 Expected: PASS — 6 tests passed.
 
-- [ ] **Step 6: Write failing tests for `startListening`/`stopListening`, including the concurrency guard**
+- [ ] **Step 7: Write failing tests for `startListening`/`stopListening`, including the concurrency guard**
 
 Append to `artifacts/mobile/services/SpeechService.test.ts`:
 
@@ -469,7 +507,7 @@ describe("stopListening", () => {
 });
 ```
 
-- [ ] **Step 7: Run tests to verify they fail**
+- [ ] **Step 8: Run tests to verify they fail**
 
 ```bash
 cd artifacts/mobile
@@ -479,7 +517,7 @@ pnpm test -- SpeechService.test
 
 Expected: FAIL — `startListening`/`stopListening` are not exported yet.
 
-- [ ] **Step 8: Implement `startListening` and `stopListening`**
+- [ ] **Step 9: Implement `startListening` and `stopListening`**
 
 Append to `artifacts/mobile/services/SpeechService.ts` (the module-level state and helper go above the two functions, at file scope alongside the existing top-level declarations — not nested inside another function):
 
@@ -533,7 +571,7 @@ export function stopListening(): void {
 }
 ```
 
-- [ ] **Step 9: Run tests to verify they pass**
+- [ ] **Step 10: Run tests to verify they pass**
 
 ```bash
 cd artifacts/mobile
@@ -543,7 +581,7 @@ pnpm test -- SpeechService.test
 
 Expected: PASS — 12 tests passed (6 from Step 2 + 6 from Step 6).
 
-- [ ] **Step 10: Run the full suite and typecheck**
+- [ ] **Step 11: Run the full suite and typecheck**
 
 ```bash
 cd artifacts/mobile
@@ -554,7 +592,7 @@ pnpm run typecheck
 
 Expected: all suites pass, typecheck produces no output (zero errors).
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add artifacts/mobile/services/SpeechService.ts artifacts/mobile/services/SpeechService.test.ts artifacts/mobile/__mocks__/expo-speech-recognition.ts
@@ -1463,4 +1501,5 @@ EOF
 - **Spec coverage:** every design-spec item maps to a task — real-device spike (Task 0), permissions + offline model + live mic (Task 1), file transcription + content-URI copy (Task 2), mic button UI + append-baseline + busy/error notices (Task 3), share-intent audio detection + fallback + async reset-sequencing (Task 4), the `sharedAudioTranscribing` cross-context wiring (Task 5), `app.json` changes (split across Task 0's plugin entry and Task 4's intent filter). No spec section is unaddressed.
 - **Placeholder scan:** Task 5 Step 2 contains a deliberately-flagged incomplete test sketch with explicit guidance for the implementer to complete it correctly rather than a silent gap — this is intentional, since fully mocking `expo-share-intent`'s native event flow inside this plan's text would either be wrong (guessing at a mock shape not verified against the real package) or disproportionately long; the guidance directs the implementer to the simpler, correct approach (mocking the context module directly) instead of leaving true ambiguity.
 - **Type consistency:** `getMicPermissionStatus`/`requestMicPermission`/`ensureOfflineModelReady`/`startListening`/`stopListening` (Task 1) and `isFileTranscriptionSupported`/`transcribeAudioFile` (Task 2) are used with identical signatures in Task 3 and Task 4 — verified by re-reading each call site against the Task 1/2 Interfaces blocks while writing this plan. `ShareIntentFile`'s shape (`fileName`, `mimeType`, `path`) matches what Task 4's detection logic (`f.mimeType.startsWith("audio/")`) and Task 2's `transcribeAudioFile(uri, fileName)` signature both expect.
-- **TDD-order correction made during self-review:** an earlier draft of Task 1 wrote `startListening`/`stopListening`'s implementation in the same step as the permission functions (Step 4), before their own tests existed (Step 6) — a direct violation of "write the failing test first." Restructured into Step 4 (permissions/model implementation only, matching Step 2's tests), Step 6 (write the concurrency-guard tests), Step 7 (confirm they fail because the functions don't exist), Step 8 (implement `startListening`/`stopListening`), Step 9 (confirm they now pass) — verified sequential and non-overlapping via a scripted line-by-line check of every `Step N:` marker against its task's expected count.
+- **TDD-order correction made during self-review:** an earlier draft of Task 1 wrote `startListening`/`stopListening`'s implementation in the same step as the permission functions, before their own tests existed — a direct violation of "write the failing test first." Restructured so the implementation step always follows its own failing-test step, verified sequential and non-overlapping via a scripted line-by-line check of every `Step N:` marker against its task's expected count.
+- **Task 0 deferred to human execution:** the real-device spike (Task 0) requires a physical Android 13+ device and an EAS dev-client build, which subagent execution cannot perform. Task 1's Step 1 duplicates Task 0's package-install/config-plugin step so Task 1 is fully self-contained and subagent execution can start there without waiting on the human-only spike — re-verified after this change that Task 1's own step numbering and "Interfaces: Consumes" line were both updated to no longer reference "installed in Task 0."
