@@ -111,6 +111,8 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [parsedDate, setParsedDate] = useState<Date | null>(null);
   const [alarm, setAlarm] = useState(defaultAlarmEnabled);
   const [saving, setSaving] = useState(false);
+  const [notesVisible, setNotesVisible] = useState(false);
+  const [description, setDescription] = useState("");
 
   const [showNoTimeSheet, setShowNoTimeSheet] = useState(false);
   const [suggestedTime, setSuggestedTime] = useState<Date>(roundToNextHour(new Date()));
@@ -151,7 +153,7 @@ export default function QuickAddInput({ onSaved }: Props) {
     try {
       await addReminder({
         title: title.trim(),
-        description: "",
+        description: description.trim(),
         datetime: dateToUse.toISOString(),
         alarm,
       });
@@ -159,6 +161,8 @@ export default function QuickAddInput({ onSaved }: Props) {
       setParsedTitle("");
       setParsedDate(null);
       setAlarm(true);
+      setDescription("");
+      setNotesVisible(false);
       onSaved?.();
     } catch {
       // silent — the list will just not update
@@ -270,6 +274,21 @@ export default function QuickAddInput({ onSaved }: Props) {
       fontFamily: "Inter_400Regular",
       color: colors.foreground,
       paddingVertical: 0,
+      ...(Platform.OS === "web" ? { outlineStyle: "none" } as any : {}),
+    },
+    notesInput: {
+      marginTop: 8,
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      fontSize: 14,
+      fontFamily: "Inter_400Regular",
+      color: colors.foreground,
+      minHeight: 60,
+      textAlignVertical: "top",
       ...(Platform.OS === "web" ? { outlineStyle: "none" } as any : {}),
     },
     alarmBtn: {
@@ -410,7 +429,20 @@ export default function QuickAddInput({ onSaved }: Props) {
           blurOnSubmit={false}
           maxLength={300}
           editable={!saving}
+          testID="quick-add-input"
         />
+        <Pressable
+          style={styles.alarmBtn}
+          onPress={() => setNotesVisible((v) => !v)}
+          hitSlop={8}
+          testID="quick-add-notes-toggle"
+        >
+          <Feather
+            name="file-text"
+            size={16}
+            color={notesVisible || description ? colors.primary : colors.mutedForeground}
+          />
+        </Pressable>
         <Pressable
           style={styles.alarmBtn}
           onPress={() => {
@@ -430,10 +462,25 @@ export default function QuickAddInput({ onSaved }: Props) {
           onPress={handleSave}
           disabled={!canSave}
           hitSlop={4}
+          testID="quick-add-save"
         >
           <Feather name="check" size={16} color={canSave ? colors.primaryForeground : colors.mutedForeground} />
         </Pressable>
       </View>
+
+      {notesVisible && (
+        <TextInput
+          style={styles.notesInput}
+          placeholder="Add a note…"
+          placeholderTextColor={colors.mutedForeground}
+          value={description}
+          onChangeText={setDescription}
+          multiline
+          maxLength={1000}
+          editable={!saving}
+          testID="quick-add-notes-input"
+        />
+      )}
 
       <Animated.View
         style={[

@@ -76,36 +76,46 @@ type PickerMode = "date" | "time" | null;
 export default function AddReminderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { reminders, addReminder, editReminder, defaultAlarmEnabled } = useReminders();
+  const { reminders, loading, addReminder, editReminder, defaultAlarmEnabled } =
+    useReminders();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const isEditing = !!id;
 
   const existing = isEditing ? reminders.find((r) => r.id === id) : null;
 
-  // Natural language input
-  const [input, setInput] = useState(
-    existing
-      ? `${existing.title}${existing.description ? " — " + existing.description : ""}`
-      : ""
-  );
+  // Natural language input (add mode only)
+  const [input, setInput] = useState("");
+
+  // Title/description directly edited (edit mode only)
+  const [editTitle, setEditTitle] = useState("");
+  const [description, setDescription] = useState("");
 
   // Parsed/overridden values
   const defaultDate = roundToNext5(new Date());
-  const [parsedTitle, setParsedTitle] = useState(existing?.title ?? "");
-  const [parsedDate, setParsedDate] = useState<Date>(
-    existing ? new Date(existing.datetime) : defaultDate
-  );
+  const [parsedTitle, setParsedTitle] = useState("");
+  const [parsedDate, setParsedDate] = useState<Date>(defaultDate);
   const [dateWasParsed, setDateWasParsed] = useState(false);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
-  const [alarm, setAlarm] = useState<boolean>(
-    existing ? existing.alarm !== false : defaultAlarmEnabled
-  );
+  const [alarm, setAlarm] = useState<boolean>(defaultAlarmEnabled);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const seededFromExisting = useRef(false);
 
   useEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 300);
   }, []);
+
+  // Reminders load asynchronously, so `existing` isn't available on the
+  // first render in edit mode — seed the editable fields once it arrives.
+  useEffect(() => {
+    if (!isEditing || !existing || seededFromExisting.current) return;
+    seededFromExisting.current = true;
+    setEditTitle(existing.title);
+    setDescription(existing.description ?? "");
+    setParsedTitle(existing.title);
+    setParsedDate(new Date(existing.datetime));
+    setAlarm(existing.alarm !== false);
+  }, [isEditing, existing]);
 
   // Re-parse whenever input changes (not in edit mode — just use existing values)
   useEffect(() => {
@@ -136,7 +146,7 @@ export default function AddReminderScreen() {
   };
 
   const handleSave = async () => {
-    const title = isEditing ? parsedTitle : parsedTitle || input.trim();
+    const title = isEditing ? editTitle : parsedTitle || input.trim();
     if (!title.trim()) {
       Alert.alert("Title required", 'Describe your reminder, e.g. "Call dentist tomorrow at 3pm".');
       return;
@@ -145,7 +155,7 @@ export default function AddReminderScreen() {
     try {
       const payload = {
         title: title.trim(),
-        description: "",
+        description: description.trim(),
         datetime: parsedDate.toISOString(),
         alarm,
       };
@@ -174,7 +184,7 @@ export default function AddReminderScreen() {
     minute: "2-digit",
   });
 
-  const canSave = !saving && !!(isEditing ? parsedTitle : parsedTitle || input.trim());
+  const canSave = !saving && !!(isEditing ? editTitle.trim() : parsedTitle || input.trim());
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -392,7 +402,12 @@ export default function AddReminderScreen() {
         <Text style={styles.headerTitle}>
           {isEditing ? "Edit Reminder" : "New Reminder"}
         </Text>
-        <Pressable style={styles.saveBtn} onPress={handleSave} disabled={!canSave}>
+        <Pressable
+          style={styles.saveBtn}
+          onPress={handleSave}
+          disabled={!canSave}
+          testID="save-button"
+        >
           <Text style={styles.saveBtnText}>{saving ? "Saving…" : "Save"}</Text>
         </Pressable>
       </View>
@@ -408,35 +423,70 @@ export default function AddReminderScreen() {
           keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
         >
-          {/* Natural language input */}
+          {isEditing ? (
+            <View style={styles.inputCard}>
+              <Text style={styles.inputHint}>Title</Text>
+              <TextInput
+                ref={inputRef}
+                style={styles.input}
+                placeholder="Reminder title"
+                placeholderTextColor={colors.mutedForeground}
+                value={editTitle}
+                onChangeText={setEditTitle}
+                maxLength={300}
+                returnKeyType="done"
+                testID="edit-title-input"
+              />
+            </View>
+          ) : (
+            /* Natural language input */
+            <View style={styles.inputCard}>
+              <Text style={styles.inputHint}>Describe your reminder in plain English</Text>
+              <TextInput
+                ref={inputRef}
+                style={styles.input}
+                placeholder={`e.g. "Call dentist tomorrow at 3pm"`}
+                placeholderTextColor={colors.mutedForeground}
+                value={input}
+                onChangeText={setInput}
+                multiline
+                maxLength={300}
+                returnKeyType="done"
+                blurOnSubmit
+                testID="input-textbox"
+              />
+              {/* Example chips — only when input is empty */}
+              {!input && (
+                <View style={styles.examplesWrap}>
+                  {EXAMPLES.map((ex) => (
+                    <Pressable
+                      key={ex}
+                      style={styles.exampleChip}
+                      onPress={() => setInput(ex)}
+                    >
+                      <Text style={styles.exampleChipText}>{ex}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Description */}
           <View style={styles.inputCard}>
-            <Text style={styles.inputHint}>Describe your reminder in plain English</Text>
+            <Text style={styles.inputHint}>Description (optional)</Text>
             <TextInput
-              ref={inputRef}
               style={styles.input}
-              placeholder={`e.g. "Call dentist tomorrow at 3pm"`}
+              placeholder="Add extra details…"
               placeholderTextColor={colors.mutedForeground}
-              value={input}
-              onChangeText={setInput}
+              value={description}
+              onChangeText={setDescription}
               multiline
-              maxLength={300}
+              maxLength={1000}
               returnKeyType="done"
               blurOnSubmit
+              testID="description-input"
             />
-            {/* Example chips — only when input is empty */}
-            {!input && (
-              <View style={styles.examplesWrap}>
-                {EXAMPLES.map((ex) => (
-                  <Pressable
-                    key={ex}
-                    style={styles.exampleChip}
-                    onPress={() => setInput(ex)}
-                  >
-                    <Text style={styles.exampleChipText}>{ex}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
           </View>
 
           {/* Parsed preview */}
@@ -444,13 +494,15 @@ export default function AddReminderScreen() {
             <Text style={styles.sectionLabel}>Parsed as</Text>
             <View style={styles.previewCard}>
               {/* Title row */}
-              <View style={styles.previewRow}>
-                <Feather name="type" size={16} color={colors.mutedForeground} />
-                <Text style={styles.previewLabel}>Title</Text>
-                <Text style={styles.previewValue} numberOfLines={2}>
-                  {parsedTitle || (input.trim() ? input.trim() : "—")}
-                </Text>
-              </View>
+              {!isEditing && (
+                <View style={styles.previewRow}>
+                  <Feather name="type" size={16} color={colors.mutedForeground} />
+                  <Text style={styles.previewLabel}>Title</Text>
+                  <Text style={styles.previewValue} numberOfLines={2}>
+                    {parsedTitle || (input.trim() ? input.trim() : "—")}
+                  </Text>
+                </View>
+              )}
 
               {/* Date row */}
               <Pressable
