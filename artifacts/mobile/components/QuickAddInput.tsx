@@ -112,7 +112,8 @@ interface Props {
 export default function QuickAddInput({ onSaved }: Props) {
   const colors = useColors();
   const { addReminder, defaultAlarmEnabled } = useReminders();
-  const { sharedText, clearSharedText, sharedAudioTranscribing } = useSharedText();
+  const { sharedText, clearSharedText, sharedAudioTranscribing, sharedAudioNotice } =
+    useSharedText();
 
   const [input, setInput] = useState("");
   const [parsedTitle, setParsedTitle] = useState("");
@@ -124,6 +125,7 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [listening, setListening] = useState(false);
   const [micNotice, setMicNotice] = useState<string | null>(null);
   const micPulse = useRef(new Animated.Value(1)).current;
+  const micSourceRef = useRef<"live" | "shared" | null>(null);
 
   const [showNoTimeSheet, setShowNoTimeSheet] = useState(false);
   const [suggestedTime, setSuggestedTime] = useState<Date>(roundToNextHour(new Date()));
@@ -134,14 +136,27 @@ export default function QuickAddInput({ onSaved }: Props) {
 
   useEffect(() => {
     if (sharedAudioTranscribing) {
+      if (micSourceRef.current === "live") {
+        // A live mic session already owns listening/pulse state — don't let
+        // this (typically near-instantly-busy) shared-audio attempt touch it.
+        return;
+      }
+      micSourceRef.current = "shared";
       setListening(true);
       startMicPulse();
       setMicNotice(null);
-    } else {
+    } else if (micSourceRef.current === "shared") {
+      micSourceRef.current = null;
       setListening(false);
       stopMicPulse();
     }
   }, [sharedAudioTranscribing]);
+
+  useEffect(() => {
+    if (sharedAudioNotice) {
+      setMicNotice(sharedAudioNotice);
+    }
+  }, [sharedAudioNotice]);
 
   useEffect(() => {
     if (sharedText) {
@@ -264,7 +279,15 @@ export default function QuickAddInput({ onSaved }: Props) {
 
   const handleMicPress = async () => {
     if (listening) {
+      if (micSourceRef.current === "shared") {
+        // A shared audio file is transcribing right now — stopping here would
+        // kill its native listeners and permanently wedge the concurrency
+        // guard (see Finding 2b). Surface a notice instead of stopping it.
+        setMicNotice("Still transcribing the shared audio…");
+        return;
+      }
       stopListening();
+      micSourceRef.current = null;
       setListening(false);
       stopMicPulse();
       return;
@@ -291,10 +314,12 @@ export default function QuickAddInput({ onSaved }: Props) {
       input,
       (fullText) => setInput(fullText),
       () => {
+        micSourceRef.current = null;
         setListening(false);
         stopMicPulse();
       },
       () => {
+        micSourceRef.current = null;
         setListening(false);
         stopMicPulse();
         setMicNotice("Couldn't hear that — try again or type it in.");
@@ -304,6 +329,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       setMicNotice("Still transcribing the shared audio…");
       return;
     }
+    micSourceRef.current = "live";
     setListening(true);
     startMicPulse();
   };

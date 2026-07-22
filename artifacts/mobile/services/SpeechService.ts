@@ -108,7 +108,16 @@ export function transcribeAudioFile(
       clearActiveSession();
       resolve({ failed: true });
     });
-    activeSubscriptions = [resultSub, errorSub];
+    const endSub = ExpoSpeechRecognitionModule.addListener("end", () => {
+      // Some inputs (e.g. an undecodable file) can end the recognition session
+      // without ever emitting a final result or an error — without this, the
+      // promise would never resolve and activeMode would stay "file" forever,
+      // wedging both this function and startListening for the rest of the
+      // app's life.
+      clearActiveSession();
+      resolve({ failed: true });
+    });
+    activeSubscriptions = [resultSub, errorSub, endSub];
 
     ExpoSpeechRecognitionModule.start({
       audioSource: { uri: cachedUri },

@@ -8,7 +8,7 @@ import { SharedTextProvider, useSharedText } from "@/contexts/SharedTextContext"
 import { STORAGE_KEY } from "@/services/ReminderService";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { Linking, Platform } from "react-native";
-import { stopListening } from "@/services/SpeechService";
+import * as SpeechService from "@/services/SpeechService";
 
 jest.mock("expo-haptics");
 
@@ -44,6 +44,7 @@ beforeEach(async () => {
     sharedText: "",
     clearSharedText: jest.fn(),
     sharedAudioTranscribing: false,
+    sharedAudioNotice: null,
   });
 });
 
@@ -79,7 +80,7 @@ describe("QuickAddInput — mic button", () => {
     // state; some tests below (deliberately) start listening and never end
     // the session via a UI action, which would otherwise leak into the next
     // test as a stale "busy" session. Reset it here for isolation.
-    stopListening();
+    SpeechService.stopListening();
     // ensureOfflineModelReady() short-circuits to "ready" on any non-Android
     // platform (jest-expo's default Platform.OS is "ios"), so it would never
     // consult the mocked androidTriggerOfflineModelDownload response below.
@@ -162,6 +163,7 @@ describe("QuickAddInput — mic button", () => {
       sharedText: "",
       clearSharedText: jest.fn(),
       sharedAudioTranscribing: true,
+      sharedAudioNotice: null,
     });
 
     const { UNSAFE_getAllByType } = renderComponent();
@@ -179,6 +181,7 @@ describe("QuickAddInput — mic button", () => {
       sharedText: "",
       clearSharedText: jest.fn(),
       sharedAudioTranscribing: false,
+      sharedAudioNotice: null,
     });
 
     const { UNSAFE_getAllByType } = renderComponent();
@@ -189,5 +192,80 @@ describe("QuickAddInput — mic button", () => {
       );
       expect(micIcon?.props.color).toBe("#7c7c9d");
     });
+  });
+
+  it("does not stop a shared-audio transcription session when the mic button is pressed (Finding 2b), and shows a busy notice instead", async () => {
+    const stopListeningSpy = jest.spyOn(SpeechService, "stopListening");
+    (useSharedText as jest.Mock).mockReturnValue({
+      sharedText: "",
+      clearSharedText: jest.fn(),
+      sharedAudioTranscribing: true,
+      sharedAudioNotice: null,
+    });
+
+    const { findByTestId, findByText } = renderComponent();
+    const micButton = await findByTestId("quick-add-mic");
+
+    fireEvent.press(micButton);
+
+    expect(await findByText(/Still transcribing the shared audio/i)).toBeTruthy();
+    expect(stopListeningSpy).not.toHaveBeenCalled();
+    stopListeningSpy.mockRestore();
+  });
+
+  it("does not clobber an in-progress live mic session when a shared-audio transcription starts and finishes (Finding 2a's QuickAddInput-observable half)", async () => {
+    const stopListeningSpy = jest.spyOn(SpeechService, "stopListening");
+    const { findByTestId, rerender, UNSAFE_getAllByType } = renderComponent();
+    const micButton = await findByTestId("quick-add-mic");
+
+    // Start a real live mic session first (permission granted, model ready
+    // per the outer beforeEach).
+    fireEvent.press(micButton);
+    await waitFor(() => expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalled());
+
+    const getMicColor = () =>
+      UNSAFE_getAllByType(Feather).find((node) => node.props.name === "mic")?.props.color;
+
+    await waitFor(() => expect(getMicColor()).toBe("#6366f1"));
+
+    // Now simulate a shared audio file starting to transcribe while the
+    // live session is still active — this must NOT touch the live
+    // session's listening/pulse state.
+    (useSharedText as jest.Mock).mockReturnValue({
+      sharedText: "",
+      clearSharedText: jest.fn(),
+      sharedAudioTranscribing: true,
+      sharedAudioNotice: null,
+    });
+    rerender(
+      <SharedTextProvider>
+        <RemindersProvider>
+          <QuickAddInput />
+        </RemindersProvider>
+      </SharedTextProvider>
+    );
+
+    expect(getMicColor()).toBe("#6366f1");
+    expect(stopListeningSpy).not.toHaveBeenCalled();
+
+    // ...and back to false again.
+    (useSharedText as jest.Mock).mockReturnValue({
+      sharedText: "",
+      clearSharedText: jest.fn(),
+      sharedAudioTranscribing: false,
+      sharedAudioNotice: null,
+    });
+    rerender(
+      <SharedTextProvider>
+        <RemindersProvider>
+          <QuickAddInput />
+        </RemindersProvider>
+      </SharedTextProvider>
+    );
+
+    // The live session survived the blip untouched: still active, never stopped.
+    expect(getMicColor()).toBe("#6366f1");
+    expect(stopListeningSpy).not.toHaveBeenCalled();
+    stopListeningSpy.mockRestore();
   });
 });

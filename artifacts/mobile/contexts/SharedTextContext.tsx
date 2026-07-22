@@ -16,12 +16,14 @@ interface SharedTextContextType {
   sharedText: string;
   clearSharedText: () => void;
   sharedAudioTranscribing: boolean;
+  sharedAudioNotice: string | null;
 }
 
 const SharedTextContext = createContext<SharedTextContextType>({
   sharedText: "",
   clearSharedText: () => {},
   sharedAudioTranscribing: false,
+  sharedAudioNotice: null,
 });
 
 interface ShareIntentFile {
@@ -48,12 +50,17 @@ try {
   ShareIntent = null;
 }
 
+const AUDIO_TRANSCRIPTION_FALLBACK_NOTICE =
+  "Couldn't transcribe this audio — added the file name instead.";
+
 function NativeShareIntentCapture({
   onText,
   onTranscribingChange,
+  onNotice,
 }: {
   onText: (text: string) => void;
   onTranscribingChange: (transcribing: boolean) => void;
+  onNotice: (notice: string | null) => void;
 }) {
   const { shareIntent, resetShareIntent } = ShareIntent!.useShareIntent();
   const handledRef = useRef(false);
@@ -66,8 +73,10 @@ function NativeShareIntentCapture({
       handledRef.current = true;
       onTranscribingChange(true);
       (async () => {
+        onNotice(null);
         if (!isFileTranscriptionSupported()) {
           onText(audioFile.fileName);
+          onNotice(AUDIO_TRANSCRIPTION_FALLBACK_NOTICE);
           onTranscribingChange(false);
           resetShareIntent();
           return;
@@ -75,9 +84,15 @@ function NativeShareIntentCapture({
         const result = await transcribeAudioFile(audioFile.path, audioFile.fileName);
         if ("text" in result) {
           onText(result.text);
-        } else {
+        } else if ("failed" in result) {
           onText(audioFile.fileName);
+          onNotice(AUDIO_TRANSCRIPTION_FALLBACK_NOTICE);
         }
+        // else: { busy: true } — a live mic session currently owns the input
+        // field. Deliberately call neither onText nor onNotice here: touching
+        // either would clobber in-progress speech the user is dictating right
+        // now (Finding 2a). onTranscribingChange(false) and resetShareIntent()
+        // below still run unconditionally, so the share intent doesn't wedge.
         onTranscribingChange(false);
         resetShareIntent();
       })();
@@ -104,6 +119,7 @@ export function SharedTextProvider({
 }) {
   const [sharedText, setSharedText] = useState("");
   const [sharedAudioTranscribing, setSharedAudioTranscribing] = useState(false);
+  const [sharedAudioNotice, setSharedAudioNotice] = useState<string | null>(null);
 
   const clearSharedText = useCallback(() => setSharedText(""), []);
   const handleText = useCallback((text: string) => setSharedText(text), []);
@@ -111,15 +127,20 @@ export function SharedTextProvider({
     (transcribing: boolean) => setSharedAudioTranscribing(transcribing),
     []
   );
+  const handleNotice = useCallback(
+    (notice: string | null) => setSharedAudioNotice(notice),
+    []
+  );
 
   return (
     <SharedTextContext.Provider
-      value={{ sharedText, clearSharedText, sharedAudioTranscribing }}
+      value={{ sharedText, clearSharedText, sharedAudioTranscribing, sharedAudioNotice }}
     >
       {Platform.OS !== "web" && ShareIntent?.useShareIntent ? (
         <NativeShareIntentCapture
           onText={handleText}
           onTranscribingChange={handleTranscribingChange}
+          onNotice={handleNotice}
         />
       ) : null}
       {children}

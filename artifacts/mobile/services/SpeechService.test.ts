@@ -279,4 +279,26 @@ describe("transcribeAudioFile", () => {
     const secondResult = await second;
     expect(secondResult).not.toEqual({ busy: true });
   });
+
+  it("resolves failed: true when the end event fires without a prior result or error, and clears the active session", async () => {
+    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus");
+
+    const endListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (call) => call[0] === "end"
+    );
+    endListenerCall[1]();
+
+    const result = await resultPromise;
+    expect(result).toEqual({ failed: true });
+
+    // activeMode must have been cleared by the bare "end" event, not left wedged:
+    // a fresh call should proceed normally (not report busy: true).
+    const secondPromise = transcribeAudioFile("content://some/audio", "note2.opus");
+    const secondErrorListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls
+      .filter((call) => call[0] === "error")
+      .pop();
+    secondErrorListenerCall[1]({ message: "fail" });
+    const secondResult = await secondPromise;
+    expect(secondResult).not.toEqual({ busy: true });
+  });
 });
