@@ -166,15 +166,30 @@ async function setupSnoozeCategory(): Promise<void> {
   } catch {}
 }
 
+// Concurrent callers (e.g. first-launch onboarding racing a reminder save)
+// must share one native permission request. Firing a second
+// requestPermissionsAsync() while the first is still awaiting the user's
+// response can resolve early with a stale status, causing the caller to
+// treat permission as denied and silently skip scheduling.
+let permissionRequestInFlight: Promise<boolean> | null = null;
+
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (Platform.OS === "web" || !Notifications) return false;
+  if (permissionRequestInFlight) return permissionRequestInFlight;
+  permissionRequestInFlight = (async () => {
+    try {
+      await setupNotificationChannel();
+      await setupSnoozeCategory();
+      const { status } = await Notifications.requestPermissionsAsync();
+      return status === "granted";
+    } catch {
+      return false;
+    }
+  })();
   try {
-    await setupNotificationChannel();
-    await setupSnoozeCategory();
-    const { status } = await Notifications.requestPermissionsAsync();
-    return status === "granted";
-  } catch {
-    return false;
+    return await permissionRequestInFlight;
+  } finally {
+    permissionRequestInFlight = null;
   }
 }
 

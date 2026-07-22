@@ -455,6 +455,25 @@ describe("permission onboarding", () => {
     expect(result).toBe(false);
   });
 
+  it("requestNotificationPermissions shares a single native call across concurrent callers", async () => {
+    let resolvePermission: (value: { status: string }) => void = () => {};
+    (requestPermissionsAsync as jest.Mock).mockImplementationOnce(
+      () => new Promise((resolve) => (resolvePermission = resolve))
+    );
+
+    const first = requestNotificationPermissions();
+    const second = requestNotificationPermissions();
+    while ((requestPermissionsAsync as jest.Mock).mock.calls.length < 1) {
+      await Promise.resolve();
+    }
+    resolvePermission({ status: "granted" });
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult).toBe(true);
+    expect(secondResult).toBe(true);
+    expect(requestPermissionsAsync).toHaveBeenCalledTimes(1);
+  });
+
   it("registers both Snooze and Mark Done tray actions, with Mark Done set to not foreground the app", async () => {
     await requestNotificationPermissions();
     expect(setNotificationCategoryAsync).toHaveBeenCalledWith(
