@@ -72,6 +72,7 @@
     "chrono-node": "^2.9.1",
     "expo-background-fetch": "~14.0.9",
     "expo-file-system": "~19.0.23",
+    "expo-localization": "~17.0.9",
     "expo-notifications": "~0.32.7",
     "expo-share-intent": "~5.1.1",
     "expo-speech-recognition": "^3.1.3",

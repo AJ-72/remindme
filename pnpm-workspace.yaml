@@ -160,3 +160,6 @@ overrides:
   esbuild: "0.27.3"
   # Force vulnerable uuid transitive deps to a patched version (GHSA-w5hq-g745-h8pq)
   uuid: "^9.0.0"
+
+allowBuilds:
+  esbuild: true

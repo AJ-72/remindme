@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import * as chrono from "chrono-node";
+import { getLocales } from "expo-localization";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
@@ -103,6 +104,10 @@ function formatSuggestedTime(d: Date): string {
   const datePart = formatDatePill(d);
   const timePart = formatTimePill(d);
   return `${datePart} at ${timePart}`;
+}
+
+function getDeviceSpeechLocale(): string {
+  return getLocales()[0]?.languageTag ?? "en-US";
 }
 
 interface Props {
@@ -304,7 +309,8 @@ export default function QuickAddInput({ onSaved }: Props) {
       if (!nowGranted) return;
     }
 
-    const modelStatus = await ensureOfflineModelReady("en-US");
+    const locale = getDeviceSpeechLocale();
+    const modelStatus = await ensureOfflineModelReady(locale);
     if (modelStatus === "preparing") {
       setMicNotice("Preparing voice recognition — try again in a moment");
       return;
@@ -312,6 +318,7 @@ export default function QuickAddInput({ onSaved }: Props) {
 
     const { busy } = startListening(
       input,
+      locale,
       (fullText) => setInput(fullText),
       () => {
         micSourceRef.current = null;

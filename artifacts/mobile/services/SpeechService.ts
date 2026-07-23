@@ -19,6 +19,16 @@ export async function ensureOfflineModelReady(
   locale: string
 ): Promise<"ready" | "preparing"> {
   if (Platform.OS !== "android") return "ready";
+
+  try {
+    const { installedLocales } = await ExpoSpeechRecognitionModule.getSupportedLocales({});
+    if (installedLocales.includes(locale)) return "ready";
+  } catch {
+    // getSupportedLocales() can reject (e.g. "package_not_found") on some
+    // devices/OS versions — fall through to requesting the download
+    // directly, same as before this check existed.
+  }
+
   const { status } = await ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload({
     locale,
   });
@@ -36,6 +46,7 @@ function clearActiveSession(): void {
 
 export function startListening(
   baseline: string,
+  locale: string,
   onResult: (fullText: string) => void,
   onEnd: () => void,
   onError: (message: string) => void
@@ -59,7 +70,7 @@ export function startListening(
   activeSubscriptions = [resultSub, endSub, errorSub];
 
   ExpoSpeechRecognitionModule.start({
-    continuous: true,
+    lang: locale,
     interimResults: true,
     requiresOnDeviceRecognition: true,
   } as any);

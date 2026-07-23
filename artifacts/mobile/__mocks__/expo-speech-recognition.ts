@@ -9,6 +9,10 @@ export const ExpoSpeechRecognitionModule = {
     canAskAgain: true,
     status: "granted",
   }),
+  getSupportedLocales: jest.fn().mockResolvedValue({
+    locales: [],
+    installedLocales: [],
+  }),
   androidTriggerOfflineModelDownload: jest.fn().mockResolvedValue({
     status: "download_success",
     message: "ok",

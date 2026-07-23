@@ -93,6 +93,39 @@ describe("ensureOfflineModelReady", () => {
     expect(result).toBe("ready");
     expect(ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload).not.toHaveBeenCalled();
   });
+
+  it("resolves ready without triggering a download when the locale is already installed", async () => {
+    (ExpoSpeechRecognitionModule.getSupportedLocales as jest.Mock).mockResolvedValueOnce({
+      locales: ["en-US", "es-ES"],
+      installedLocales: ["en-US"],
+    });
+    const result = await ensureOfflineModelReady("en-US");
+    expect(result).toBe("ready");
+    expect(ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload).not.toHaveBeenCalled();
+  });
+
+  it("triggers a download when the locale is not among the installed locales", async () => {
+    (ExpoSpeechRecognitionModule.getSupportedLocales as jest.Mock).mockResolvedValueOnce({
+      locales: ["en-US", "es-ES"],
+      installedLocales: ["en-US"],
+    });
+    const result = await ensureOfflineModelReady("es-ES");
+    expect(result).toBe("ready");
+    expect(ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload).toHaveBeenCalledWith({
+      locale: "es-ES",
+    });
+  });
+
+  it("falls back to triggering the download when getSupportedLocales rejects", async () => {
+    (ExpoSpeechRecognitionModule.getSupportedLocales as jest.Mock).mockRejectedValueOnce(
+      new Error("package_not_found")
+    );
+    const result = await ensureOfflineModelReady("en-US");
+    expect(result).toBe("ready");
+    expect(ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload).toHaveBeenCalledWith({
+      locale: "en-US",
+    });
+  });
 });
 
 import { startListening, stopListening } from "@/services/SpeechService";
@@ -102,17 +135,25 @@ describe("startListening", () => {
     const onResult = jest.fn();
     const onEnd = jest.fn();
     const onError = jest.fn();
-    const result = startListening("", onResult, onEnd, onError);
+    const result = startListening("", "en-US", onResult, onEnd, onError);
     expect(result).toEqual({ busy: false });
     expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledWith(
-      expect.objectContaining({ requiresOnDeviceRecognition: true })
+      expect.objectContaining({ requiresOnDeviceRecognition: true, lang: "en-US" })
+    );
+    stopListening();
+  });
+
+  it("passes the given locale through to the native module as lang", () => {
+    startListening("", "es-ES", jest.fn(), jest.fn(), jest.fn());
+    expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledWith(
+      expect.objectContaining({ lang: "es-ES" })
     );
     stopListening();
   });
 
   it("combines the baseline with each result event's transcript", () => {
     const onResult = jest.fn();
-    startListening("call mom", onResult, jest.fn(), jest.fn());
+    startListening("call mom", "en-US", onResult, jest.fn(), jest.fn());
 
     const resultListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
       (call) => call[0] === "result"
@@ -125,10 +166,10 @@ describe("startListening", () => {
   });
 
   it("returns busy: true and does not call start again when already listening", () => {
-    startListening("", jest.fn(), jest.fn(), jest.fn());
+    startListening("", "en-US", jest.fn(), jest.fn(), jest.fn());
     (ExpoSpeechRecognitionModule.start as jest.Mock).mockClear();
 
-    const second = startListening("", jest.fn(), jest.fn(), jest.fn());
+    const second = startListening("", "en-US", jest.fn(), jest.fn(), jest.fn());
 
     expect(second).toEqual({ busy: true });
     expect(ExpoSpeechRecognitionModule.start).not.toHaveBeenCalled();
@@ -137,7 +178,7 @@ describe("startListening", () => {
 
   it("clears the active session and calls onEnd when the end event fires", () => {
     const onEnd = jest.fn();
-    startListening("", jest.fn(), onEnd, jest.fn());
+    startListening("", "en-US", jest.fn(), onEnd, jest.fn());
 
     const endListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
       (call) => call[0] === "end"
@@ -146,7 +187,7 @@ describe("startListening", () => {
 
     expect(onEnd).toHaveBeenCalled();
     // Session cleared: a fresh startListening should now succeed (busy: false).
-    const afterEnd = startListening("", jest.fn(), jest.fn(), jest.fn());
+    const afterEnd = startListening("", "en-US", jest.fn(), jest.fn(), jest.fn());
     expect(afterEnd).toEqual({ busy: false });
     stopListening();
   });
@@ -159,11 +200,11 @@ describe("stopListening", () => {
   });
 
   it("stops the native module and allows a fresh startListening afterward", () => {
-    startListening("", jest.fn(), jest.fn(), jest.fn());
+    startListening("", "en-US", jest.fn(), jest.fn(), jest.fn());
     stopListening();
     expect(ExpoSpeechRecognitionModule.stop).toHaveBeenCalled();
 
-    const result = startListening("", jest.fn(), jest.fn(), jest.fn());
+    const result = startListening("", "en-US", jest.fn(), jest.fn(), jest.fn());
     expect(result).toEqual({ busy: false });
     stopListening();
   });
@@ -228,7 +269,7 @@ describe("transcribeAudioFile", () => {
   });
 
   it("resolves busy: true and does not call start when live listening is already active", async () => {
-    startListening("", jest.fn(), jest.fn(), jest.fn());
+    startListening("", "en-US", jest.fn(), jest.fn(), jest.fn());
     (ExpoSpeechRecognitionModule.start as jest.Mock).mockClear();
 
     const result = await transcribeAudioFile("content://some/audio", "note.opus");
