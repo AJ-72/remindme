@@ -1,5 +1,5 @@
 1. Integrate with google drive to store the reminders to support migration of phone or reinstallation.
-2. Add audio support and image support
+2. Add audio support and image support [Audio half FIXED 2026-07-23 — voice-to-text via mic button + forwarded WhatsApp audio (Android only); image support still open. WhatsApp-audio transcription depends on an unverified real-device spike — may fall back to filename-only for real WhatsApp voice notes]
 3. Integrate with calendars?
 4. Verify the snooze flow
 5. Show the reminder description in notification after taking user's consent [FIXED 2026-07-20]
