@@ -17,11 +17,14 @@ import {
   constructedFiles,
   resetConstructedFiles,
   makeNextCopyThrow,
+  seedExistingCacheFile,
+  resetExistingCacheFiles,
 } from "../__mocks__/expo-file-system";
 
 beforeEach(() => {
   jest.clearAllMocks();
   resetConstructedFiles();
+  resetExistingCacheFiles();
   jest.replaceProperty(Platform, "OS", "android");
 });
 
@@ -256,16 +259,53 @@ describe("transcribeAudioFile", () => {
     expect(source.copy).toHaveBeenCalledWith(cached);
   });
 
-  it("resolves failed: true (never rejects) when an error event fires", async () => {
+  it("copies into a distinct cache filename even when the shared uri is already inside the cache dir under the same name (expo-share-intent resolves WhatsApp content:// URIs this way)", async () => {
+    // Simulates expo-share-intent having already copied the WhatsApp voice
+    // note into our own cache dir under its original filename — the uri and
+    // fileName collide with what a naive `new File(Paths.cache, fileName)`
+    // destination would produce, which would make source === destination.
+    seedExistingCacheFile("file:///mock-cache-dir/PTT-20260724-WA0003.opus");
+
+    const resultPromise = transcribeAudioFile(
+      "file:///mock-cache-dir/PTT-20260724-WA0003.opus",
+      "PTT-20260724-WA0003.opus"
+    );
+
+    const resultListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (call) => call[0] === "result"
+    );
+    resultListenerCall[1]({ isFinal: true, results: [{ transcript: "final transcript" }] });
+
+    const result = await resultPromise;
+    expect(result).toEqual({ text: "final transcript" });
+    const [source, cached] = constructedFiles;
+    expect(cached.uri).not.toBe(source.uri);
+    expect(source.copy).toHaveBeenCalledWith(cached);
+  });
+
+  it("deletes the cached temp copy after a successful transcription, so cache files don't accumulate", async () => {
+    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus");
+
+    const resultListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (call) => call[0] === "result"
+    );
+    resultListenerCall[1]({ isFinal: true, results: [{ transcript: "final transcript" }] });
+    await resultPromise;
+
+    const [, cached] = constructedFiles;
+    expect(cached.exists).toBe(false);
+  });
+
+  it("resolves failed: true (never rejects) when an error event fires, with the error's reason attached", async () => {
     const resultPromise = transcribeAudioFile("content://some/audio", "note.opus");
 
     const errorListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
       (call) => call[0] === "error"
     );
-    errorListenerCall[1]({ message: "not-supported" });
+    errorListenerCall[1]({ error: "not-supported", message: "not-supported" });
 
     const result = await resultPromise;
-    expect(result).toEqual({ failed: true });
+    expect(result).toEqual({ failed: true, reason: expect.stringContaining("not-supported") });
   });
 
   it("resolves busy: true and does not call start when live listening is already active", async () => {
@@ -307,7 +347,7 @@ describe("transcribeAudioFile", () => {
 
     const result = await transcribeAudioFile("content://some/audio", "note.opus");
 
-    expect(result).toEqual({ failed: true });
+    expect(result).toEqual({ failed: true, reason: expect.stringContaining("permission revoked") });
     expect(ExpoSpeechRecognitionModule.start).not.toHaveBeenCalled();
 
     // activeMode must have been cleared by the failure, not left wedged: a fresh call
@@ -330,7 +370,7 @@ describe("transcribeAudioFile", () => {
     endListenerCall[1]();
 
     const result = await resultPromise;
-    expect(result).toEqual({ failed: true });
+    expect(result).toEqual({ failed: true, reason: expect.stringContaining("end event") });
 
     // activeMode must have been cleared by the bare "end" event, not left wedged:
     // a fresh call should proceed normally (not report busy: true).

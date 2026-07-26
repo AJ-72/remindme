@@ -7,6 +7,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -117,8 +118,13 @@ interface Props {
 export default function QuickAddInput({ onSaved }: Props) {
   const colors = useColors();
   const { addReminder, defaultAlarmEnabled } = useReminders();
-  const { sharedText, clearSharedText, sharedAudioTranscribing, sharedAudioNotice } =
-    useSharedText();
+  const {
+    sharedText,
+    clearSharedText,
+    sharedAudioTranscribing,
+    sharedAudioNotice,
+    sharedAudioDebugInfo,
+  } = useSharedText();
 
   const [input, setInput] = useState("");
   const [parsedTitle, setParsedTitle] = useState("");
@@ -129,6 +135,8 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [description, setDescription] = useState("");
   const [listening, setListening] = useState(false);
   const [micNotice, setMicNotice] = useState<string | null>(null);
+  const [micNoticeDebugInfo, setMicNoticeDebugInfo] = useState<string | null>(null);
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
   const micPulse = useRef(new Animated.Value(1)).current;
   const micSourceRef = useRef<"live" | "shared" | null>(null);
 
@@ -162,6 +170,10 @@ export default function QuickAddInput({ onSaved }: Props) {
       setMicNotice(sharedAudioNotice);
     }
   }, [sharedAudioNotice]);
+
+  useEffect(() => {
+    setMicNoticeDebugInfo(sharedAudioDebugInfo);
+  }, [sharedAudioDebugInfo]);
 
   useEffect(() => {
     if (sharedText) {
@@ -450,6 +462,32 @@ export default function QuickAddInput({ onSaved }: Props) {
       marginTop: 6,
       paddingHorizontal: 4,
     },
+    debugModalOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.5)",
+      justifyContent: "flex-end",
+    },
+    debugModalSheet: {
+      backgroundColor: colors.card,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      maxHeight: "80%",
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: Platform.OS === "ios" ? 40 : 24,
+    },
+    debugModalTitle: {
+      fontSize: 16,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.foreground,
+      marginBottom: 12,
+    },
+    debugModalText: {
+      fontSize: 12,
+      lineHeight: 18,
+      fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+      color: colors.foreground,
+    },
     modalOverlay: {
       flex: 1,
       backgroundColor: "rgba(0,0,0,0.4)",
@@ -605,8 +643,33 @@ export default function QuickAddInput({ onSaved }: Props) {
       </View>
 
       {micNotice && (
-        <Text style={styles.micNoticeText}>{micNotice}</Text>
+        micNoticeDebugInfo ? (
+          <Pressable onPress={() => setShowDebugInfo(true)}>
+            <Text style={styles.micNoticeText}>{micNotice} (tap for details)</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.micNoticeText}>{micNotice}</Text>
+        )
       )}
+
+      <Modal
+        visible={showDebugInfo}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowDebugInfo(false)}
+      >
+        <Pressable style={styles.debugModalOverlay} onPress={() => setShowDebugInfo(false)}>
+          <Pressable onPress={() => {}} style={styles.debugModalSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.debugModalTitle}>Shared audio details</Text>
+            <ScrollView>
+              <Text style={styles.debugModalText} selectable>
+                {micNoticeDebugInfo}
+              </Text>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {notesVisible && (
         <TextInput

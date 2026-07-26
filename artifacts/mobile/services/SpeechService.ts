@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { File, Paths } from "expo-file-system";
+import { logDebug } from "@/services/DebugLogService";
 
 export async function getMicPermissionStatus(): Promise<{
   granted: boolean;
@@ -93,31 +94,57 @@ export function isFileTranscriptionSupported(): boolean {
 export function transcribeAudioFile(
   uri: string,
   fileName: string
-): Promise<{ busy: boolean } | { text: string } | { failed: true }> {
+): Promise<{ busy: boolean } | { text: string } | { failed: true; reason: string }> {
   if (activeMode !== null) return Promise.resolve({ busy: true });
   activeMode = "file";
 
   return new Promise((resolve) => {
-    let cachedUri: string;
+    let cached: File;
     try {
       const source = new File(uri);
-      const cached = new File(Paths.cache, fileName);
+      // `uri` is frequently already inside our own cache directory — the
+      // expo-share-intent native module resolves WhatsApp's content:// URIs
+      // by copying them into `context.cacheDir` (the same directory as
+      // `Paths.cache`) under the original fileName. Reusing that fileName
+      // here would make `cached` alias `source`: copy() then either throws
+      // "destination already exists", or — if the destination is deleted
+      // first to work around that — deletes the only copy of the file
+      // before it can be copied, throwing "source doesn't exist" instead.
+      // A random prefix guarantees `cached` is always a distinct file.
+      const cacheName = `transcribe-${Math.random().toString(36).slice(2)}-${fileName}`;
+      cached = new File(Paths.cache, cacheName);
+      logDebug(`transcribeAudioFile: copying ${uri} -> ${cached.uri}`);
       source.copy(cached);
-      cachedUri = cached.uri;
-    } catch {
+      logDebug(`transcribeAudioFile: copy succeeded, starting recognizer on ${cached.uri}`);
+    } catch (e) {
+      logDebug(`transcribeAudioFile: copy() failed: ${String(e)}`);
       clearActiveSession();
-      resolve({ failed: true });
+      resolve({ failed: true, reason: `copy() failed: ${String(e)}` });
       return;
     }
+
+    const cleanupCachedFile = () => {
+      try {
+        if (cached.exists) cached.delete();
+      } catch {
+        // best-effort cleanup — each attempt uses a fresh random filename,
+        // so a leftover file here can't collide with any future attempt.
+      }
+    };
 
     const resultSub = ExpoSpeechRecognitionModule.addListener("result", (event: any) => {
       if (!event.isFinal) return;
       clearActiveSession();
+      cleanupCachedFile();
       resolve({ text: event.results?.[0]?.transcript ?? "" });
     });
-    const errorSub = ExpoSpeechRecognitionModule.addListener("error", () => {
+    const errorSub = ExpoSpeechRecognitionModule.addListener("error", (event: any) => {
       clearActiveSession();
-      resolve({ failed: true });
+      cleanupCachedFile();
+      resolve({
+        failed: true,
+        reason: `error event: ${event?.error ?? "unknown"} — ${event?.message ?? "no message"}`,
+      });
     });
     const endSub = ExpoSpeechRecognitionModule.addListener("end", () => {
       // Some inputs (e.g. an undecodable file) can end the recognition session
@@ -126,12 +153,13 @@ export function transcribeAudioFile(
       // wedging both this function and startListening for the rest of the
       // app's life.
       clearActiveSession();
-      resolve({ failed: true });
+      cleanupCachedFile();
+      resolve({ failed: true, reason: "end event fired with no prior result or error" });
     });
     activeSubscriptions = [resultSub, errorSub, endSub];
 
     ExpoSpeechRecognitionModule.start({
-      audioSource: { uri: cachedUri },
+      audioSource: { uri: cached.uri },
       requiresOnDeviceRecognition: true,
     } as any);
   });

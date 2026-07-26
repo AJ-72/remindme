@@ -5,6 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import SettingsScreen from "@/app/(tabs)/settings";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { DEFAULT_ALARM_KEY, SHOW_DESCRIPTION_KEY } from "@/services/ReminderService";
+import { logDebug } from "@/services/DebugLogService";
 
 jest.mock("expo-haptics");
 
@@ -87,5 +88,25 @@ describe("SettingsScreen", () => {
         JSON.stringify(true)
       )
     );
+  });
+
+  it("shows a placeholder when the debug logs row is tapped with no logs recorded yet", async () => {
+    const { findByTestId } = renderScreen();
+    const row = await findByTestId("debug-logs-row");
+
+    fireEvent.press(row);
+
+    const text = await findByTestId("debug-logs-text");
+    await waitFor(() => expect(text.props.children).toMatch(/no debug logs recorded/i));
+  });
+
+  it("shows recorded log entries when the debug logs row is tapped", async () => {
+    await logDebug("share-intent test entry");
+
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("debug-logs-row"));
+
+    const text = await findByTestId("debug-logs-text");
+    await waitFor(() => expect(text.props.children).toMatch(/share-intent test entry/));
   });
 });
