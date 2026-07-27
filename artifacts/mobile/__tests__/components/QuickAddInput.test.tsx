@@ -117,6 +117,36 @@ describe("QuickAddInput", () => {
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].title).toBe("മീറ്റിംഗ്");
   });
+
+  it("renders the notes input with the Malayalam font when notes text is Malayalam", async () => {
+    const { findByTestId } = renderComponent();
+
+    const notesToggle = await findByTestId("quick-add-notes-toggle");
+    fireEvent.press(notesToggle);
+
+    const notesInput = await findByTestId("quick-add-notes-input");
+    fireEvent.changeText(notesInput, "നാളെ വൈകിട്ട് മീറ്റിംഗ്");
+
+    const flatStyle = Array.isArray(notesInput.props.style)
+      ? Object.assign({}, ...notesInput.props.style)
+      : notesInput.props.style;
+    expect(flatStyle.fontFamily).toBe("NotoSansMalayalam_400Regular");
+  });
+
+  it("renders the notes input with the Inter font when notes text is English", async () => {
+    const { findByTestId } = renderComponent();
+
+    const notesToggle = await findByTestId("quick-add-notes-toggle");
+    fireEvent.press(notesToggle);
+
+    const notesInput = await findByTestId("quick-add-notes-input");
+    fireEvent.changeText(notesInput, "Ask about the weekend trip");
+
+    const flatStyle = Array.isArray(notesInput.props.style)
+      ? Object.assign({}, ...notesInput.props.style)
+      : notesInput.props.style;
+    expect(flatStyle.fontFamily).toBe("Inter_400Regular");
+  });
 });
 
 describe("QuickAddInput — mic button", () => {

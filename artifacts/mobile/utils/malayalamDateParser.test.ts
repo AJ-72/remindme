@@ -131,6 +131,21 @@ describe("parseMalayalamDateTime — clock time with period words", () => {
     expect(date!.getMinutes()).toBe(0);
     expect(title).toBe("മീറ്റിംഗ്");
   });
+
+  it("resolves a period word's own default hour, not a bare-hour phrase belonging to an unrelated clause later in the sentence", () => {
+    // രാത്രി (night) has no explicit hour attached to it here; the "10 മണിക്ക്"
+    // later in the sentence belongs to a separate clause about a bus arrival,
+    // and must not suppress രാത്രി's own default hour (21 / 9 PM).
+    const { date } = parseMalayalamDateTime(
+      "രാത്രി ഓർമ്മിപ്പിക്കണം, 10 മണിക്ക് ബസ് വരും",
+      now
+    );
+    expect(date!.getHours()).toBe(21);
+  });
+
+  it("still resolves രാത്രി alone (no other time mentioned) to its default hour", () => {
+    expect(parseMalayalamDateTime("രാത്രി ഉറക്കം", now).date!.getHours()).toBe(21);
+  });
 });
 
 describe("parseMalayalamDateTime — half past", () => {

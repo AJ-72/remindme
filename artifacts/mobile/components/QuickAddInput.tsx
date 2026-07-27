@@ -381,7 +381,6 @@ export default function QuickAddInput({ onSaved }: Props) {
       paddingHorizontal: 14,
       paddingVertical: 10,
       fontSize: 14,
-      fontFamily: "Inter_400Regular",
       color: colors.foreground,
       minHeight: 60,
       textAlignVertical: "top",
@@ -591,7 +590,7 @@ export default function QuickAddInput({ onSaved }: Props) {
 
       {notesVisible && (
         <TextInput
-          style={styles.notesInput}
+          style={[styles.notesInput, { fontFamily: getFontFamily(description, "400Regular") }]}
           placeholder="Add a note…"
           placeholderTextColor={colors.mutedForeground}
           value={description}

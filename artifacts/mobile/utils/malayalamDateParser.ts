@@ -202,8 +202,19 @@ function resolveClockTime(text: string): ClockMatch | null {
         };
       }
     }
-    if (text.includes(period.word) && !text.match(/മണിക്ക്/)) {
-      return { matchedText: period.word, hour: period.defaultHour, minute: 0 };
+  }
+
+  for (const period of PERIOD_WORDS) {
+    if (text.includes(period.word)) {
+      // Scope the "used alone" check to a window right after the period
+      // word, rather than the whole string, so an unrelated bare-hour
+      // phrase elsewhere in the sentence (e.g. a second clause mentioning
+      // a different time) doesn't suppress this period word's own default.
+      const periodIndex = text.indexOf(period.word);
+      const windowAfter = text.slice(periodIndex + period.word.length, periodIndex + period.word.length + 20);
+      if (!windowAfter.match(/മണിക്ക്/)) {
+        return { matchedText: period.word, hour: period.defaultHour, minute: 0 };
+      }
     }
   }
 
