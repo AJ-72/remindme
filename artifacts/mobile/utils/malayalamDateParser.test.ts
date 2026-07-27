@@ -153,3 +153,29 @@ describe("parseMalayalamDateTime — half past", () => {
     expect(title).toBe("മീറ്റിംഗ്");
   });
 });
+
+describe("parseMalayalamDateTime — relative durations", () => {
+  const now = new Date("2026-07-29T10:00:00");
+
+  it("parses 'X മണിക്കൂർ കഴിഞ്ഞ്' as X hours from now", () => {
+    const { date, title } = parseMalayalamDateTime("2 മണിക്കൂർ കഴിഞ്ഞ് കോൾ ചെയ്യാൻ", now);
+    expect(date!.getTime()).toBe(now.getTime() + 2 * 60 * 60 * 1000);
+    expect(title).toBe("കോൾ ചെയ്യാൻ");
+  });
+
+  it("parses 'X മിനിറ്റ് കഴിഞ്ഞ്' as X minutes from now", () => {
+    const { date } = parseMalayalamDateTime("30 മിനിറ്റ് കഴിഞ്ഞ് ഓർമ്മിപ്പിക്കുക", now);
+    expect(date!.getTime()).toBe(now.getTime() + 30 * 60 * 1000);
+  });
+
+  it("takes precedence over day/clock resolvers per spec's pattern precedence", () => {
+    // Duration patterns short-circuit before day/clock resolvers run at all.
+    const { date } = parseMalayalamDateTime("5 മണിക്കൂർ കഴിഞ്ഞ്", now);
+    expect(date!.getTime()).toBe(now.getTime() + 5 * 60 * 60 * 1000);
+  });
+
+  it("parses a spelled-out duration count", () => {
+    const { date } = parseMalayalamDateTime("അഞ്ച് മണിക്കൂർ കഴിഞ്ഞ്", now);
+    expect(date!.getTime()).toBe(now.getTime() + 5 * 60 * 60 * 1000);
+  });
+});

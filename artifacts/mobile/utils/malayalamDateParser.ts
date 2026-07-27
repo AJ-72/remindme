@@ -143,6 +143,31 @@ function applyBareHourBias(rawHour: number): number {
   return rawHour; // 8-11 stay as AM
 }
 
+interface DurationMatch {
+  matchedText: string;
+  offsetMs: number;
+}
+
+function resolveDuration(text: string): DurationMatch | null {
+  const hoursMatch = text.match(new RegExp(`(${NUMBER_PATTERN})\\s*മണിക്കൂർ\\s*കഴിഞ്ഞ്`));
+  if (hoursMatch) {
+    const count = parseMalayalamNumber(hoursMatch[1]);
+    if (count !== null) {
+      return { matchedText: hoursMatch[0], offsetMs: count * 60 * 60 * 1000 };
+    }
+  }
+
+  const minutesMatch = text.match(new RegExp(`(${NUMBER_PATTERN})\\s*മിനിറ്റ്\\s*കഴിഞ്ഞ്`));
+  if (minutesMatch) {
+    const count = parseMalayalamNumber(minutesMatch[1]);
+    if (count !== null) {
+      return { matchedText: minutesMatch[0], offsetMs: count * 60 * 1000 };
+    }
+  }
+
+  return null;
+}
+
 function resolveClockTime(text: string): ClockMatch | null {
   const halfPastAfter = text.match(
     new RegExp(`(${NUMBER_PATTERN})\\s*മണി\\s*കഴിഞ്ഞ്\\s*അര`)
@@ -204,6 +229,13 @@ export function parseMalayalamDateTime(
   // Normalize whitespace early (collapsing runs of whitespace to single space)
   // so both resolvers and stripMatch operate on consistent text
   const normalizedText = text.replace(/\s+/g, " ").trim();
+
+  // Check for relative durations first; they short-circuit and never reach day/clock resolvers
+  const durationMatch = resolveDuration(normalizedText);
+  if (durationMatch) {
+    const title = cleanTitle(stripMatch(normalizedText, durationMatch.matchedText)) || cleanTitle(normalizedText);
+    return { title, date: new Date(now.getTime() + durationMatch.offsetMs) };
+  }
 
   const dayMatch = resolveWeekday(normalizedText, now) ?? resolveRelativeDay(normalizedText, now);
   const remainingAfterDay = dayMatch ? stripMatch(normalizedText, dayMatch.matchedText) : normalizedText;
