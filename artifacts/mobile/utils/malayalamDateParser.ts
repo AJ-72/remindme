@@ -137,6 +137,12 @@ function applyBias(hour: number, bias: "AM" | "PM"): number {
   return hour;
 }
 
+function applyBareHourBias(rawHour: number): number {
+  if (rawHour >= 1 && rawHour <= 7) return applyBias(rawHour, "PM");
+  if (rawHour === 12) return 12;
+  return rawHour; // 8-11 stay as AM
+}
+
 function resolveClockTime(text: string): ClockMatch | null {
   const halfPastAfter = text.match(
     new RegExp(`(${NUMBER_PATTERN})\\s*മണി\\s*കഴിഞ്ഞ്\\s*അര`)
@@ -144,9 +150,7 @@ function resolveClockTime(text: string): ClockMatch | null {
   if (halfPastAfter) {
     const rawHour = parseMalayalamNumber(halfPastAfter[1]);
     if (rawHour !== null) {
-      const hour = rawHour >= 1 && rawHour <= 7 ? applyBias(rawHour, "PM")
-        : rawHour === 12 ? 12
-        : rawHour;
+      const hour = applyBareHourBias(rawHour);
       return { matchedText: halfPastAfter[0], hour, minute: 30 };
     }
   }
@@ -155,9 +159,7 @@ function resolveClockTime(text: string): ClockMatch | null {
   if (halfPastBefore) {
     const rawHour = parseMalayalamNumber(halfPastBefore[1]);
     if (rawHour !== null) {
-      const hour = rawHour >= 1 && rawHour <= 7 ? applyBias(rawHour, "PM")
-        : rawHour === 12 ? 12
-        : rawHour;
+      const hour = applyBareHourBias(rawHour);
       return { matchedText: halfPastBefore[0], hour, minute: 30 };
     }
   }
@@ -185,9 +187,7 @@ function resolveClockTime(text: string): ClockMatch | null {
   if (bare) {
     const rawHour = parseMalayalamNumber(bare[1]);
     if (rawHour !== null) {
-      const hour = rawHour >= 1 && rawHour <= 7 ? applyBias(rawHour, "PM")
-        : rawHour === 12 ? 12
-        : rawHour; // 8-11 stay as AM (no bias applied)
+      const hour = applyBareHourBias(rawHour);
       return { matchedText: bare[0], hour, minute: 0 };
     }
   }
