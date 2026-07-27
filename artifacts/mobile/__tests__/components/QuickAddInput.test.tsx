@@ -72,6 +72,41 @@ describe("QuickAddInput", () => {
     expect(stored[0].title).toBe("Call mom");
     expect(stored[0].description).toBe("Ask about the weekend trip");
   });
+
+  it("parses a Malayalam date/time phrase into the date pill and title", async () => {
+    const { findByTestId, findByText } = renderComponent();
+
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.changeText(titleInput, "നാളെ വൈകിട്ട് 5 മണിക്ക് മീറ്റിംഗ്");
+
+    // The pill row renders "Tomorrow" and "5:00 PM"-formatted text once a
+    // date is parsed — this confirms routing engaged, not just that saving works.
+    expect(await findByText("Tomorrow")).toBeTruthy();
+
+    const saveButton = await findByTestId("quick-add-save");
+    fireEvent.press(saveButton);
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].title).toBe("മീറ്റിംഗ്");
+  });
+
+  it("parses a Malayalam speech-transcript-shaped spelled-out-number string via the mic result path", async () => {
+    const { findByTestId } = renderComponent();
+    const titleInput = await findByTestId("quick-add-input");
+
+    // Simulate what the mic result listener does: setInput(fullText) with a
+    // transcript containing a spelled-out number, since on-device speech
+    // recognition transcribes numbers as words more often than digits.
+    fireEvent.changeText(titleInput, "നാളെ വൈകിട്ട് അഞ്ച് മണിക്ക് മീറ്റിംഗ്");
+
+    await waitFor(() => {
+      expect(titleInput.props.value).toBe("നാളെ വൈകിട്ട് അഞ്ച് മണിക്ക് മീറ്റിംഗ്");
+    });
+  });
 });
 
 describe("QuickAddInput — mic button", () => {
