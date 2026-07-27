@@ -13,6 +13,7 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { Reminder, useReminders } from "@/contexts/RemindersContext";
 import { formatDatetime } from "@/utils/formatDatetime";
+import { getFontFamily } from "@/utils/getFontFamily";
 
 function isOverdue(iso: string, completed: boolean): boolean {
   return !completed && new Date(iso) < new Date();
@@ -84,13 +85,11 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
     },
     title: {
       fontSize: 15,
-      fontFamily: "Inter_600SemiBold",
       color: reminder.completed ? colors.mutedForeground : colors.foreground,
       textDecorationLine: reminder.completed ? "line-through" : "none",
     },
     description: {
       fontSize: 13,
-      fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
       marginTop: 2,
     },
@@ -129,7 +128,10 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
 
         <View style={styles.content}>
           <View style={styles.titleRow}>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text
+              style={[styles.title, { fontFamily: getFontFamily(reminder.title, "600SemiBold") }]}
+              numberOfLines={1}
+            >
               {reminder.title}
             </Text>
             {reminder.alarm === false && (
@@ -137,7 +139,13 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
             )}
           </View>
           {!!reminder.description && (
-            <Text style={styles.description} numberOfLines={1}>
+            <Text
+              style={[
+                styles.description,
+                { fontFamily: getFontFamily(reminder.description, "400Regular") },
+              ]}
+              numberOfLines={1}
+            >
               {reminder.description}
             </Text>
           )}

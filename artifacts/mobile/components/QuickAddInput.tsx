@@ -13,7 +13,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import * as chrono from "chrono-node";
 import { getLocales } from "expo-localization";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
@@ -25,6 +24,8 @@ import {
   startListening,
   stopListening,
 } from "@/services/SpeechService";
+import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
+import { getFontFamily } from "@/utils/getFontFamily";
 
 type DateTimePickerEvent = { type: string; nativeEvent: object };
 const DateTimePicker: React.ComponentType<any> | null =
@@ -58,25 +59,6 @@ function toDateInput(d: Date): string {
 
 function toTimeInput(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function parseNaturalLanguage(text: string): { title: string; date: Date | null } {
-  if (!text.trim()) return { title: "", date: null };
-  const now = new Date();
-  const results = chrono.parse(text, now, { forwardDate: true });
-  if (results.length === 0) return { title: text.trim(), date: null };
-  const parsed = results[0];
-  const date = parsed.date();
-  let title = text;
-  for (let i = results.length - 1; i >= 0; i--) {
-    const r = results[i];
-    title = title.slice(0, r.index) + title.slice(r.index + r.text.length);
-  }
-  title = title
-    .replace(/\s+/g, " ")
-    .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
-    .trim();
-  return { title: title || text.trim(), date };
 }
 
 function formatDatePill(d: Date): string {
@@ -398,7 +380,6 @@ export default function QuickAddInput({ onSaved }: Props) {
     textInput: {
       flex: 1,
       fontSize: 15,
-      fontFamily: "Inter_400Regular",
       color: colors.foreground,
       paddingVertical: 0,
       ...(Platform.OS === "web" ? { outlineStyle: "none" } as any : {}),
@@ -412,7 +393,6 @@ export default function QuickAddInput({ onSaved }: Props) {
       paddingHorizontal: 14,
       paddingVertical: 10,
       fontSize: 14,
-      fontFamily: "Inter_400Regular",
       color: colors.foreground,
       minHeight: 60,
       textAlignVertical: "top",
@@ -579,7 +559,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       <View style={styles.bar}>
         <Feather name="plus-circle" size={18} color={colors.mutedForeground} />
         <TextInput
-          style={styles.textInput}
+          style={[styles.textInput, { fontFamily: getFontFamily(input, "400Regular") }]}
           placeholder="Add a reminder…"
           placeholderTextColor={colors.mutedForeground}
           value={input}
@@ -673,7 +653,7 @@ export default function QuickAddInput({ onSaved }: Props) {
 
       {notesVisible && (
         <TextInput
-          style={styles.notesInput}
+          style={[styles.notesInput, { fontFamily: getFontFamily(description, "400Regular") }]}
           placeholder="Add a note…"
           placeholderTextColor={colors.mutedForeground}
           value={description}

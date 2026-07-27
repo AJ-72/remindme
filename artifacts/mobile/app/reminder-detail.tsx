@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 import { formatDatetime } from "@/utils/formatDatetime";
+import { getFontFamily } from "@/utils/getFontFamily";
 
 function goBack() {
   if (router.canGoBack()) {
@@ -99,13 +100,11 @@ export default function ReminderDetailScreen() {
     },
     title: {
       fontSize: 22,
-      fontFamily: "Inter_700Bold",
       color: colors.foreground,
       marginBottom: 8,
     },
     description: {
       fontSize: 15,
-      fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
       marginBottom: 12,
     },
@@ -204,9 +203,18 @@ export default function ReminderDetailScreen() {
         </View>
       ) : (
         <View style={styles.content}>
-          <Text style={styles.title}>{reminder.title}</Text>
+          <Text style={[styles.title, { fontFamily: getFontFamily(reminder.title, "700Bold") }]}>
+            {reminder.title}
+          </Text>
           {!!reminder.description && (
-            <Text style={styles.description}>{reminder.description}</Text>
+            <Text
+              style={[
+                styles.description,
+                { fontFamily: getFontFamily(reminder.description, "400Regular") },
+              ]}
+            >
+              {reminder.description}
+            </Text>
           )}
           <View style={styles.timeRow}>
             <Feather name="clock" size={14} color={colors.mutedForeground} />

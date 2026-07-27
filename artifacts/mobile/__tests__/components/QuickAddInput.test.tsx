@@ -72,6 +72,81 @@ describe("QuickAddInput", () => {
     expect(stored[0].title).toBe("Call mom");
     expect(stored[0].description).toBe("Ask about the weekend trip");
   });
+
+  it("parses a Malayalam date/time phrase into the date pill and title", async () => {
+    const { findByTestId, findByText } = renderComponent();
+
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.changeText(titleInput, "നാളെ വൈകിട്ട് 5 മണിക്ക് മീറ്റിംഗ്");
+
+    // The pill row renders "Tomorrow" and "5:00 PM"-formatted text once a
+    // date is parsed — this confirms routing engaged, not just that saving works.
+    expect(await findByText("Tomorrow")).toBeTruthy();
+
+    const saveButton = await findByTestId("quick-add-save");
+    fireEvent.press(saveButton);
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].title).toBe("മീറ്റിംഗ്");
+  });
+
+  it("parses a Malayalam speech-transcript-shaped spelled-out-number string via the mic result path", async () => {
+    const { findByTestId, findByText } = renderComponent();
+    const titleInput = await findByTestId("quick-add-input");
+
+    // Simulate what the mic result listener does: setInput(fullText) with a
+    // transcript containing a spelled-out number, since on-device speech
+    // recognition transcribes numbers as words more often than digits.
+    fireEvent.changeText(titleInput, "നാളെ വൈകിട്ട് അഞ്ച് മണിക്ക് മീറ്റിംഗ്");
+
+    // Confirms the spelled-out number ("അഞ്ച്" = five) was actually recognized
+    // and parsed into a date — not just that the input echoes its own value.
+    expect(await findByText("Tomorrow")).toBeTruthy();
+
+    const saveButton = await findByTestId("quick-add-save");
+    fireEvent.press(saveButton);
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].title).toBe("മീറ്റിംഗ്");
+  });
+
+  it("renders the notes input with the Malayalam font when notes text is Malayalam", async () => {
+    const { findByTestId } = renderComponent();
+
+    const notesToggle = await findByTestId("quick-add-notes-toggle");
+    fireEvent.press(notesToggle);
+
+    const notesInput = await findByTestId("quick-add-notes-input");
+    fireEvent.changeText(notesInput, "നാളെ വൈകിട്ട് മീറ്റിംഗ്");
+
+    const flatStyle = Array.isArray(notesInput.props.style)
+      ? Object.assign({}, ...notesInput.props.style)
+      : notesInput.props.style;
+    expect(flatStyle.fontFamily).toBe("NotoSansMalayalam_400Regular");
+  });
+
+  it("renders the notes input with the Inter font when notes text is English", async () => {
+    const { findByTestId } = renderComponent();
+
+    const notesToggle = await findByTestId("quick-add-notes-toggle");
+    fireEvent.press(notesToggle);
+
+    const notesInput = await findByTestId("quick-add-notes-input");
+    fireEvent.changeText(notesInput, "Ask about the weekend trip");
+
+    const flatStyle = Array.isArray(notesInput.props.style)
+      ? Object.assign({}, ...notesInput.props.style)
+      : notesInput.props.style;
+    expect(flatStyle.fontFamily).toBe("Inter_400Regular");
+  });
 });
 
 describe("QuickAddInput — mic button", () => {

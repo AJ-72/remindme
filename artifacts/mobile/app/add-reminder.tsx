@@ -15,9 +15,10 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as chrono from "chrono-node";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
+import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
+import { getFontFamily } from "@/utils/getFontFamily";
 
 type DateTimePickerEvent = { type: string; nativeEvent: object };
 const DateTimePicker: React.ComponentType<any> | null =
@@ -39,36 +40,6 @@ function toDateInput(d: Date) {
 
 function toTimeInput(d: Date) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function parseNaturalLanguage(text: string): { title: string; date: Date | null } {
-  if (!text.trim()) return { title: "", date: null };
-
-  const now = new Date();
-  const results = chrono.parse(text, now, { forwardDate: true });
-
-  if (results.length === 0) {
-    return { title: text.trim(), date: null };
-  }
-
-  // Use the first parsed date/time
-  const parsed = results[0];
-  const date = parsed.date();
-
-  // Strip all matched date/time strings to extract the title
-  let title = text;
-  // Remove matches in reverse order to preserve indices
-  for (let i = results.length - 1; i >= 0; i--) {
-    const r = results[i];
-    title = title.slice(0, r.index) + title.slice(r.index + r.text.length);
-  }
-  // Clean up extra whitespace, punctuation at edges
-  title = title
-    .replace(/\s+/g, " ")
-    .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
-    .trim();
-
-  return { title: title || text.trim(), date };
 }
 
 type PickerMode = "date" | "time" | null;
@@ -428,7 +399,7 @@ export default function AddReminderScreen() {
               <Text style={styles.inputHint}>Title</Text>
               <TextInput
                 ref={inputRef}
-                style={styles.input}
+                style={[styles.input, { fontFamily: getFontFamily(editTitle, "400Regular") }]}
                 placeholder="Reminder title"
                 placeholderTextColor={colors.mutedForeground}
                 value={editTitle}
@@ -444,7 +415,7 @@ export default function AddReminderScreen() {
               <Text style={styles.inputHint}>Describe your reminder in plain English</Text>
               <TextInput
                 ref={inputRef}
-                style={styles.input}
+                style={[styles.input, { fontFamily: getFontFamily(input, "400Regular") }]}
                 placeholder={`e.g. "Call dentist tomorrow at 3pm"`}
                 placeholderTextColor={colors.mutedForeground}
                 value={input}
@@ -476,7 +447,7 @@ export default function AddReminderScreen() {
           <View style={styles.inputCard}>
             <Text style={styles.inputHint}>Description (optional)</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { fontFamily: getFontFamily(description, "400Regular") }]}
               placeholder="Add extra details…"
               placeholderTextColor={colors.mutedForeground}
               value={description}

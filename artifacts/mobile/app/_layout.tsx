@@ -5,6 +5,12 @@ import {
   Inter_700Bold,
   useFonts,
 } from "@expo-google-fonts/inter";
+import {
+  NotoSansMalayalam_400Regular,
+  NotoSansMalayalam_500Medium,
+  NotoSansMalayalam_600SemiBold,
+  NotoSansMalayalam_700Bold,
+} from "@expo-google-fonts/noto-sans-malayalam";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -56,6 +62,10 @@ export default function RootLayout() {
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
+    NotoSansMalayalam_400Regular,
+    NotoSansMalayalam_500Medium,
+    NotoSansMalayalam_600SemiBold,
+    NotoSansMalayalam_700Bold,
   });
 
   const [showAlarmBanner, setShowAlarmBanner] = useState(false);
