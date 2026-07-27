@@ -21,7 +21,9 @@ Users can only get natural-language date/time extraction out of typed (or spoken
 
 ### Script detection & routing
 
-The real signature of `parseNaturalLanguage()` in `components/QuickAddInput.tsx` (lines 63–80) is:
+**Second call site found during planning:** `parseNaturalLanguage()` is not unique to `QuickAddInput.tsx` — `app/add-reminder.tsx` (lines 44–72) contains a byte-for-byte duplicate of the same function, used for that screen's own "add mode" natural-language input (its "edit mode" uses a separate plain-text title field, unaffected). Routing only `QuickAddInput.tsx`'s copy would leave Malayalam unsupported on the add-reminder screen — inconsistent with the feature goal. Fix: extract `parseNaturalLanguage` into a new shared module, `utils/parseNaturalLanguage.ts`, and have both `components/QuickAddInput.tsx` and `app/add-reminder.tsx` import it instead of defining their own copy. This removes a pre-existing duplication as a side effect, not a separate goal.
+
+The real signature of `parseNaturalLanguage()` (as it exists identically in both current locations, lines 63–80 of `QuickAddInput.tsx` and lines 44–72 of `add-reminder.tsx`) is:
 
 ```ts
 function parseNaturalLanguage(text: string): { title: string; date: Date | null } {
@@ -32,7 +34,7 @@ function parseNaturalLanguage(text: string): { title: string; date: Date | null 
 }
 ```
 
-It takes no `now` parameter (creates it internally) and returns `{ title, date }` directly, having already stripped the matched substring(s) out of the title itself — it does not expose a separate "matched substring" to the caller. The Malayalam path must return the same shape so the call site doesn't need to branch on which parser ran:
+It takes no `now` parameter (creates it internally) and returns `{ title, date }` directly, having already stripped the matched substring(s) out of the title itself — it does not expose a separate "matched substring" to the caller. `utils/parseNaturalLanguage.ts` (the new shared module both screens import) keeps this exact signature and behavior for the chrono path, and gains a script check before it:
 
 ```ts
 const MALAYALAM_RANGE = /[ഀ-ൿ]/;
