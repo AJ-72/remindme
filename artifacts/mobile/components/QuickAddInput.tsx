@@ -24,6 +24,7 @@ import {
   stopListening,
 } from "@/services/SpeechService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
+import { getFontFamily } from "@/utils/getFontFamily";
 
 type DateTimePickerEvent = { type: string; nativeEvent: object };
 const DateTimePicker: React.ComponentType<any> | null =
@@ -367,7 +368,6 @@ export default function QuickAddInput({ onSaved }: Props) {
     textInput: {
       flex: 1,
       fontSize: 15,
-      fontFamily: "Inter_400Regular",
       color: colors.foreground,
       paddingVertical: 0,
       ...(Platform.OS === "web" ? { outlineStyle: "none" } as any : {}),
@@ -522,7 +522,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       <View style={styles.bar}>
         <Feather name="plus-circle" size={18} color={colors.mutedForeground} />
         <TextInput
-          style={styles.textInput}
+          style={[styles.textInput, { fontFamily: getFontFamily(input, "400Regular") }]}
           placeholder="Add a reminder…"
           placeholderTextColor={colors.mutedForeground}
           value={input}

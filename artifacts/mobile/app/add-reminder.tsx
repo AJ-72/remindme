@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
+import { getFontFamily } from "@/utils/getFontFamily";
 
 type DateTimePickerEvent = { type: string; nativeEvent: object };
 const DateTimePicker: React.ComponentType<any> | null =
@@ -398,7 +399,7 @@ export default function AddReminderScreen() {
               <Text style={styles.inputHint}>Title</Text>
               <TextInput
                 ref={inputRef}
-                style={styles.input}
+                style={[styles.input, { fontFamily: getFontFamily(editTitle, "400Regular") }]}
                 placeholder="Reminder title"
                 placeholderTextColor={colors.mutedForeground}
                 value={editTitle}
@@ -414,7 +415,7 @@ export default function AddReminderScreen() {
               <Text style={styles.inputHint}>Describe your reminder in plain English</Text>
               <TextInput
                 ref={inputRef}
-                style={styles.input}
+                style={[styles.input, { fontFamily: getFontFamily(input, "400Regular") }]}
                 placeholder={`e.g. "Call dentist tomorrow at 3pm"`}
                 placeholderTextColor={colors.mutedForeground}
                 value={input}
@@ -446,7 +447,7 @@ export default function AddReminderScreen() {
           <View style={styles.inputCard}>
             <Text style={styles.inputHint}>Description (optional)</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { fontFamily: getFontFamily(description, "400Regular") }]}
               placeholder="Add extra details…"
               placeholderTextColor={colors.mutedForeground}
               value={description}
