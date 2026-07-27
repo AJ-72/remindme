@@ -1,0 +1,138 @@
+const MALAYALAM_DIGIT_MAP: Record<string, string> = {
+  "൦": "0", "൧": "1", "൨": "2", "൩": "3", "൪": "4",
+  "൫": "5", "൬": "6", "൭": "7", "൮": "8", "൯": "9",
+};
+
+const MALAYALAM_NUMBER_WORDS: Record<string, number> = {
+  "ഒന്ന്": 1,
+  "രണ്ട്": 2,
+  "മൂന്ന്": 3,
+  "നാല്": 4,
+  "അഞ്ച്": 5,
+  "ആറ്": 6,
+  "ഏഴ്": 7,
+  "എട്ട്": 8,
+  "ഒൻപത്": 9,
+  "ഒമ്പത്": 9,
+  "പത്ത്": 10,
+  "പതിനൊന്ന്": 11,
+  "പന്ത്രണ്ട്": 12,
+};
+
+// Sorted longest-first so "പതിനൊന്ന്" (11) isn't cut short by a naive
+// substring match against a shorter word.
+const NUMBER_WORD_KEYS = Object.keys(MALAYALAM_NUMBER_WORDS).sort(
+  (a, b) => b.length - a.length
+);
+
+export function parseMalayalamNumber(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  if (MALAYALAM_NUMBER_WORDS[trimmed] !== undefined) {
+    return MALAYALAM_NUMBER_WORDS[trimmed];
+  }
+
+  const converted = trimmed
+    .split("")
+    .map((ch) => MALAYALAM_DIGIT_MAP[ch] ?? ch)
+    .join("");
+  if (/^\d+$/.test(converted)) {
+    return parseInt(converted, 10);
+  }
+
+  return null;
+}
+
+// Matches a numeral token: an Arabic/Malayalam digit run, or one of the
+// known spelled-out number words. Used inside larger patterns below.
+const NUMBER_PATTERN = `(?:\\d+|[൦-൯]+|${NUMBER_WORD_KEYS.join("|")})`;
+
+const WEEKDAYS: { word: string; index: number }[] = [
+  { word: "ഞായർ", index: 0 },
+  { word: "തിങ്കൾ", index: 1 },
+  { word: "ചൊവ്വ", index: 2 },
+  { word: "ബുധൻ", index: 3 },
+  { word: "വ്യാഴം", index: 4 },
+  { word: "വെള്ളി", index: 5 },
+  { word: "ശനി", index: 6 },
+];
+
+function startOfDay(d: Date): Date {
+  const result = new Date(d);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function addDays(d: Date, days: number): Date {
+  const result = new Date(d);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+interface DayMatch {
+  matchedText: string;
+  targetDay: Date; // start-of-day Date; time-of-day is composed later
+}
+
+function resolveRelativeDay(text: string, now: Date): DayMatch | null {
+  if (text.includes("മറ്റന്നാൾ")) {
+    return { matchedText: "മറ്റന്നാൾ", targetDay: addDays(startOfDay(now), 2) };
+  }
+  if (text.includes("നാളെ")) {
+    return { matchedText: "നാളെ", targetDay: addDays(startOfDay(now), 1) };
+  }
+  if (text.includes("ഇന്ന്")) {
+    return { matchedText: "ഇന്ന്", targetDay: startOfDay(now) };
+  }
+  return null;
+}
+
+function resolveWeekday(text: string, now: Date): DayMatch | null {
+  for (const { word, index } of WEEKDAYS) {
+    const nextPos = text.indexOf(`അടുത്ത ${word}`);
+    if (nextPos !== -1) {
+      const daysAhead = ((index - now.getDay() + 7) % 7) || 7;
+      return {
+        matchedText: `അടുത്ത ${word}`,
+        targetDay: addDays(startOfDay(now), daysAhead),
+      };
+    }
+    const pos = text.indexOf(word);
+    if (pos !== -1) {
+      const daysAhead = (index - now.getDay() + 7) % 7;
+      return { matchedText: word, targetDay: addDays(startOfDay(now), daysAhead) };
+    }
+  }
+  return null;
+}
+
+function stripMatch(text: string, matchedText: string): string {
+  return text.replace(matchedText, "").replace(/\s+/g, " ").trim();
+}
+
+function cleanTitle(text: string): string {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
+    .trim();
+}
+
+export function parseMalayalamDateTime(
+  text: string,
+  now: Date = new Date()
+): { title: string; date: Date | null } {
+  if (!text.trim()) return { title: "", date: null };
+
+  const dayMatch = resolveWeekday(text, now) ?? resolveRelativeDay(text, now);
+
+  if (!dayMatch) {
+    return { title: cleanTitle(text), date: null };
+  }
+
+  const remaining = stripMatch(text, dayMatch.matchedText);
+  const composed = new Date(dayMatch.targetDay);
+  composed.setHours(9, 0, 0, 0); // default time-of-day; Task 2 overrides this
+
+  return { title: cleanTitle(remaining) || cleanTitle(text), date: composed };
+}
