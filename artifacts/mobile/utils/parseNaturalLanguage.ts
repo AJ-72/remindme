@@ -1,7 +1,7 @@
 import * as chrono from "chrono-node";
 import { parseMalayalamDateTime } from "./malayalamDateParser";
 
-const MALAYALAM_RANGE = /[ഀ-ൿ]/;
+export const MALAYALAM_RANGE = /[ഀ-ൿ]/;
 
 export function parseNaturalLanguage(text: string): { title: string; date: Date | null } {
   if (!text.trim()) return { title: "", date: null };

@@ -1,6 +1,6 @@
-export type FontWeight = "400Regular" | "500Medium" | "600SemiBold" | "700Bold";
+import { MALAYALAM_RANGE } from "./parseNaturalLanguage";
 
-const MALAYALAM_RANGE = /[ഀ-ൿ]/;
+export type FontWeight = "400Regular" | "500Medium" | "600SemiBold" | "700Bold";
 
 const INTER_WEIGHTS: Record<FontWeight, string> = {
   "400Regular": "Inter_400Regular",
