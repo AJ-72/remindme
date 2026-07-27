@@ -132,3 +132,24 @@ describe("parseMalayalamDateTime — clock time with period words", () => {
     expect(title).toBe("മീറ്റിംഗ്");
   });
 });
+
+describe("parseMalayalamDateTime — half past", () => {
+  const now = new Date("2026-07-29T10:00:00");
+
+  it("parses 'X മണി കഴിഞ്ഞ് അര' as :30", () => {
+    const { date } = parseMalayalamDateTime("5 മണി കഴിഞ്ഞ് അര മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(17);
+    expect(date!.getMinutes()).toBe(30);
+  });
+
+  it("parses 'അര X മണിക്ക്' as :30", () => {
+    const { date } = parseMalayalamDateTime("അര 5 മണിക്ക് മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(17);
+    expect(date!.getMinutes()).toBe(30);
+  });
+
+  it("strips the half-past phrase cleanly from the title", () => {
+    const { title } = parseMalayalamDateTime("നാളെ അര 5 മണിക്ക് മീറ്റിംഗ്", now);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+});

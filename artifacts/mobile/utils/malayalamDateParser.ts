@@ -138,6 +138,30 @@ function applyBias(hour: number, bias: "AM" | "PM"): number {
 }
 
 function resolveClockTime(text: string): ClockMatch | null {
+  const halfPastAfter = text.match(
+    new RegExp(`(${NUMBER_PATTERN})\\s*മണി\\s*കഴിഞ്ഞ്\\s*അര`)
+  );
+  if (halfPastAfter) {
+    const rawHour = parseMalayalamNumber(halfPastAfter[1]);
+    if (rawHour !== null) {
+      const hour = rawHour >= 1 && rawHour <= 7 ? applyBias(rawHour, "PM")
+        : rawHour === 12 ? 12
+        : rawHour;
+      return { matchedText: halfPastAfter[0], hour, minute: 30 };
+    }
+  }
+
+  const halfPastBefore = text.match(new RegExp(`അര\\s*(${NUMBER_PATTERN})\\s*മണിക്ക്`));
+  if (halfPastBefore) {
+    const rawHour = parseMalayalamNumber(halfPastBefore[1]);
+    if (rawHour !== null) {
+      const hour = rawHour >= 1 && rawHour <= 7 ? applyBias(rawHour, "PM")
+        : rawHour === 12 ? 12
+        : rawHour;
+      return { matchedText: halfPastBefore[0], hour, minute: 30 };
+    }
+  }
+
   for (const period of PERIOD_WORDS) {
     const withHourRegex = new RegExp(`${period.word}\\s*(${NUMBER_PATTERN})\\s*മണിക്ക്`);
     const withHour = text.match(withHourRegex);
