@@ -179,3 +179,19 @@ describe("parseMalayalamDateTime — relative durations", () => {
     expect(date!.getTime()).toBe(now.getTime() + 5 * 60 * 60 * 1000);
   });
 });
+
+describe("parseMalayalamDateTime — code-mixed input (v1 limitation)", () => {
+  const now = new Date("2026-07-29T10:00:00");
+
+  it("extracts the Malayalam day word and leaves embedded Latin time text untouched in the title", () => {
+    const { title, date } = parseMalayalamDateTime("call John നാളെ 5pm", now);
+    expect(date!.getDate()).toBe(30); // നാളെ recognized
+    expect(title).toBe("call John 5pm"); // "5pm" not parsed as a time
+  });
+
+  it("does not recognize an English relative-date word even next to Malayalam text", () => {
+    const { date } = parseMalayalamDateTime("Meeting tomorrow നാളെ", now);
+    // നാളെ is still recognized (it's Malayalam vocabulary); "tomorrow" is not touched.
+    expect(date!.getDate()).toBe(30);
+  });
+});
