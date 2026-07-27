@@ -118,6 +118,59 @@ function cleanTitle(text: string): string {
     .trim();
 }
 
+interface ClockMatch {
+  matchedText: string;
+  hour: number;
+  minute: number;
+}
+
+const PERIOD_WORDS: { word: string; bias: "AM" | "PM"; defaultHour: number }[] = [
+  { word: "രാവിലെ", bias: "AM", defaultHour: 9 },
+  { word: "ഉച്ചയ്ക്ക്", bias: "PM", defaultHour: 12 },
+  { word: "വൈകിട്ട്", bias: "PM", defaultHour: 18 },
+  { word: "രാത്രി", bias: "PM", defaultHour: 21 },
+];
+
+function applyBias(hour: number, bias: "AM" | "PM"): number {
+  if (hour === 12) return 12;
+  if (bias === "PM") return hour + 12;
+  return hour;
+}
+
+function resolveClockTime(text: string): ClockMatch | null {
+  for (const period of PERIOD_WORDS) {
+    const withHourRegex = new RegExp(`${period.word}\\s*(${NUMBER_PATTERN})\\s*മണിക്ക്`);
+    const withHour = text.match(withHourRegex);
+    if (withHour) {
+      const rawHour = parseMalayalamNumber(withHour[1]);
+      if (rawHour !== null) {
+        return {
+          matchedText: withHour[0],
+          hour: applyBias(rawHour, period.bias),
+          minute: 0,
+        };
+      }
+    }
+    if (text.includes(period.word) && !text.match(/മണിക്ക്/)) {
+      return { matchedText: period.word, hour: period.defaultHour, minute: 0 };
+    }
+  }
+
+  const bareRegex = new RegExp(`(${NUMBER_PATTERN})\\s*മണിക്ക്`);
+  const bare = text.match(bareRegex);
+  if (bare) {
+    const rawHour = parseMalayalamNumber(bare[1]);
+    if (rawHour !== null) {
+      const hour = rawHour >= 1 && rawHour <= 7 ? applyBias(rawHour, "PM")
+        : rawHour === 12 ? 12
+        : rawHour; // 8-11 stay as AM (no bias applied)
+      return { matchedText: bare[0], hour, minute: 0 };
+    }
+  }
+
+  return null;
+}
+
 export function parseMalayalamDateTime(
   text: string,
   now: Date = new Date()
@@ -129,14 +182,24 @@ export function parseMalayalamDateTime(
   const normalizedText = text.replace(/\s+/g, " ").trim();
 
   const dayMatch = resolveWeekday(normalizedText, now) ?? resolveRelativeDay(normalizedText, now);
+  const remainingAfterDay = dayMatch ? stripMatch(normalizedText, dayMatch.matchedText) : normalizedText;
 
-  if (!dayMatch) {
+  const clockMatch = resolveClockTime(remainingAfterDay);
+
+  if (!dayMatch && !clockMatch) {
     return { title: cleanTitle(normalizedText), date: null };
   }
 
-  const remaining = stripMatch(normalizedText, dayMatch.matchedText);
-  const composed = new Date(dayMatch.targetDay);
-  composed.setHours(9, 0, 0, 0); // default time-of-day; Task 2 overrides this
+  const composed = new Date(dayMatch ? dayMatch.targetDay : startOfDay(now));
+  if (clockMatch) {
+    composed.setHours(clockMatch.hour, clockMatch.minute, 0, 0);
+  } else {
+    composed.setHours(9, 0, 0, 0);
+  }
 
-  return { title: cleanTitle(remaining) || cleanTitle(normalizedText), date: composed };
+  const remainingAfterClock = clockMatch
+    ? stripMatch(remainingAfterDay, clockMatch.matchedText)
+    : remainingAfterDay;
+
+  return { title: cleanTitle(remainingAfterClock) || cleanTitle(normalizedText), date: composed };
 }
