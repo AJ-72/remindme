@@ -15,9 +15,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as chrono from "chrono-node";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
+import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 
 type DateTimePickerEvent = { type: string; nativeEvent: object };
 const DateTimePicker: React.ComponentType<any> | null =
@@ -39,36 +39,6 @@ function toDateInput(d: Date) {
 
 function toTimeInput(d: Date) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function parseNaturalLanguage(text: string): { title: string; date: Date | null } {
-  if (!text.trim()) return { title: "", date: null };
-
-  const now = new Date();
-  const results = chrono.parse(text, now, { forwardDate: true });
-
-  if (results.length === 0) {
-    return { title: text.trim(), date: null };
-  }
-
-  // Use the first parsed date/time
-  const parsed = results[0];
-  const date = parsed.date();
-
-  // Strip all matched date/time strings to extract the title
-  let title = text;
-  // Remove matches in reverse order to preserve indices
-  for (let i = results.length - 1; i >= 0; i--) {
-    const r = results[i];
-    title = title.slice(0, r.index) + title.slice(r.index + r.text.length);
-  }
-  // Clean up extra whitespace, punctuation at edges
-  title = title
-    .replace(/\s+/g, " ")
-    .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
-    .trim();
-
-  return { title: title || text.trim(), date };
 }
 
 type PickerMode = "date" | "time" | null;
