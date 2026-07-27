@@ -124,15 +124,19 @@ export function parseMalayalamDateTime(
 ): { title: string; date: Date | null } {
   if (!text.trim()) return { title: "", date: null };
 
-  const dayMatch = resolveWeekday(text, now) ?? resolveRelativeDay(text, now);
+  // Normalize whitespace early (collapsing runs of whitespace to single space)
+  // so both resolvers and stripMatch operate on consistent text
+  const normalizedText = text.replace(/\s+/g, " ").trim();
+
+  const dayMatch = resolveWeekday(normalizedText, now) ?? resolveRelativeDay(normalizedText, now);
 
   if (!dayMatch) {
-    return { title: cleanTitle(text), date: null };
+    return { title: cleanTitle(normalizedText), date: null };
   }
 
-  const remaining = stripMatch(text, dayMatch.matchedText);
+  const remaining = stripMatch(normalizedText, dayMatch.matchedText);
   const composed = new Date(dayMatch.targetDay);
   composed.setHours(9, 0, 0, 0); // default time-of-day; Task 2 overrides this
 
-  return { title: cleanTitle(remaining) || cleanTitle(text), date: composed };
+  return { title: cleanTitle(remaining) || cleanTitle(normalizedText), date: composed };
 }

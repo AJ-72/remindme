@@ -65,6 +65,12 @@ describe("parseMalayalamDateTime — weekday names", () => {
     expect(date!.getMonth()).toBe(7); // August = 7
   });
 
+  it("forces +7 days even with irregular spacing (double space)", () => {
+    const { date } = parseMalayalamDateTime("അടുത്ത  ബുധൻ മീറ്റിംഗ്", wednesday);
+    expect(date!.getDate()).toBe(5); // Aug 5, next Wednesday
+    expect(date!.getMonth()).toBe(7); // August = 7
+  });
+
   it("returns a null match for text with no day/weekday word", () => {
     const { title, date } = parseMalayalamDateTime("വീട്ടിൽ എന്തെങ്കിലും ചെയ്യണം", wednesday);
     expect(date).toBeNull();
