@@ -77,17 +77,25 @@ function NativeShareIntentCapture({
   onNotice,
   onDebugInfo,
   dictationLanguage,
-  settingsLoading,
 }: {
   onText: (text: string) => void;
   onTranscribingChange: (transcribing: boolean) => void;
   onNotice: (notice: string | null) => void;
   onDebugInfo: (info: string | null) => void;
   dictationLanguage: DictationLanguage;
-  settingsLoading: boolean;
 }) {
   const { shareIntent, resetShareIntent, error } = ShareIntent!.useShareIntent();
   const handledRef = useRef(false);
+
+  // dictationLanguage loads asynchronously from AsyncStorage in
+  // RemindersProvider, starting from a default value. Keep a ref that's
+  // updated on every render (not just when this effect re-runs) so the
+  // audio-transcription branch below can read whatever the freshest
+  // committed value is at the moment it actually calls transcribeAudioFile,
+  // rather than the value captured in this effect's closure at the instant
+  // the audio file was first detected.
+  const dictationLanguageRef = useRef(dictationLanguage);
+  dictationLanguageRef.current = dictationLanguage;
 
   useEffect(() => {
     logDebug("NativeShareIntentCapture mounted");
@@ -95,19 +103,8 @@ function NativeShareIntentCapture({
 
   useEffect(() => {
     logDebug(
-      `NativeShareIntentCapture effect ran — handled=${handledRef.current}, error=${String(error)}, shareIntent=${safeStringify(shareIntent)}, settingsLoading=${settingsLoading}`
+      `NativeShareIntentCapture effect ran — handled=${handledRef.current}, error=${String(error)}, shareIntent=${safeStringify(shareIntent)}`
     );
-
-    // Settings (including dictationLanguage) load asynchronously from
-    // AsyncStorage in RemindersProvider. If we process a shared audio file
-    // before that load resolves, transcribeAudioFile would be called with
-    // the default "en-US" instead of the user's actual stored language, and
-    // — since handledRef latches after the first attempt — it would never
-    // get a chance to retry with the correct value. Wait for settings to
-    // finish loading before handling anything.
-    if (settingsLoading) {
-      return;
-    }
 
     if (error && !handledRef.current) {
       handledRef.current = true;
@@ -136,8 +133,26 @@ function NativeShareIntentCapture({
             onNotice(AUDIO_TRANSCRIPTION_FALLBACK_NOTICE);
             return;
           }
-          logDebug(`calling transcribeAudioFile(${audioFile.path}, ${audioFile.fileName})`);
-          const result = await transcribeAudioFile(audioFile.path, audioFile.fileName, dictationLanguage);
+          // Audio can be detected on the very first render, before
+          // RemindersProvider's async AsyncStorage read of dictationLanguage
+          // resolves — the value captured above (from this effect's
+          // closure) may still be the default. Give any already-in-flight
+          // settings load a bounded number of event-loop turns to commit
+          // and update dictationLanguageRef via a re-render (bailing out
+          // early the moment it changes), then read whatever the freshest
+          // value is right before the call. This only affects the
+          // audio-transcription path; the text/error branches above and
+          // below are unaffected and still run immediately.
+          const languageBeforeWaiting = dictationLanguageRef.current;
+          for (let attempt = 0; attempt < 10; attempt++) {
+            if (dictationLanguageRef.current !== languageBeforeWaiting) {
+              break;
+            }
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          }
+          const currentDictationLanguage = dictationLanguageRef.current;
+          logDebug(`calling transcribeAudioFile(${audioFile.path}, ${audioFile.fileName}, ${currentDictationLanguage})`);
+          const result = await transcribeAudioFile(audioFile.path, audioFile.fileName, currentDictationLanguage);
           logDebug(`transcribeAudioFile result: ${safeStringify(result)}`);
           if ("text" in result) {
             onText(result.text);
@@ -187,17 +202,7 @@ function NativeShareIntentCapture({
     if (!audioFile && !text) {
       handledRef.current = false;
     }
-  }, [
-    shareIntent,
-    error,
-    resetShareIntent,
-    onText,
-    onTranscribingChange,
-    onNotice,
-    onDebugInfo,
-    dictationLanguage,
-    settingsLoading,
-  ]);
+  }, [shareIntent, error, resetShareIntent, onText, onTranscribingChange, onNotice, onDebugInfo]);
 
   return null;
 }
@@ -207,7 +212,7 @@ export function SharedTextProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const { dictationLanguage, loading: settingsLoading } = useReminders();
+  const { dictationLanguage } = useReminders();
   const [sharedText, setSharedText] = useState("");
   const [sharedAudioTranscribing, setSharedAudioTranscribing] = useState(false);
   const [sharedAudioNotice, setSharedAudioNotice] = useState<string | null>(null);
@@ -251,7 +256,6 @@ export function SharedTextProvider({
           onNotice={handleNotice}
           onDebugInfo={handleDebugInfo}
           dictationLanguage={dictationLanguage}
-          settingsLoading={settingsLoading}
         />
       ) : null}
       {children}
