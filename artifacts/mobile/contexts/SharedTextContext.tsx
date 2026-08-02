@@ -12,7 +12,7 @@ import {
   isFileTranscriptionSupported,
   transcribeAudioFile,
 } from "@/services/SpeechService";
-import { useReminders, type DictationLanguage } from "@/contexts/RemindersContext";
+import { getDictationLanguage } from "@/services/ReminderService";
 
 interface SharedTextContextType {
   sharedText: string;
@@ -76,26 +76,14 @@ function NativeShareIntentCapture({
   onTranscribingChange,
   onNotice,
   onDebugInfo,
-  dictationLanguage,
 }: {
   onText: (text: string) => void;
   onTranscribingChange: (transcribing: boolean) => void;
   onNotice: (notice: string | null) => void;
   onDebugInfo: (info: string | null) => void;
-  dictationLanguage: DictationLanguage;
 }) {
   const { shareIntent, resetShareIntent, error } = ShareIntent!.useShareIntent();
   const handledRef = useRef(false);
-
-  // dictationLanguage loads asynchronously from AsyncStorage in
-  // RemindersProvider, starting from a default value. Keep a ref that's
-  // updated on every render (not just when this effect re-runs) so the
-  // audio-transcription branch below can read whatever the freshest
-  // committed value is at the moment it actually calls transcribeAudioFile,
-  // rather than the value captured in this effect's closure at the instant
-  // the audio file was first detected.
-  const dictationLanguageRef = useRef(dictationLanguage);
-  dictationLanguageRef.current = dictationLanguage;
 
   useEffect(() => {
     logDebug("NativeShareIntentCapture mounted");
@@ -133,26 +121,15 @@ function NativeShareIntentCapture({
             onNotice(AUDIO_TRANSCRIPTION_FALLBACK_NOTICE);
             return;
           }
-          // Audio can be detected on the very first render, before
-          // RemindersProvider's async AsyncStorage read of dictationLanguage
-          // resolves — the value captured above (from this effect's
-          // closure) may still be the default. Give any already-in-flight
-          // settings load a bounded number of event-loop turns to commit
-          // and update dictationLanguageRef via a re-render (bailing out
-          // early the moment it changes), then read whatever the freshest
-          // value is right before the call. This only affects the
-          // audio-transcription path; the text/error branches above and
-          // below are unaffected and still run immediately.
-          const languageBeforeWaiting = dictationLanguageRef.current;
-          for (let attempt = 0; attempt < 10; attempt++) {
-            if (dictationLanguageRef.current !== languageBeforeWaiting) {
-              break;
-            }
-            await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          }
-          const currentDictationLanguage = dictationLanguageRef.current;
-          logDebug(`calling transcribeAudioFile(${audioFile.path}, ${audioFile.fileName}, ${currentDictationLanguage})`);
-          const result = await transcribeAudioFile(audioFile.path, audioFile.fileName, currentDictationLanguage);
+          // Read the current dictation language directly from AsyncStorage
+          // rather than threading it through a prop from RemindersContext.
+          // This is already on an async path that's seconds long (audio
+          // transcription), so an awaited storage read here is always
+          // correct and deterministic — no race with RemindersProvider's
+          // own async load, no polling needed.
+          const dictationLanguage = await getDictationLanguage();
+          logDebug(`calling transcribeAudioFile(${audioFile.path}, ${audioFile.fileName}, ${dictationLanguage})`);
+          const result = await transcribeAudioFile(audioFile.path, audioFile.fileName, dictationLanguage);
           logDebug(`transcribeAudioFile result: ${safeStringify(result)}`);
           if ("text" in result) {
             onText(result.text);
@@ -212,7 +189,6 @@ export function SharedTextProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const { dictationLanguage } = useReminders();
   const [sharedText, setSharedText] = useState("");
   const [sharedAudioTranscribing, setSharedAudioTranscribing] = useState(false);
   const [sharedAudioNotice, setSharedAudioNotice] = useState<string | null>(null);
@@ -255,7 +231,6 @@ export function SharedTextProvider({
           onTranscribingChange={handleTranscribingChange}
           onNotice={handleNotice}
           onDebugInfo={handleDebugInfo}
-          dictationLanguage={dictationLanguage}
         />
       ) : null}
       {children}
