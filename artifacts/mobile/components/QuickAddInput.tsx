@@ -13,7 +13,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { getLocales } from "expo-localization";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
@@ -89,17 +88,13 @@ function formatSuggestedTime(d: Date): string {
   return `${datePart} at ${timePart}`;
 }
 
-function getDeviceSpeechLocale(): string {
-  return getLocales()[0]?.languageTag ?? "en-US";
-}
-
 interface Props {
   onSaved?: () => void;
 }
 
 export default function QuickAddInput({ onSaved }: Props) {
   const colors = useColors();
-  const { addReminder, defaultAlarmEnabled } = useReminders();
+  const { addReminder, defaultAlarmEnabled, dictationLanguage } = useReminders();
   const {
     sharedText,
     clearSharedText,
@@ -303,7 +298,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       if (!nowGranted) return;
     }
 
-    const locale = getDeviceSpeechLocale();
+    const locale = dictationLanguage;
     const modelStatus = await ensureOfflineModelReady(locale);
     if (modelStatus === "preparing") {
       setMicNotice("Preparing voice recognition — try again in a moment");
