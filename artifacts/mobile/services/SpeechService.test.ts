@@ -238,7 +238,7 @@ import { transcribeAudioFile } from "@/services/SpeechService";
 
 describe("transcribeAudioFile", () => {
   it("copies the source file into cache, then resolves with the final transcript", async () => {
-    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus");
+    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus", "en-US");
 
     const resultListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
       (call) => call[0] === "result"
@@ -268,7 +268,8 @@ describe("transcribeAudioFile", () => {
 
     const resultPromise = transcribeAudioFile(
       "file:///mock-cache-dir/PTT-20260724-WA0003.opus",
-      "PTT-20260724-WA0003.opus"
+      "PTT-20260724-WA0003.opus",
+      "en-US"
     );
 
     const resultListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
@@ -284,7 +285,7 @@ describe("transcribeAudioFile", () => {
   });
 
   it("deletes the cached temp copy after a successful transcription, so cache files don't accumulate", async () => {
-    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus");
+    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus", "en-US");
 
     const resultListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
       (call) => call[0] === "result"
@@ -297,7 +298,7 @@ describe("transcribeAudioFile", () => {
   });
 
   it("resolves failed: true (never rejects) when an error event fires, with the error's reason attached", async () => {
-    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus");
+    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus", "en-US");
 
     const errorListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
       (call) => call[0] === "error"
@@ -312,7 +313,7 @@ describe("transcribeAudioFile", () => {
     startListening("", "en-US", jest.fn(), jest.fn(), jest.fn());
     (ExpoSpeechRecognitionModule.start as jest.Mock).mockClear();
 
-    const result = await transcribeAudioFile("content://some/audio", "note.opus");
+    const result = await transcribeAudioFile("content://some/audio", "note.opus", "en-US");
 
     expect(result).toEqual({ busy: true });
     expect(ExpoSpeechRecognitionModule.start).not.toHaveBeenCalled();
@@ -320,14 +321,14 @@ describe("transcribeAudioFile", () => {
   });
 
   it("clears the active session after resolving, allowing a fresh call afterward", async () => {
-    const first = transcribeAudioFile("content://some/audio", "note.opus");
+    const first = transcribeAudioFile("content://some/audio", "note.opus", "en-US");
     const errorListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
       (call) => call[0] === "error"
     );
     errorListenerCall[1]({ message: "fail" });
     await first;
 
-    const secondPromise = transcribeAudioFile("content://some/audio", "note2.opus");
+    const secondPromise = transcribeAudioFile("content://some/audio", "note2.opus", "en-US");
     // The session was cleared by the first call, so this second call registers
     // its own fresh set of listeners; trigger the latest "error" listener to
     // resolve it (the brief's original test awaited this promise without ever
@@ -345,14 +346,14 @@ describe("transcribeAudioFile", () => {
     // Simulate a source copy failure (e.g. revoked content:// read permission).
     makeNextCopyThrow();
 
-    const result = await transcribeAudioFile("content://some/audio", "note.opus");
+    const result = await transcribeAudioFile("content://some/audio", "note.opus", "en-US");
 
     expect(result).toEqual({ failed: true, reason: expect.stringContaining("permission revoked") });
     expect(ExpoSpeechRecognitionModule.start).not.toHaveBeenCalled();
 
     // activeMode must have been cleared by the failure, not left wedged: a fresh call
     // should proceed normally (not report busy: true).
-    const second = transcribeAudioFile("content://some/audio", "note2.opus");
+    const second = transcribeAudioFile("content://some/audio", "note2.opus", "en-US");
     const errorListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls
       .filter((call) => call[0] === "error")
       .pop();
@@ -361,8 +362,22 @@ describe("transcribeAudioFile", () => {
     expect(secondResult).not.toEqual({ busy: true });
   });
 
+  it("passes the given locale through to the native module as lang", async () => {
+    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus", "ml-IN");
+
+    expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledWith(
+      expect.objectContaining({ lang: "ml-IN" })
+    );
+
+    const errorListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (call) => call[0] === "error"
+    );
+    errorListenerCall[1]({ message: "cleanup" });
+    await resultPromise;
+  });
+
   it("resolves failed: true when the end event fires without a prior result or error, and clears the active session", async () => {
-    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus");
+    const resultPromise = transcribeAudioFile("content://some/audio", "note.opus", "en-US");
 
     const endListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
       (call) => call[0] === "end"
@@ -374,7 +389,7 @@ describe("transcribeAudioFile", () => {
 
     // activeMode must have been cleared by the bare "end" event, not left wedged:
     // a fresh call should proceed normally (not report busy: true).
-    const secondPromise = transcribeAudioFile("content://some/audio", "note2.opus");
+    const secondPromise = transcribeAudioFile("content://some/audio", "note2.opus", "en-US");
     const secondErrorListenerCall = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls
       .filter((call) => call[0] === "error")
       .pop();
