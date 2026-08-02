@@ -11,20 +11,23 @@ import { AppState } from "react-native";
 import {
   type Reminder,
   type NotificationData,
+  type DictationLanguage,
   addReminder as serviceAdd,
   deleteReminder as serviceDelete,
   editReminder as serviceEdit,
   getDefaultAlarmEnabled,
+  getDictationLanguage,
   getShowDescriptionEnabled,
   initNotifications,
   loadReminders,
   setDefaultAlarmEnabled as serviceSetDefaultAlarmEnabled,
+  setDictationLanguage as serviceSetDictationLanguage,
   setShowDescriptionEnabled as serviceSetShowDescriptionEnabled,
   snoozeReminder as serviceSnooze,
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
 
-export type { Reminder, NotificationData };
+export type { Reminder, NotificationData, DictationLanguage };
 export {
   SNOOZE_ACTION_ID,
   SNOOZE_CATEGORY_ID,
@@ -49,6 +52,8 @@ interface RemindersContextType {
   setDefaultAlarmEnabled: (enabled: boolean) => Promise<void>;
   showDescriptionInNotifications: boolean;
   setShowDescriptionInNotifications: (enabled: boolean) => Promise<void>;
+  dictationLanguage: DictationLanguage;
+  setDictationLanguage: (lang: DictationLanguage) => Promise<void>;
 }
 
 const RemindersContext = createContext<RemindersContextType | null>(null);
@@ -65,17 +70,20 @@ export function RemindersProvider({
   const [defaultAlarmEnabled, setDefaultAlarmEnabledState] = useState(true);
   const [showDescriptionInNotifications, setShowDescriptionInNotificationsState] =
     useState(false);
+  const [dictationLanguage, setDictationLanguageState] = useState<DictationLanguage>("en-US");
 
   useEffect(() => {
     Promise.all([
       loadReminders(),
       getDefaultAlarmEnabled(),
       getShowDescriptionEnabled(),
+      getDictationLanguage(),
     ])
-      .then(([loadedReminders, defaultAlarm, showDescription]) => {
+      .then(([loadedReminders, defaultAlarm, showDescription, dictLang]) => {
         setReminders(loadedReminders);
         setDefaultAlarmEnabledState(defaultAlarm);
         setShowDescriptionInNotificationsState(showDescription);
+        setDictationLanguageState(dictLang);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -102,6 +110,11 @@ export function RemindersProvider({
     },
     []
   );
+
+  const setDictationLanguage = useCallback(async (lang: DictationLanguage) => {
+    await serviceSetDictationLanguage(lang);
+    setDictationLanguageState(lang);
+  }, []);
 
   const addReminder = useCallback(
     async (data: Omit<Reminder, "id" | "completed" | "notificationId">) => {
@@ -165,6 +178,8 @@ export function RemindersProvider({
         setDefaultAlarmEnabled,
         showDescriptionInNotifications,
         setShowDescriptionInNotifications,
+        dictationLanguage,
+        setDictationLanguage,
       }}
     >
       {children}

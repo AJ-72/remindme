@@ -29,11 +29,11 @@ jest.mock("@/contexts/SharedTextContext", () => {
 
 function renderComponent() {
   return render(
-    <SharedTextProvider>
-      <RemindersProvider>
+    <RemindersProvider>
+      <SharedTextProvider>
         <QuickAddInput />
-      </RemindersProvider>
-    </SharedTextProvider>
+      </SharedTextProvider>
+    </RemindersProvider>
   );
 }
 
@@ -185,6 +185,22 @@ describe("QuickAddInput — mic button", () => {
     });
   });
 
+  it("uses the dictationLanguage setting, not the device locale, when starting to listen", async () => {
+    // AsyncStorage is already imported at the top of this file (used by the
+    // existing beforeEach's `await (AsyncStorage as any).clear()`).
+    await AsyncStorage.setItem("@dictation_language_v1", "ml-IN");
+
+    const { findByTestId } = renderComponent();
+    const micButton = await findByTestId("quick-add-mic");
+    fireEvent.press(micButton);
+
+    await waitFor(() => {
+      expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledWith(
+        expect.objectContaining({ lang: "ml-IN" })
+      );
+    });
+  });
+
   it("populates the input field when a result event fires while listening", async () => {
     const { findByTestId } = renderComponent();
     const micButton = await findByTestId("quick-add-mic");
@@ -313,11 +329,11 @@ describe("QuickAddInput — mic button", () => {
       sharedAudioNotice: null,
     });
     rerender(
-      <SharedTextProvider>
-        <RemindersProvider>
+      <RemindersProvider>
+        <SharedTextProvider>
           <QuickAddInput />
-        </RemindersProvider>
-      </SharedTextProvider>
+        </SharedTextProvider>
+      </RemindersProvider>
     );
 
     expect(getMicColor()).toBe("#6366f1");
@@ -331,11 +347,11 @@ describe("QuickAddInput — mic button", () => {
       sharedAudioNotice: null,
     });
     rerender(
-      <SharedTextProvider>
-        <RemindersProvider>
+      <RemindersProvider>
+        <SharedTextProvider>
           <QuickAddInput />
-        </RemindersProvider>
-      </SharedTextProvider>
+        </SharedTextProvider>
+      </RemindersProvider>
     );
 
     // The live session survived the blip untouched: still active, never stopped.

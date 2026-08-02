@@ -93,7 +93,8 @@ export function isFileTranscriptionSupported(): boolean {
 
 export function transcribeAudioFile(
   uri: string,
-  fileName: string
+  fileName: string,
+  locale: string
 ): Promise<{ busy: boolean } | { text: string } | { failed: true; reason: string }> {
   if (activeMode !== null) return Promise.resolve({ busy: true });
   activeMode = "file";
@@ -160,6 +161,7 @@ export function transcribeAudioFile(
 
     ExpoSpeechRecognitionModule.start({
       audioSource: { uri: cached.uri },
+      lang: locale,
       requiresOnDeviceRecognition: true,
     } as any);
   });

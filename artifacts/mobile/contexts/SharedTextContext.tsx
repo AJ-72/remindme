@@ -12,6 +12,7 @@ import {
   isFileTranscriptionSupported,
   transcribeAudioFile,
 } from "@/services/SpeechService";
+import { getDictationLanguage } from "@/services/ReminderService";
 
 interface SharedTextContextType {
   sharedText: string;
@@ -120,8 +121,15 @@ function NativeShareIntentCapture({
             onNotice(AUDIO_TRANSCRIPTION_FALLBACK_NOTICE);
             return;
           }
-          logDebug(`calling transcribeAudioFile(${audioFile.path}, ${audioFile.fileName})`);
-          const result = await transcribeAudioFile(audioFile.path, audioFile.fileName);
+          // Read the current dictation language directly from AsyncStorage
+          // rather than threading it through a prop from RemindersContext.
+          // This is already on an async path that's seconds long (audio
+          // transcription), so an awaited storage read here is always
+          // correct and deterministic — no race with RemindersProvider's
+          // own async load, no polling needed.
+          const dictationLanguage = await getDictationLanguage();
+          logDebug(`calling transcribeAudioFile(${audioFile.path}, ${audioFile.fileName}, ${dictationLanguage})`);
+          const result = await transcribeAudioFile(audioFile.path, audioFile.fileName, dictationLanguage);
           logDebug(`transcribeAudioFile result: ${safeStringify(result)}`);
           if ("text" in result) {
             onText(result.text);

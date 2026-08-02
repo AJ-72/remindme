@@ -36,11 +36,11 @@ function renderScreen() {
         insets: { top: 0, left: 0, right: 0, bottom: 0 },
       }}
     >
-      <SharedTextProvider>
-        <RemindersProvider>
+      <RemindersProvider>
+        <SharedTextProvider>
           <HomeScreen />
-        </RemindersProvider>
-      </SharedTextProvider>
+        </SharedTextProvider>
+      </RemindersProvider>
     </SafeAreaProvider>
   );
 }

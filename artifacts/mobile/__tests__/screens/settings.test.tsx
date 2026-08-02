@@ -4,7 +4,11 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import SettingsScreen from "@/app/(tabs)/settings";
 import { RemindersProvider } from "@/contexts/RemindersContext";
-import { DEFAULT_ALARM_KEY, SHOW_DESCRIPTION_KEY } from "@/services/ReminderService";
+import {
+  DEFAULT_ALARM_KEY,
+  SHOW_DESCRIPTION_KEY,
+  DICTATION_LANGUAGE_KEY,
+} from "@/services/ReminderService";
 import { logDebug } from "@/services/DebugLogService";
 
 jest.mock("expo-haptics");
@@ -108,5 +112,43 @@ describe("SettingsScreen", () => {
 
     const text = await findByTestId("debug-logs-text");
     await waitFor(() => expect(text.props.children).toMatch(/share-intent test entry/));
+  });
+
+  it("highlights English by default when no dictation language is stored (mocked device locale is en-US)", async () => {
+    const { findByTestId } = renderScreen();
+    const enPill = await findByTestId("dictation-language-en");
+    const mlPill = await findByTestId("dictation-language-ml");
+    await waitFor(() => expect(enPill.props.accessibilityState?.selected).toBe(true));
+    expect(mlPill.props.accessibilityState?.selected).toBe(false);
+  });
+
+  it("highlights Malayalam when it's the stored dictation language", async () => {
+    await AsyncStorage.setItem(DICTATION_LANGUAGE_KEY, "ml-IN");
+    const { findByTestId } = renderScreen();
+    const mlPill = await findByTestId("dictation-language-ml");
+    await waitFor(() => expect(mlPill.props.accessibilityState?.selected).toBe(true));
+  });
+
+  it("tapping the Malayalam pill persists the new dictation language to storage", async () => {
+    const { findByTestId } = renderScreen();
+    const mlPill = await findByTestId("dictation-language-ml");
+
+    fireEvent.press(mlPill);
+
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(DICTATION_LANGUAGE_KEY, "ml-IN")
+    );
+  });
+
+  it("tapping the English pill persists the new dictation language to storage", async () => {
+    await AsyncStorage.setItem(DICTATION_LANGUAGE_KEY, "ml-IN");
+    const { findByTestId } = renderScreen();
+    const enPill = await findByTestId("dictation-language-en");
+
+    fireEvent.press(enPill);
+
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(DICTATION_LANGUAGE_KEY, "en-US")
+    );
   });
 });

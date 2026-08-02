@@ -29,6 +29,8 @@ export default function SettingsScreen() {
     setDefaultAlarmEnabled,
     showDescriptionInNotifications,
     setShowDescriptionInNotifications,
+    dictationLanguage,
+    setDictationLanguage,
   } = useReminders();
 
   const [logsVisible, setLogsVisible] = useState(false);
@@ -109,6 +111,38 @@ export default function SettingsScreen() {
     },
     descriptionCard: {
       marginTop: 12,
+    },
+    languageCard: {
+      marginTop: 12,
+    },
+    languageLabel: {
+      fontSize: 15,
+      fontFamily: "Inter_500Medium",
+      color: colors.foreground,
+      marginBottom: 10,
+    },
+    languagePillRow: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    languagePill: {
+      paddingVertical: 8,
+      paddingHorizontal: 16,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    languagePillActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    languagePillText: {
+      fontSize: 14,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+    },
+    languagePillTextActive: {
+      color: colors.primaryForeground,
     },
     debugRow: {
       flexDirection: "row",
@@ -234,6 +268,52 @@ export default function SettingsScreen() {
               showDescriptionInNotifications ? colors.primary : colors.mutedForeground
             }
           />
+        </View>
+
+        <View style={[styles.alarmCard, styles.languageCard]}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.languageLabel}>Dictation language</Text>
+            <View style={styles.languagePillRow}>
+              <Pressable
+                testID="dictation-language-en"
+                accessibilityRole="button"
+                accessibilityState={{ selected: dictationLanguage === "en-US" }}
+                style={[
+                  styles.languagePill,
+                  dictationLanguage === "en-US" && styles.languagePillActive,
+                ]}
+                onPress={() => setDictationLanguage("en-US")}
+              >
+                <Text
+                  style={[
+                    styles.languagePillText,
+                    dictationLanguage === "en-US" && styles.languagePillTextActive,
+                  ]}
+                >
+                  English
+                </Text>
+              </Pressable>
+              <Pressable
+                testID="dictation-language-ml"
+                accessibilityRole="button"
+                accessibilityState={{ selected: dictationLanguage === "ml-IN" }}
+                style={[
+                  styles.languagePill,
+                  dictationLanguage === "ml-IN" && styles.languagePillActive,
+                ]}
+                onPress={() => setDictationLanguage("ml-IN")}
+              >
+                <Text
+                  style={[
+                    styles.languagePillText,
+                    dictationLanguage === "ml-IN" && styles.languagePillTextActive,
+                  ]}
+                >
+                  മലയാളം
+                </Text>
+              </Pressable>
+            </View>
+          </View>
         </View>
 
         <Pressable
