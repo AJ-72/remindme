@@ -1,8 +1,10 @@
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getLocales } from "expo-localization";
 import {
   ALARM_EARLY_OFFSET_MS,
   DEFAULT_ALARM_KEY,
+  DICTATION_LANGUAGE_KEY,
   PERMISSION_ONBOARDING_KEY,
   SNOOZE_CATEGORY_ID,
   SNOOZE_ACTION_ID,
@@ -14,6 +16,7 @@ import {
   deleteReminder,
   editReminder,
   getDefaultAlarmEnabled,
+  getDictationLanguage,
   hasCompletedPermissionOnboarding,
   markDoneById,
   markPermissionOnboardingComplete,
@@ -21,6 +24,7 @@ import {
   rescheduleAllFutureReminders,
   scheduleSnoozeNotification,
   setDefaultAlarmEnabled,
+  setDictationLanguage,
   setShowDescriptionEnabled,
   snoozeReminder,
   toggleComplete,
@@ -410,6 +414,45 @@ describe("default alarm setting", () => {
       DEFAULT_ALARM_KEY,
       JSON.stringify(false)
     );
+  });
+});
+
+describe("dictation language setting", () => {
+  beforeEach(() => {
+    (getLocales as jest.Mock).mockReturnValue([
+      { languageTag: "en-US", languageCode: "en", regionCode: "US" },
+    ]);
+  });
+
+  it("defaults to en-US when unset and the device locale is not Malayalam", async () => {
+    const result = await getDictationLanguage();
+    expect(result).toBe("en-US");
+  });
+
+  it("defaults to ml-IN when unset and the device locale is Malayalam", async () => {
+    (getLocales as jest.Mock).mockReturnValue([
+      { languageTag: "ml-IN", languageCode: "ml", regionCode: "IN" },
+    ]);
+    const result = await getDictationLanguage();
+    expect(result).toBe("ml-IN");
+  });
+
+  it("setDictationLanguage persists ml-IN, and getDictationLanguage reflects it regardless of device locale", async () => {
+    await setDictationLanguage("ml-IN");
+    const result = await getDictationLanguage();
+    expect(result).toBe("ml-IN");
+  });
+
+  it("setDictationLanguage persists en-US after being set to ml-IN", async () => {
+    await setDictationLanguage("ml-IN");
+    await setDictationLanguage("en-US");
+    const result = await getDictationLanguage();
+    expect(result).toBe("en-US");
+  });
+
+  it("setDictationLanguage writes under DICTATION_LANGUAGE_KEY", async () => {
+    await setDictationLanguage("ml-IN");
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(DICTATION_LANGUAGE_KEY, "ml-IN");
   });
 });
 

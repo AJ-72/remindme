@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Linking, Platform } from "react-native";
+import { getLocales } from "expo-localization";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -13,6 +14,7 @@ try {
 export const STORAGE_KEY = "@reminders_v1";
 export const DEFAULT_ALARM_KEY = "@default_alarm_v1";
 export const SHOW_DESCRIPTION_KEY = "@show_description_v1";
+export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
 export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 export const SNOOZE_ACTION_ID = "SNOOZE_10";
@@ -42,6 +44,8 @@ export interface NotificationData {
   alarm: boolean;
   channelId: string;
 }
+
+export type DictationLanguage = "en-US" | "ml-IN";
 
 export async function loadReminders(): Promise<Reminder[]> {
   try {
@@ -77,6 +81,19 @@ export async function getShowDescriptionEnabled(): Promise<boolean> {
 
 export async function setShowDescriptionEnabled(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(SHOW_DESCRIPTION_KEY, JSON.stringify(enabled));
+}
+
+export async function getDictationLanguage(): Promise<DictationLanguage> {
+  try {
+    const raw = await AsyncStorage.getItem(DICTATION_LANGUAGE_KEY);
+    if (raw === "en-US" || raw === "ml-IN") return raw;
+  } catch {}
+  const deviceLocale = getLocales()[0]?.languageTag ?? "en-US";
+  return deviceLocale.startsWith("ml") ? "ml-IN" : "en-US";
+}
+
+export async function setDictationLanguage(lang: DictationLanguage): Promise<void> {
+  await AsyncStorage.setItem(DICTATION_LANGUAGE_KEY, lang);
 }
 
 export async function resolveNotificationBody(
