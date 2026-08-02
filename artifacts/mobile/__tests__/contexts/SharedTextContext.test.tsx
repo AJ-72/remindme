@@ -2,8 +2,10 @@ import React from "react";
 import { render, waitFor } from "@testing-library/react-native";
 import { Text } from "react-native";
 import { SharedTextProvider, useSharedText } from "@/contexts/SharedTextContext";
+import { RemindersProvider } from "@/contexts/RemindersContext";
 import { useShareIntent } from "expo-share-intent";
 import * as SpeechService from "@/services/SpeechService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 function Consumer() {
   const { sharedText, sharedAudioTranscribing, sharedAudioNotice, sharedAudioDebugInfo } =
@@ -20,14 +22,17 @@ function Consumer() {
 
 function renderConsumer() {
   return render(
-    <SharedTextProvider>
-      <Consumer />
-    </SharedTextProvider>
+    <RemindersProvider>
+      <SharedTextProvider>
+        <Consumer />
+      </SharedTextProvider>
+    </RemindersProvider>
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
+  await (AsyncStorage as any).clear();
   (useShareIntent as jest.Mock).mockReturnValue({
     isReady: true,
     hasShareIntent: false,
@@ -165,5 +170,33 @@ describe("SharedTextContext — native share-intent errors", () => {
     await waitFor(async () => {
       expect((await findByTestId("shared-text")).props.children).toBe("call mom tomorrow");
     });
+  });
+
+  it("transcribes shared audio using the stored dictationLanguage setting", async () => {
+    await AsyncStorage.setItem("@dictation_language_v1", "ml-IN");
+    jest.spyOn(SpeechService, "isFileTranscriptionSupported").mockReturnValue(true);
+    const transcribeSpy = jest
+      .spyOn(SpeechService, "transcribeAudioFile")
+      .mockResolvedValue({ text: "call mom tomorrow" });
+    (useShareIntent as jest.Mock).mockReturnValue({
+      isReady: true,
+      hasShareIntent: true,
+      shareIntent: {
+        files: [{ fileName: "AUD-0001.opus", mimeType: "audio/ogg", path: "content://media/AUD-0001.opus" }],
+      },
+      resetShareIntent: jest.fn(),
+      error: null,
+    });
+
+    const { findByTestId } = renderConsumer();
+
+    await waitFor(async () => {
+      expect((await findByTestId("shared-text")).props.children).toBe("call mom tomorrow");
+    });
+    expect(transcribeSpy).toHaveBeenCalledWith(
+      "content://media/AUD-0001.opus",
+      "AUD-0001.opus",
+      "ml-IN"
+    );
   });
 });
