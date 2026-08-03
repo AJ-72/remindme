@@ -47,7 +47,7 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
   const styles = StyleSheet.create({
     card: {
       backgroundColor: colors.card,
-      borderRadius: 16,
+      borderRadius: colors.radiusCard,
       padding: 16,
       marginBottom: 10,
       flexDirection: "row",
@@ -66,9 +66,9 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
       borderColor: overdue && !reminder.completed ? "#fca5a5" : colors.border,
     },
     checkButton: {
-      width: 26,
-      height: 26,
-      borderRadius: 13,
+      width: 24,
+      height: 24,
+      borderRadius: 12,
       borderWidth: 2,
       borderColor: reminder.completed ? colors.primary : colors.border,
       backgroundColor: reminder.completed ? colors.primary : "transparent",
