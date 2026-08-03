@@ -319,7 +319,8 @@ export default function QuickAddInput({ onSaved }: Props) {
         setListening(false);
         stopMicPulse();
         setMicNotice("Couldn't hear that — try again or type it in.");
-      }
+      },
+      modelStatus !== "unavailable"
     );
     if (busy) {
       setMicNotice("Still transcribing the shared audio…");
@@ -356,7 +357,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       flexDirection: "row",
       alignItems: "center",
       backgroundColor: colors.card,
-      borderRadius: 16,
+      borderRadius: colors.radiusCapsule,
       borderWidth: 1,
       borderColor: colors.border,
       paddingHorizontal: 14,
