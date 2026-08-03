@@ -111,6 +111,7 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [notesVisible, setNotesVisible] = useState(false);
   const [description, setDescription] = useState("");
   const [listening, setListening] = useState(false);
+  const [activeTab, setActiveTab] = useState<"type" | "speak">("type");
   const [micNotice, setMicNotice] = useState<string | null>(null);
   const [micNoticeDebugInfo, setMicNoticeDebugInfo] = useState<string | null>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
@@ -133,6 +134,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       }
       micSourceRef.current = "shared";
       setListening(true);
+      setActiveTab("speak");
       startMicPulse();
       setMicNotice(null);
     } else if (micSourceRef.current === "shared") {
@@ -271,22 +273,7 @@ export default function QuickAddInput({ onSaved }: Props) {
     micPulse.setValue(1);
   };
 
-  const handleMicPress = async () => {
-    if (listening) {
-      if (micSourceRef.current === "shared") {
-        // A shared audio file is transcribing right now — stopping here would
-        // kill its native listeners and permanently wedge the concurrency
-        // guard (see Finding 2b). Surface a notice instead of stopping it.
-        setMicNotice("Still transcribing the shared audio…");
-        return;
-      }
-      stopListening();
-      micSourceRef.current = null;
-      setListening(false);
-      stopMicPulse();
-      return;
-    }
-
+  const startSpeakMode = async () => {
     setMicNotice(null);
     const { granted, canAskAgain } = await getMicPermissionStatus();
     if (!granted) {
@@ -329,6 +316,36 @@ export default function QuickAddInput({ onSaved }: Props) {
     micSourceRef.current = "live";
     setListening(true);
     startMicPulse();
+  };
+
+  const stopSpeakMode = () => {
+    if (micSourceRef.current === "shared") {
+      // A shared audio file is transcribing right now — stopping here would
+      // kill its native listeners and permanently wedge the concurrency
+      // guard (see Finding 2b). Surface a notice instead of stopping it.
+      setMicNotice("Still transcribing the shared audio…");
+      return;
+    }
+    stopListening();
+    micSourceRef.current = null;
+    setListening(false);
+    stopMicPulse();
+  };
+
+  const handleTabPress = (tab: "type" | "speak") => {
+    setActiveTab(tab);
+    if (tab === "speak") {
+      if (!listening) {
+        startSpeakMode();
+      } else if (micSourceRef.current === "shared") {
+        // A shared audio file is already transcribing — surface the same
+        // busy notice pressing SPEAK would have shown via the old mic
+        // button, rather than silently no-op'ing.
+        setMicNotice("Still transcribing the shared audio…");
+      }
+    } else {
+      if (listening) stopSpeakMode();
+    }
   };
 
   const canSave = !saving && !!(parsedTitle || input.trim());
@@ -404,6 +421,36 @@ export default function QuickAddInput({ onSaved }: Props) {
       backgroundColor: canSave ? colors.primary : colors.muted,
       alignItems: "center",
       justifyContent: "center",
+    },
+    tabRow: {
+      flexDirection: "row",
+      gap: 4,
+      paddingHorizontal: 6,
+      paddingTop: 6,
+      marginTop: 6,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    tab: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 5,
+      paddingBottom: 6,
+      borderBottomWidth: 2,
+      borderBottomColor: "transparent",
+    },
+    tabActive: {
+      borderBottomColor: colors.primary,
+    },
+    tabText: {
+      fontSize: 12,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.mutedForeground,
+    },
+    tabTextActive: {
+      color: colors.primary,
     },
     pillRow: {
       flexDirection: "row",
@@ -581,20 +628,6 @@ export default function QuickAddInput({ onSaved }: Props) {
         </Pressable>
         <Pressable
           style={styles.alarmBtn}
-          onPress={handleMicPress}
-          hitSlop={8}
-          testID="quick-add-mic"
-        >
-          <Animated.View style={{ transform: [{ scale: micPulse }] }}>
-            <Feather
-              name="mic"
-              size={16}
-              color={listening ? colors.primary : colors.mutedForeground}
-            />
-          </Animated.View>
-        </Pressable>
-        <Pressable
-          style={styles.alarmBtn}
           onPress={() => {
             setAlarm((a) => !a);
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -615,6 +648,34 @@ export default function QuickAddInput({ onSaved }: Props) {
           testID="quick-add-save"
         >
           <Feather name="check" size={16} color={canSave ? colors.primaryForeground : colors.mutedForeground} />
+        </Pressable>
+      </View>
+
+      <View style={styles.tabRow}>
+        <Pressable
+          style={[styles.tab, activeTab === "type" && styles.tabActive]}
+          onPress={() => handleTabPress("type")}
+          testID="quick-add-tab-type"
+        >
+          <Text style={[styles.tabText, activeTab === "type" && styles.tabTextActive]}>
+            TYPE
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tab, activeTab === "speak" && styles.tabActive]}
+          onPress={() => handleTabPress("speak")}
+          testID="quick-add-tab-speak"
+        >
+          <Animated.View style={{ transform: [{ scale: activeTab === "speak" ? micPulse : 1 }] }}>
+            <Feather
+              name="mic"
+              size={13}
+              color={activeTab === "speak" ? colors.primary : colors.mutedForeground}
+            />
+          </Animated.View>
+          <Text style={[styles.tabText, activeTab === "speak" && styles.tabTextActive]}>
+            SPEAK
+          </Text>
         </Pressable>
       </View>
 
