@@ -56,6 +56,25 @@ describe("HomeScreen", () => {
     expect(await findByText("No reminders yet")).toBeTruthy();
   });
 
+  it("shows a 'Today' header with a date and upcoming-count subtitle", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({ id: "r1", title: "Task one", completed: false, datetime: FUTURE }),
+        makeReminder({ id: "r2", title: "Task two", completed: false, datetime: FUTURE }),
+      ])
+    );
+    const { findByText } = renderScreen();
+    expect(await findByText("Today")).toBeTruthy();
+    expect(await findByText("2 upcoming")).toBeTruthy();
+  });
+
+  it("shows 'All caught up!' as the subtitle when there are no upcoming reminders", async () => {
+    const { findByText } = renderScreen();
+    expect(await findByText("Today")).toBeTruthy();
+    expect(await findByText("All caught up!")).toBeTruthy();
+  });
+
   it("lists reminder titles loaded from storage", async () => {
     await AsyncStorage.setItem(
       STORAGE_KEY,

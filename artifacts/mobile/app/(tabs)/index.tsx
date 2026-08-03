@@ -73,6 +73,17 @@ export default function HomeScreen() {
       color: colors.mutedForeground,
       marginTop: 2,
     },
+    headerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    headerAvatar: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.muted,
+    },
     scrollContent: {
       paddingHorizontal: 20,
       paddingTop: 4,
@@ -157,10 +168,15 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Reminders</Text>
-        <Text style={styles.headerSubtitle}>
-          {upcoming.length === 0 ? "All caught up!" : `${upcoming.length} upcoming`}
-        </Text>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.headerTitle}>Today</Text>
+            <Text style={styles.headerSubtitle}>
+              {upcoming.length === 0 ? "All caught up!" : `${upcoming.length} upcoming`}
+            </Text>
+          </View>
+          <View style={styles.headerAvatar} />
+        </View>
       </View>
 
       <QuickAddInput />
