@@ -34,6 +34,9 @@ const colors = {
     warningForeground: "#ffffff",
   },
   radius: 14,
+  radiusCard: 20,
+  radiusCapsule: 20,
+  radiusFull: 999,
 };
 
 export default colors;
