@@ -16,9 +16,14 @@ export async function requestMicPermission(): Promise<boolean> {
   return granted;
 }
 
+// "unavailable" means this device has no offline model for the locale at
+// all (e.g. many devices' Speech Services app has no Malayalam offline
+// pack, even though Gboard's separate voice-typing engine supports it) —
+// callers should fall back to online (requiresOnDeviceRecognition: false)
+// rather than treating this the same as "preparing" (still downloading).
 export async function ensureOfflineModelReady(
   locale: string
-): Promise<"ready" | "preparing"> {
+): Promise<"ready" | "preparing" | "unavailable"> {
   if (Platform.OS !== "android") return "ready";
 
   try {
@@ -30,10 +35,16 @@ export async function ensureOfflineModelReady(
     // directly, same as before this check existed.
   }
 
-  const { status } = await ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload({
-    locale,
-  });
-  return status === "download_success" ? "ready" : "preparing";
+  try {
+    const { status } = await ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload({
+      locale,
+    });
+    return status === "download_success" ? "ready" : "preparing";
+  } catch {
+    // Rejects with ERROR_LANGUAGE_UNAVAILABLE (code 12) when this device's
+    // Speech Services app has no offline model for the locale at all.
+    return "unavailable";
+  }
 }
 
 let activeMode: "live" | "file" | null = null;
@@ -50,7 +61,8 @@ export function startListening(
   locale: string,
   onResult: (fullText: string) => void,
   onEnd: () => void,
-  onError: (message: string) => void
+  onError: (message: string) => void,
+  onDevice: boolean = true
 ): { busy: boolean } {
   if (activeMode !== null) return { busy: true };
   activeMode = "live";
@@ -73,7 +85,7 @@ export function startListening(
   ExpoSpeechRecognitionModule.start({
     lang: locale,
     interimResults: true,
-    requiresOnDeviceRecognition: true,
+    requiresOnDeviceRecognition: onDevice,
   } as any);
 
   return { busy: false };
@@ -94,7 +106,8 @@ export function isFileTranscriptionSupported(): boolean {
 export function transcribeAudioFile(
   uri: string,
   fileName: string,
-  locale: string
+  locale: string,
+  onDevice: boolean = true
 ): Promise<{ busy: boolean } | { text: string } | { failed: true; reason: string }> {
   if (activeMode !== null) return Promise.resolve({ busy: true });
   activeMode = "file";
@@ -162,7 +175,7 @@ export function transcribeAudioFile(
     ExpoSpeechRecognitionModule.start({
       audioSource: { uri: cached.uri },
       lang: locale,
-      requiresOnDeviceRecognition: true,
+      requiresOnDeviceRecognition: onDevice,
     } as any);
   });
 }

@@ -125,6 +125,12 @@ export default function SettingsScreen() {
       flexDirection: "row",
       gap: 8,
     },
+    languageNotice: {
+      fontSize: 12,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginTop: 10,
+    },
     languagePill: {
       paddingVertical: 8,
       paddingHorizontal: 16,
@@ -313,6 +319,13 @@ export default function SettingsScreen() {
                 </Text>
               </Pressable>
             </View>
+            {dictationLanguage !== "en-US" && (
+              <Text style={styles.languageNotice}>
+                Non-English dictation may use Google's online speech recognition when an
+                offline model isn't available on this device — your voice audio is sent to
+                Google's servers to be transcribed, and an internet connection is required.
+              </Text>
+            )}
           </View>
         </View>
 

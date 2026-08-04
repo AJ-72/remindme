@@ -175,6 +175,7 @@ describe("SharedTextContext — native share-intent errors", () => {
   it("transcribes shared audio using the stored dictationLanguage setting", async () => {
     await AsyncStorage.setItem("@dictation_language_v1", "ml-IN");
     jest.spyOn(SpeechService, "isFileTranscriptionSupported").mockReturnValue(true);
+    jest.spyOn(SpeechService, "ensureOfflineModelReady").mockResolvedValue("ready");
     const transcribeSpy = jest
       .spyOn(SpeechService, "transcribeAudioFile")
       .mockResolvedValue({ text: "call mom tomorrow" });
@@ -196,7 +197,8 @@ describe("SharedTextContext — native share-intent errors", () => {
     expect(transcribeSpy).toHaveBeenCalledWith(
       "content://media/AUD-0001.opus",
       "AUD-0001.opus",
-      "ml-IN"
+      "ml-IN",
+      true
     );
   });
 });

@@ -9,6 +9,7 @@ import React, {
 import { Platform } from "react-native";
 import { logDebug } from "@/services/DebugLogService";
 import {
+  ensureOfflineModelReady,
   isFileTranscriptionSupported,
   transcribeAudioFile,
 } from "@/services/SpeechService";
@@ -128,8 +129,17 @@ function NativeShareIntentCapture({
           // correct and deterministic — no race with RemindersProvider's
           // own async load, no polling needed.
           const dictationLanguage = await getDictationLanguage();
-          logDebug(`calling transcribeAudioFile(${audioFile.path}, ${audioFile.fileName}, ${dictationLanguage})`);
-          const result = await transcribeAudioFile(audioFile.path, audioFile.fileName, dictationLanguage);
+          const modelStatus = await ensureOfflineModelReady(dictationLanguage);
+          const onDevice = modelStatus !== "unavailable";
+          logDebug(
+            `calling transcribeAudioFile(${audioFile.path}, ${audioFile.fileName}, ${dictationLanguage}, onDevice=${onDevice})`
+          );
+          const result = await transcribeAudioFile(
+            audioFile.path,
+            audioFile.fileName,
+            dictationLanguage,
+            onDevice
+          );
           logDebug(`transcribeAudioFile result: ${safeStringify(result)}`);
           if ("text" in result) {
             onText(result.text);
