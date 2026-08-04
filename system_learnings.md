@@ -1,0 +1,143 @@
+# System Learnings Ledger
+
+Running log of non-obvious fixes, config changes, and decisions made while working in this repo.
+Read this before starting work — it may save you from re-debugging something already solved.
+
+**Format rule:** one entry per change. State WHAT changed, WHY (root cause, not symptom), and WHERE.
+Keep entries short and factual. Do not delete old entries — mark them SUPERSEDED if a later entry replaces them.
+Newest entries at the top.
+
+---
+
+## 2026-08-04 — EAS cloud build failing: local `android/` dir leaking into the upload
+
+**Symptom:** `eas build` from `artifacts/mobile` failed with two errors: (1) `android/local.properties` (Windows-specific SDK path) flagged as leaking into the EAS upload, and (2) Gradle "No matching variant" / "No variants exist" errors for `react-native-community/datetimepicker`, `async-storage`, `gesture-handler`, `keyboard-controller` — as if the build was resolving against stale cached autolinking metadata instead of a fresh one.
+
+**ROOT CAUSE:** this project uses Continuous Native Generation — `artifacts/mobile/android/` is never committed (gitignored) and is meant to be regenerated fresh by `expo prebuild` on EAS's servers every build. But local Windows native builds (`npx expo run:android`, see 2026-08-02/03 entries below) leave a real `android/` dir on disk, including machine-specific `local.properties` and stale `android/build`, `android/app/build` Gradle output from earlier CMake/library versions. With no `.easignore` present, eas-cli's upload step included this local directory, so EAS built against a stale, Windows-specific native tree instead of generating its own — hence both the leaked-path warning and the bogus variant-resolution failures (cached metadata not matching what's actually in `node_modules` on EAS's build server).
+
+**FIX:** added `artifacts/mobile/.easignore`:
+```
+/android
+/ios
+```
+This forces EAS to always ignore any locally-generated native folders and prebuild fresh, regardless of what's sitting on disk from local Windows builds.
+
+**STATUS AS OF THIS ENTRY: fix committed and pushed (confirmed `.easignore` present in the commit that landed, working tree clean, origin/main in sync) but user reports the SAME errors recurring on a subsequent `eas-cli` build.** Repo-side static checks (git tracking, `.gitignore`, `.easignore` placement, eas-cli version 21.5.0, no `EAS_NO_VCS` override) all look correct — root cause of the *recurrence* is NOT yet confirmed. Do not assume `.easignore` alone is sufficient until a fresh build log is inspected. Next step when resuming: get the actual failing build's log/URL and check whether eas-cli's local-build (`eas build --local`) path might bypass `.easignore`-based filtering differently than the cloud-submission path, or whether a stale eas-cli build cache on EAS's side is reusing a prior (pre-fix) upload.
+
+---
+
+## 2026-08-03 — CMake/Ninja Windows fix (see 2026-08-02 entry below) was INCOMPLETE — corrected here
+
+**SUPERSEDES:** the "FIX" in the 2026-08-02 entry below (pinning `externalNativeBuild.cmake.version "4.1.2"` only in `artifacts/mobile/android/app/build.gradle`) is necessary but NOT sufficient. That only fixes the `:app` module's own native build. It does nothing for other native modules (`expo-modules-core`, `react-native-screens`, `react-native-keyboard-controller`, etc.) — each Android Gradle Plugin subproject resolves its own CMake version independently; there is no inheritance from `:app` or from a project-wide default.
+
+**Confirmed root cause of "it worked on the emulator but failed on my physical OnePlus phone" (same repo, no other changes):** the emulator build used architectures `x86_64,arm64-v8a`; the phone build used `arm64-v8a,armeabi-v7a` — a different, previously-uncached architecture combo forced a fresh CMake reconfigure for modules that hadn't been rebuilt before, and those modules were still silently using the broken default CMake 3.22.1/Ninja 1.10, even with the `:app`-only pin already in place.
+
+**THE ACTUAL COMPLETE FIX — three things must ALL be present:**
+1. `artifacts/mobile/android/app/build.gradle` — pin for the `:app` module itself (from 2026-08-02 entry):
+   ```gradle
+   android { externalNativeBuild { cmake { version "4.1.2" } } }
+   ```
+2. `artifacts/mobile/android/build.gradle` (root, top-level, NOT app/build.gradle) — a project-wide hook that catches every OTHER native module automatically, since most don't have `CMAKE_VERSION` env var support and can't be edited durably (they live in `node_modules`):
+   ```gradle
+   allprojects {
+     // ... existing repositories block ...
+     plugins.withId("com.android.library") {
+       android {
+         externalNativeBuild {
+           cmake {
+             version "4.1.2"
+           }
+         }
+       }
+     }
+   }
+   ```
+   CRITICAL TIMING GOTCHA: this must be set directly inside `plugins.withId { android { ... } }`, evaluated immediately when the plugin applies — NOT wrapped in `afterEvaluate { }`. `afterEvaluate` fires too late: AGP/RNGP has already read and locked the CMake version by then, causing `A problem occurred configuring project ':expo-modules-core' > It is too late to set version`. This cost a full failed build cycle to discover.
+3. `$env:CMAKE_VERSION = "4.1.2"` still needed too, for the couple of modules (react-native-worklets, react-native-reanimated) that read `System.getenv("CMAKE_VERSION")` directly in their own `build.gradle` rather than relying on the root project's `externalNativeBuild` block.
+
+**DEAD END — do not retry:** setting `cmake.dir=<path>` in `artifacts/mobile/android/local.properties` does NOT work. This is not a real Android Gradle Plugin / RNGP property for overriding the CMake *version* used per-module; the build silently ignored it and modules kept using the old broken CMake anyway. (Possibly confused with a different, unrelated legacy `ndk.dir`/`cmake.dir` convention from very old Android tooling — doesn't apply here.)
+
+**Always clean stale caches before retrying any CMake version change**, at ALL these levels (missing any one leaves a stale/broken `build.ninja` manifest that fails even with the correct version now configured):
+- `artifacts/mobile/android/app/.cxx`, `android/app/build`, `android/build`, `android/.gradle`
+- Every native module's own `.cxx` dir under `node_modules/.pnpm/<pkg>/android/.cxx` (find via `find node_modules/.pnpm -maxdepth 4 -iname ".cxx" -type d`)
+
+---
+
+## 2026-08-03 — Black screen on app launch was emulator memory exhaustion, not an app bug
+
+**Symptom:** app installed and launched fine (confirmed via `adb shell dumpsys window | grep mCurrentFocus` showing `com.reminders/.MainActivity` focused, and logcat showing `ReactNativeJS: Running "main"` with no errors/crashes), but the screen rendered solid black — no UI, no status bar icons in the worst case. Persisted across: force-stop + cold relaunch, Metro restart, full `adb reboot` of the emulator (temporarily improved status-bar rendering but app content stayed black, then hit a "System UI isn't responding" ANR on next attempt).
+
+**ROOT CAUSE:** the emulator had run out of memory — `adb shell top` showed only 124MB free out of ~4GB, with `surfaceflinger` and `system_server` both under heavy CPU load (245% sys, 123% irq). This happened gradually from the session's repeated builds/process kills/relaunches. Once RAM is that tight, `surfaceflinger` can't composite frames properly — app logic runs fine (hence no crash/error in logs) but nothing paints, which looks exactly like a broken UI/render bug even though it isn't one.
+
+**FIX:** free host machine RAM (close other heavy apps/processes), which frees emulator RAM too. Confirmed the emulator's `MemFree` jumped from 124MB to 580MB+ (2.6GB available) after freeing host memory, and the app rendered correctly on the very next launch — no code, config, or emulator settings changed.
+
+**DIAGNOSTIC TAKEAWAY:** if an RN/Expo app shows a persistent black screen with NO errors anywhere in logcat, NO bundling failure, and the activity is confirmed focused — suspect emulator resource exhaustion before suspecting app code. Check with `adb shell top -n 1 -m 5` (look at `Mem: ... free` and `surfaceflinger`/`system_server` CPU%) before spending time on font-loading/splash-screen/Fabric-surface theories. A "System UI isn't responding" ANR appearing on an otherwise-idle emulator is a strong tell.
+
+---
+
+## 2026-08-03 — Added Stop hook to enforce this ledger gets updated after commits
+
+**Context:** user wants this file kept current automatically, specifically for a smaller/less capable model reading it later — so entries in this file must stay short, imperative, and scannable (WHAT/WHY/WHERE per entry), not prose.
+
+**WHAT:** added `.claude/settings.json` with a `Stop` hook running `.claude/check-learnings-updated.sh`. On every Claude Code stop, the script compares current git `HEAD` against a marker file (`.claude/.last-learnings-commit`, gitignored — local session state, not committed). If new commits landed since the marker and none of them touched `system_learnings.md`, the hook blocks stop and injects a reason listing the unlogged commits, prompting Claude to add an entry before finishing. If `system_learnings.md` was already touched, or there's nothing new, it's a silent no-op (exit 0).
+
+**WHY:** a static git `post-commit` hook can only run a fixed script — it can't reason about *why* a change mattered, so it can't write a good ledger entry. A Claude Code `Stop` hook fires in-session, after Claude (which has full context on what it just did) would otherwise finish, so it can actually produce a reasoned entry rather than a mechanical commit-hash dump.
+
+**LIMITATION:** this only fires when Claude Code itself is the one committing and then stopping. It does NOT catch manual `git commit` runs from a plain terminal outside a Claude Code session — that would need a separate real git `post-commit` hook (a mechanical stub log, not a reasoned entry) layered on top if ever wanted. Not implemented as of this entry.
+
+**GOTCHA:** the hook's JSON output must be built carefully — the `reason` field can contain a multi-line git log, and naive `cat <<EOF` embedding of raw newlines into a JSON string produces invalid JSON. `jq` was unavailable in this repo's Git Bash environment, so the script manually escapes backslashes/quotes and converts real newlines to `\n` via `sed`+`awk` before printing the JSON line. Validated with `node -e "JSON.parse(...)"` since `jq`/`python` weren't reliably available either.
+
+**GOTCHA:** a newly-created `.claude/settings.json` is not picked up by the running session's file watcher automatically — needs `/hooks` (reload) or a session restart to activate for hooks created mid-session.
+
+---
+
+## 2026-08-03 — Existing junctions already solve Windows path-length for this repo: C:\p and C:\n
+
+**Context:** while cleaning up temp folders from the local-build troubleshooting session, found C:\p, C:\n, C:\g, C:\m, C:\r, C:\w at the drive root, all dated 2026-07-27 (predate that session, not created by Claude).
+- `C:\p` is an NTFS junction → `C:\workspace\remindme` (confirmed via `fsutil reparsepoint query`, matching inode with the real repo's files).
+- `C:\n` is an NTFS junction → `C:\workspace\remindme\node_modules`.
+- `C:\g` is a real directory, a Gradle cache (`.tmp`, `caches`, `daemon`, `jdks`, `kotlin-profile`) — legitimate, do not touch.
+- `C:\m`, `C:\r`, `C:\w` are real standalone directories, NOT junctions, each containing what looks like another full repo copy (`.claude`, `artifacts`, `.android`, etc.) — purpose/ownership unconfirmed, left untouched.
+
+IMPLICATION: **`C:\p` already gives a short-path alias to this exact repo** — likely set up by a prior session/user specifically to work around the CMake/Ninja Windows long-path bug (see entry below). Building from `C:\p\artifacts\mobile` (junction) should get the same path-length benefit as physically copying the repo to `C:\dev\remindme`, without duplicating the checkout or needing a separate `pnpm install`.
+FIX FOR NEXT TIME: try building from `C:\p\artifacts\mobile` first before copying the repo elsewhere. Only fall back to a physical copy + separate pnpm store if the junction alone isn't short enough.
+
+**Do not delete C:\p, C:\n, C:\g, C:\m, C:\r, C:\w without explicit user confirmation per-folder** — p/n are load-bearing junctions to this repo, and m/r/w are unidentified but structurally look like other real project copies (found via git status showing meaningful uncommitted work in at least one of them).
+
+---
+
+## 2026-08-02/03 — Local Android build on Windows: confirmed working end-to-end
+
+**Outcome:** after fixes #1 and #2 below, `npx expo run:android` completed with `BUILD SUCCESSFUL`, APK installed, and `com.reminders/.MainActivity` was confirmed as the foreground focused activity on the Pixel 10 emulator via `adb shell dumpsys window | grep mCurrentFocus`. The local-build path is fully validated, not just theoretically fixed.
+
+**One extra transient failure encountered along the way (not a real bug, no fix needed):** after the native build succeeded the first time, Metro failed to bundle with `Unable to resolve "expo-router/entry" from "artifacts\mobile\index.ts"` — looked like Metro's projectRoot got confused (import stack showed paths resolving as if relative to repo root instead of `artifacts/mobile`). `metro.config.js` and the `expo-router` symlink were both verified correct. Simply re-running `npx expo run:android` from the correct cwd fixed it on the next attempt (build was mostly cached, finished in 24s). Conclusion: if you hit `expo-router/entry` unresolved right after a successful native build, just retry before assuming a real config problem.
+
+**Process note — background task interruption:** a background build task can show status "stopped" with "No completion record found" if the Claude Code process/session ends while it's still running (not a build failure). Always check the task's `.output` log file directly for actual progress/result before assuming the build failed — in this case the log showed `BUILD SUCCESSFUL` had already happened before the interruption.
+
+---
+
+## 2026-08-02 — Local Android build on Windows: fixed three separate blockers
+
+**PARTIALLY SUPERSEDED by the 2026-08-03 "CMake/Ninja Windows fix ... was INCOMPLETE" entry above** — item #2's fix below (CMake pin in `app/build.gradle` only) is necessary but not sufficient; see that entry for the complete fix covering all native modules, not just `:app`.
+
+**Context:** user wanted `npx expo run:android` to work locally (avoid burning EAS free-tier build quota). Hit three unrelated failures in sequence. All three must be fixed together for a clean Windows build.
+
+1. **JDK version.** System `java` on PATH was JDK 26. RN/Kotlin Gradle plugin does not support it — fails with misleading error `Error resolving plugin [id: 'com.facebook.react.settings'] > 26.0.2` (that "26.0.2" is the Java version, not a plugin version — Kotlin's `JavaVersion.parse` chokes on it).
+   FIX: set `JAVA_HOME` to Android Studio's bundled JBR (`C:\Program Files\Android\Android Studio\jbr`, JDK 21) before running any gradle/expo build command.
+
+2. **CMake/Ninja Windows long-path bug.** AGP defaults to CMake 3.22.1, which bundles Ninja 1.10. Ninja 1.10 has a real bug in Windows long-path handling, fixed only in Ninja 1.12+ (see ninja-build/ninja#1900). Windows registry `LongPathsEnabled=1` does NOT fix this — it's Ninja's own internal 260-char check, unrelated to the OS long-path opt-in.
+   Symptom: build runs for minutes, gets deep into native module compilation, then fails with `ninja: error: Stat(...): Filename longer than 260 characters` or `manifest 'build.ninja' still dirty after 100 tries`, usually on modules with long file trees (react-native-keyboard-controller, react-native-worklets, expo-modules-core).
+   FIX: install newer CMake (4.1.2 used here) via Android Studio SDK Manager, then explicitly pin it in `artifacts/mobile/android/app/build.gradle`:
+   ```
+   android { externalNativeBuild { cmake { version "4.1.2" } } }
+   ```
+   IMPORTANT: setting the `CMAKE_VERSION` env var alone is NOT enough — some individual native modules (e.g. react-native-worklets) read `CMAKE_VERSION` from their own `android/build.gradle`, but the top-level `:app` module does NOT read this env var and silently keeps using CMake 3.22.1 unless the version is set explicitly in `app/build.gradle` as above.
+   `android/` is prebuild-generated — this edit may be wiped by a future `expo prebuild` and need reapplying.
+   After any CMake version change, delete stale build caches or old absolute paths / broken ninja manifests persist and cause confusing failures: delete `android/app/.cxx`, `android/app/build`, `android/build`, `android/.gradle`.
+
+3. **pnpm store path nesting.** Not a root cause on its own, but pnpm's `.pnpm/<pkg>@<version>_<hash>/node_modules/<pkg>` layout adds ~40-60 extra characters versus npm/yarn's flatter layout. This can tip a marginal path over Ninja's 260-char limit when the underlying Ninja bug (see #2) is present. Once CMake/Ninja is upgraded past 1.12, this stops mattering — do not try to "fix" pnpm nesting as a primary solution; it is a red herring if #2 isn't fixed first.
+   (We tried relocating the pnpm virtual-store-dir to a short path `C:/ps` via `.npmrc` `virtual-store-dir=C:/ps` as a workaround before finding the real fix in #2 — this bought some headroom but did not fully solve it. Not necessary once CMake is upgraded.)
+
+**Correct order of operations for a clean Windows local build:** fix JDK (#1) → fix CMake/Ninja version (#2) → delete stale `.cxx`/`build` caches → run `npx expo run:android`.
+
+**Do NOT conclude pnpm itself is broken or unsupported on Windows** — this was raised and correctly pushed back on. The actual bug is in the bundled Ninja version, which affects npm/yarn users too; pnpm just makes marginal cases fail slightly more often.
