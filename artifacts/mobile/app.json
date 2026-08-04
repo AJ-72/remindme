@@ -14,14 +14,21 @@
       "backgroundColor": "#F5F4FF"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.curios.remindme",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow Reminders to transcribe speech into reminder text.",
+        "NSMicrophoneUsageDescription": "Allow Reminders to use the microphone to add reminders by voice.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.USE_EXACT_ALARM",
         "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECORD_AUDIO"
       ],
       "package": "com.curios.remindme",
       "adaptiveIcon": {
@@ -46,7 +53,9 @@
         {
           "icon": "./assets/images/notification-icon.png",
           "color": "#6366f1",
-          "sounds": ["./assets/sounds/alarm.wav"]
+          "sounds": [
+            "./assets/sounds/alarm.wav"
+          ]
         }
       ],
       [
