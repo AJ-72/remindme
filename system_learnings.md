@@ -22,7 +22,21 @@ Newest entries at the top.
 ```
 This forces EAS to always ignore any locally-generated native folders and prebuild fresh, regardless of what's sitting on disk from local Windows builds.
 
-**STATUS AS OF THIS ENTRY: fix committed and pushed (confirmed `.easignore` present in the commit that landed, working tree clean, origin/main in sync) but user reports the SAME errors recurring on a subsequent `eas-cli` build.** Repo-side static checks (git tracking, `.gitignore`, `.easignore` placement, eas-cli version 21.5.0, no `EAS_NO_VCS` override) all look correct — root cause of the *recurrence* is NOT yet confirmed. Do not assume `.easignore` alone is sufficient until a fresh build log is inspected. Next step when resuming: get the actual failing build's log/URL and check whether eas-cli's local-build (`eas build --local`) path might bypass `.easignore`-based filtering differently than the cloud-submission path, or whether a stale eas-cli build cache on EAS's side is reusing a prior (pre-fix) upload.
+**UPDATE — `.easignore` alone did NOT fix it; real root cause found (see next entry below, 2026-08-05).** Do not stop at this entry's fix.
+
+---
+
+## 2026-08-05 — SUPERSEDES entry above: real root cause was a stray root-level `eas.json` shadowing the mobile one
+
+**Symptom:** identical `android/local.properties` leak warning kept recurring on `eas-cli build` even after `artifacts/mobile/.easignore` (previous entry) was committed and pushed. Repo-side static checks all looked correct (git tracking, `.gitignore`, `.easignore` placement, eas-cli 21.5.0, no `EAS_NO_VCS`) — the `.easignore` fix was real but insufficient, which is what made this confusing.
+
+**ROOT CAUSE:** `git log` on `eas.json`/`.gitignore`/`app.json` history found a **duplicate `eas.json` accidentally committed at the repo root** (`c:\workspace\remindme\eas.json`, commit `ad8e945`, 2026-08-03, bundled into an unrelated design-doc commit) — almost certainly created by running an `eas`/`expo` command from the repo root instead of `cd`-ing into `artifacts/mobile` first. Confirmed it was debris, not intentional: no `app.json` exists at the repo root and no `extra.eas.projectId` in the root `eas.json` — it can't build anything standalone. eas-cli resolves the project root by walking up from cwd to the nearest `eas.json`; with this stray file present, any build invocation risked resolving the whole monorepo as the build root instead of `artifacts/mobile`, uploading the entire repo (including the local, machine-specific `artifacts/mobile/android/` dir with `local.properties`) and never applying `artifacts/mobile/.easignore`, which is scoped to the wrong directory once the root is misresolved.
+
+**TIMING MATCH:** the stray root `eas.json` first appeared 2026-08-03, right around when local Android build support (CMake/Ninja fixes, `npx expo run:android`) was being set up — consistent with the user's report "this worked before we made changes to support android build locally." The local-build work itself didn't break anything; a one-off misplaced `eas` CLI invocation during that same work session did.
+
+**FIX:** `git rm eas.json` at the repo root (commit `b9e9339`). `artifacts/mobile/eas.json` remains the sole authoritative EAS config, matching the documented invocation in CLAUDE.md (`cd artifacts/mobile && npx eas-cli build ...`).
+
+**LESSON:** when EAS Build behavior looks wrong despite correct-looking config in the expected location, check for a **second, shadowing config file higher up the directory tree** — `eas.json`/`.easignore` resolution walks upward from cwd, so a stray file anywhere above the real project root can silently override or bypass the real one. Don't just verify the config you expect is correct; verify no other copy exists that could be found first.
 
 ---
 
