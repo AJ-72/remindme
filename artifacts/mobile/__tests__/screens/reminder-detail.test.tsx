@@ -1,5 +1,4 @@
 import React from "react";
-import { Alert } from "react-native";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -129,22 +128,34 @@ describe("ReminderDetailScreen", () => {
     });
   });
 
-  it("Delete shows a confirm alert, then deletes on confirm and navigates back", async () => {
-    const alertSpy = jest
-      .spyOn(Alert, "alert")
-      .mockImplementation((_title, _msg, buttons) => {
-        buttons?.find((btn) => btn.text === "Delete")?.onPress?.();
-      });
+  it("Delete shows a styled confirm sheet, then deletes on confirm and navigates back", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText } = renderScreen();
+    const button = await findByTestId("delete-button");
 
+    fireEvent.press(button);
+
+    expect(await findByText("Delete Reminder")).toBeTruthy();
+    const confirmButton = await findByTestId("confirm-sheet-confirm");
+    fireEvent.press(confirmButton);
+
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored.find((r: Reminder) => r.id === "r1")).toBeUndefined();
+  });
+
+  it("cancelling the delete confirm sheet keeps the reminder and does not navigate back", async () => {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
     const { findByTestId } = renderScreen();
     const button = await findByTestId("delete-button");
 
     fireEvent.press(button);
 
-    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const cancelButton = await findByTestId("confirm-sheet-cancel");
+    fireEvent.press(cancelButton);
+
+    expect(mockBack).not.toHaveBeenCalled();
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
-    expect(stored.find((r: Reminder) => r.id === "r1")).toBeUndefined();
-    alertSpy.mockRestore();
+    expect(stored.find((r: Reminder) => r.id === "r1")).toBeDefined();
   });
 });

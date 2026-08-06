@@ -1,9 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -12,6 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import ConfirmSheet from "@/components/ConfirmSheet";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 import { formatDatetime } from "@/utils/formatDatetime";
@@ -31,6 +31,7 @@ export default function ReminderDetailScreen() {
   const { reminders, loading, toggleComplete, snoozeReminder, deleteReminder } =
     useReminders();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const reminder = reminders.find((r) => r.id === id);
 
@@ -49,17 +50,17 @@ export default function ReminderDetailScreen() {
   };
 
   const handleDelete = () => {
-    Alert.alert("Delete Reminder", "Are you sure you want to delete this reminder?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          await deleteReminder(id);
-          goBack();
-        },
-      },
-    ]);
+    setConfirmingDelete(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    setConfirmingDelete(false);
+    await deleteReminder(id);
+    goBack();
+  };
+
+  const handleCancelDelete = () => {
+    setConfirmingDelete(false);
   };
 
   const styles = StyleSheet.create({
@@ -257,6 +258,16 @@ export default function ReminderDetailScreen() {
           </View>
         </View>
       )}
+
+      <ConfirmSheet
+        visible={confirmingDelete}
+        title="Delete Reminder"
+        message="Are you sure you want to delete this reminder?"
+        confirmLabel="Delete"
+        destructive
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+      />
     </View>
   );
 }

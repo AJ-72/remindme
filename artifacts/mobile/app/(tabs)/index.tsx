@@ -3,7 +3,6 @@ import { router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   RefreshControl,
@@ -12,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import ConfirmSheet from "@/components/ConfirmSheet";
 import QuickAddInput from "@/components/QuickAddInput";
 import ReminderCard from "@/components/ReminderCard";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
@@ -23,6 +23,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { reminders, deleteReminder, loading } = useReminders();
   const [refreshing, setRefreshing] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const { upcoming, completed } = useMemo(() => {
     const upcoming = reminders
@@ -35,14 +36,16 @@ export default function HomeScreen() {
   }, [reminders]);
 
   const handleDelete = (id: string) => {
-    Alert.alert("Delete Reminder", "Are you sure you want to delete this reminder?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => deleteReminder(id),
-      },
-    ]);
+    setPendingDeleteId(id);
+  };
+
+  const handleConfirmDelete = () => {
+    if (pendingDeleteId) deleteReminder(pendingDeleteId);
+    setPendingDeleteId(null);
+  };
+
+  const handleCancelDelete = () => {
+    setPendingDeleteId(null);
   };
 
   const handleRefresh = async () => {
@@ -231,6 +234,16 @@ export default function HomeScreen() {
           </>
         )}
       </KeyboardAwareScrollViewCompat>
+
+      <ConfirmSheet
+        visible={pendingDeleteId !== null}
+        title="Delete Reminder"
+        message="Are you sure you want to delete this reminder?"
+        confirmLabel="Delete"
+        destructive
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+      />
     </View>
   );
 }

@@ -1,5 +1,4 @@
 import React from "react";
-import { Alert } from "react-native";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -119,18 +118,12 @@ describe("HomeScreen", () => {
     expect(titles).toEqual(["Completed newer", "Completed older"]);
   });
 
-  it("deleting a reminder removes it from the visible list", async () => {
-    const alertSpy = jest
-      .spyOn(Alert, "alert")
-      .mockImplementation((_title, _msg, buttons) => {
-        buttons?.find((btn) => btn.text === "Delete")?.onPress?.();
-      });
-
+  it("deleting a reminder shows a styled confirm sheet, then removes it from the visible list on confirm", async () => {
     await AsyncStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([makeReminder({ id: "r1", title: "Delete me" })])
     );
-    const { findByText, queryByText, UNSAFE_getAllByType } = renderScreen();
+    const { findByText, findByTestId, queryByText, UNSAFE_getAllByType } = renderScreen();
     await findByText("Delete me");
 
     const Feather = require("@expo/vector-icons").Feather;
@@ -139,7 +132,32 @@ describe("HomeScreen", () => {
     );
     fireEvent.press(trashIcon.parent);
 
+    expect(await findByText("Delete Reminder")).toBeTruthy();
+    const confirmButton = await findByTestId("confirm-sheet-confirm");
+    fireEvent.press(confirmButton);
+
     await waitFor(() => expect(queryByText("Delete me")).toBeNull());
-    alertSpy.mockRestore();
+  });
+
+  it("cancelling the delete confirm sheet keeps the reminder", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ id: "r1", title: "Keep me" })])
+    );
+    const { findByText, findByTestId, UNSAFE_getAllByType } = renderScreen();
+    await findByText("Keep me");
+
+    const Feather = require("@expo/vector-icons").Feather;
+    const trashIcon = UNSAFE_getAllByType(Feather).find(
+      (node: any) => node.props.name === "trash-2"
+    );
+    fireEvent.press(trashIcon.parent);
+
+    const cancelButton = await findByTestId("confirm-sheet-cancel");
+    fireEvent.press(cancelButton);
+
+    await waitFor(async () => {
+      expect(await findByText("Keep me")).toBeTruthy();
+    });
   });
 });
