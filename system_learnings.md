@@ -9,6 +9,26 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-06 — Fire-and-forget async handler raced a test's `waitFor` under parallel jest workers
+
+**Symptom:** `index.test.tsx`'s delete-confirm test failed nondeterministically — reliably green with `jest --runInBand`, reliably red in default parallel mode. Looked like cross-suite pollution at first but reproduced identically on an unmodified checkout via `git stash`, ruling that out.
+
+**ROOT CAUSE:** `HomeScreen`'s `handleConfirmDelete` called `deleteReminder(id)` (async: awaits an AsyncStorage write via `serviceDelete`, then `setReminders`) without `await`, then immediately called `setPendingDeleteId(null)` to close the sheet. This left the delete as a detached fire-and-forget promise, racing the test's `waitFor` default 1000ms timeout. Under jest's default parallel-worker mode, CPU contention from concurrently-running suites was enough to occasionally push that promise chain past the timeout window — a genuine race, not flake noise or pollution.
+
+**FIX:** made `handleConfirmDelete` (`app/(tabs)/index.tsx`) properly `async`/await the delete before clearing `pendingDeleteId`. Also widened `ConfirmSheet`'s `onConfirm` prop type to `() => void | Promise<void>`. Test fix: wrap the confirm `fireEvent.press` in `act(async () => {...})` and give `waitFor` an explicit longer timeout, so the assertion follows real completion instead of racing a fixed clock. Verified with 5 consecutive full parallel `jest` runs, all green — don't conclude "flaky, ignore" from a single red run; rerun with `--runInBand` vs default parallel and diff the behavior before writing something off as pre-existing noise.
+
+---
+
+## 2026-08-06 — expo-speech-recognition needs `continuous: true` or dictation stops at the first pause in speech
+
+**Symptom:** live mic dictation (`QuickAddInput`'s mic button) would stop listening as soon as the user paused mid-sentence, well before they were done speaking.
+
+**ROOT CAUSE:** `SpeechService.ts`'s `startListening()` called `ExpoSpeechRecognitionModule.start()` without `continuous: true` (default `false`). Per the library's own docs: without it, iOS 17- ends the session after 3s of silence, and iOS 18+/Android end it as soon as any `isFinal` result comes in — either way, a natural speaking pause gets treated as "done talking," firing the `end` event, which our listener reads as a user-initiated stop.
+
+**FIX:** pass `continuous: true` in the `ExpoSpeechRecognitionModule.start()` call inside `startListening()` (`services/SpeechService.ts`). Session now stays open through pauses and only ends via our own `stopListening()`/`.stop()` call or a real error.
+
+---
+
 ## 2026-08-06 — `Alert.alert` cannot be styled — use a custom Modal sheet for any confirm dialog that needs app styling
 
 **Symptom:** delete-confirmation dialog looked visually out of place (plain OS system alert) next to the rest of the app's themed UI.
