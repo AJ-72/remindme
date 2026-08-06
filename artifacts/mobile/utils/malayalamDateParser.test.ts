@@ -236,3 +236,30 @@ describe("parseMalayalamDateTime — hour-word case-suffix variants", () => {
     expect(title).toBe("കോൾ ചെയ്യാൻ");
   });
 });
+
+describe("parseMalayalamDateTime — period word + hour without dative suffix", () => {
+  const now = new Date("2026-07-29T10:00:00");
+
+  it("uses the stated hour, not the period default, for വൈകിട്ട് X മണി", () => {
+    // വൈകിട്ട് defaults to 18:00, so a wrong fallback is visible here.
+    const { title, date } = parseMalayalamDateTime("വൈകിട്ട് 5 മണി മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(17);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+
+  it("uses the stated hour for ഉച്ചയ്ക്ക് X മണി", () => {
+    const { date } = parseMalayalamDateTime("ഉച്ചയ്ക്ക് 2 മണി ഭക്ഷണം", now);
+    expect(date!.getHours()).toBe(14);
+  });
+
+  it("uses the stated hour for രാവിലെ X മണി and strips both from the title", () => {
+    const { title, date } = parseMalayalamDateTime("രാവിലെ 9 മണി മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(9);
+    expect(title).toBe("മീറ്റിംഗ്"); // was "9 മണി മീറ്റിംഗ്"
+  });
+
+  it("still falls back to the period default when no hour is attached", () => {
+    expect(parseMalayalamDateTime("രാവിലെ ജോലി", now).date!.getHours()).toBe(9);
+    expect(parseMalayalamDateTime("വൈകിട്ട് നടത്തം", now).date!.getHours()).toBe(18);
+  });
+});

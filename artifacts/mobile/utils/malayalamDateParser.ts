@@ -215,13 +215,17 @@ function resolveClockTime(text: string): ClockMatch | null {
 
   for (const period of PERIOD_WORDS) {
     if (text.includes(period.word)) {
-      // Scope the "used alone" check to a window right after the period
-      // word, rather than the whole string, so an unrelated bare-hour
-      // phrase elsewhere in the sentence (e.g. a second clause mentioning
-      // a different time) doesn't suppress this period word's own default.
+      // Only fall back to the period's default hour when no explicit hour is
+      // attached to it. The window keeps an unrelated bare-hour phrase
+      // elsewhere in the sentence from suppressing this period's default.
       const periodIndex = text.indexOf(period.word);
-      const windowAfter = text.slice(periodIndex + period.word.length, periodIndex + period.word.length + 20);
-      if (!windowAfter.match(/മണിക്ക്/)) {
+      const afterStart = periodIndex + period.word.length;
+      const windowAfter = text.slice(afterStart, afterStart + 20);
+      const windowBefore = text.slice(Math.max(0, periodIndex - 20), periodIndex);
+      const hourNearby =
+        new RegExp(HOUR_UNIT).test(windowAfter) ||
+        new RegExp(HOUR_UNIT).test(windowBefore);
+      if (!hourNearby) {
         return { matchedText: period.word, hour: period.defaultHour, minute: 0 };
       }
     }
