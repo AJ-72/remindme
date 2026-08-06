@@ -263,3 +263,19 @@ describe("parseMalayalamDateTime — period word + hour without dative suffix", 
     expect(parseMalayalamDateTime("വൈകിട്ട് നടത്തം", now).date!.getHours()).toBe(18);
   });
 });
+
+describe("parseMalayalamDateTime — period word after the hour", () => {
+  const now = new Date("2026-07-29T10:00:00");
+
+  it("binds a trailing period word to the hour and strips both from the title", () => {
+    const { title, date } = parseMalayalamDateTime("9 മണിക്ക് രാവിലെ മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(9);
+    expect(title).toBe("മീറ്റിംഗ്"); // was "9 മണിക്ക് മീറ്റിംഗ്"
+  });
+
+  it("applies a trailing period word's PM bias", () => {
+    const { title, date } = parseMalayalamDateTime("5 മണി വൈകിട്ട് നടത്തം", now);
+    expect(date!.getHours()).toBe(17);
+    expect(title).toBe("നടത്തം");
+  });
+});

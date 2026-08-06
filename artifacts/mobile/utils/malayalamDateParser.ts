@@ -199,16 +199,21 @@ function resolveClockTime(text: string): ClockMatch | null {
   }
 
   for (const period of PERIOD_WORDS) {
-    const withHourRegex = new RegExp(`${period.word}\\s*(${NUMBER_PATTERN})\\s*${HOUR_UNIT}`);
-    const withHour = text.match(withHourRegex);
-    if (withHour) {
-      const rawHour = parseMalayalamNumber(withHour[1]);
-      if (rawHour !== null) {
-        return {
-          matchedText: withHour[0],
-          hour: applyBias(rawHour, period.bias),
-          minute: 0,
-        };
+    const orderedRegexes = [
+      new RegExp(`${period.word}\\s*(${NUMBER_PATTERN})\\s*${HOUR_UNIT}`),
+      new RegExp(`(${NUMBER_PATTERN})\\s*${HOUR_UNIT}\\s*${period.word}`),
+    ];
+    for (const regex of orderedRegexes) {
+      const withHour = text.match(regex);
+      if (withHour) {
+        const rawHour = parseMalayalamNumber(withHour[1]);
+        if (rawHour !== null) {
+          return {
+            matchedText: withHour[0],
+            hour: applyBias(rawHour, period.bias),
+            minute: 0,
+          };
+        }
       }
     }
   }
