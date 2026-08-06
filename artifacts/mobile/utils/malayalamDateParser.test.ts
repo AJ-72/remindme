@@ -210,3 +210,29 @@ describe("parseMalayalamDateTime — code-mixed input (v1 limitation)", () => {
     expect(date!.getDate()).toBe(30);
   });
 });
+
+describe("parseMalayalamDateTime — hour-word case-suffix variants", () => {
+  const now = new Date("2026-07-29T10:00:00"); // Wednesday
+
+  it("recognizes the bare hour word മണി (no dative suffix)", () => {
+    const { title, date } = parseMalayalamDateTime("9 മണി മീറ്റിംഗ്", now);
+    expect(date).not.toBeNull();
+    expect(date!.getHours()).toBe(9);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+
+  it("recognizes the orthographic variant മണിയ്ക്ക്", () => {
+    const { title, date } = parseMalayalamDateTime("9 മണിയ്ക്ക് മീറ്റിംഗ്", now);
+    expect(date).not.toBeNull();
+    expect(date!.getHours()).toBe(9);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+
+  it("does NOT treat the duration word മണിക്കൂർ as an hour-of-day", () => {
+    // മണിക്ക is a strict prefix of മണിക്കൂർ; the hour pattern must not
+    // match inside it. See the guard comment on HOUR_UNIT.
+    const { date, title } = parseMalayalamDateTime("2 മണിക്കൂർ കഴിഞ്ഞ് കോൾ ചെയ്യാൻ", now);
+    expect(date!.getTime()).toBe(now.getTime() + 2 * 60 * 60 * 1000);
+    expect(title).toBe("കോൾ ചെയ്യാൻ");
+  });
+});

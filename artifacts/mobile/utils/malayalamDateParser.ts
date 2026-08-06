@@ -48,6 +48,15 @@ export function parseMalayalamNumber(raw: string): number | null {
 // known spelled-out number words. Used inside larger patterns below.
 const NUMBER_PATTERN = `(?:\\d+|[൦-൯]+|${NUMBER_WORD_KEYS.join("|")})`;
 
+// The Malayalam hour word മണി is agglutinative: it appears bare, or with a
+// dative case suffix that speech recognizers spell inconsistently —
+// മണിക്ക് / മണിയ്ക്ക് / മണിക്ക. All are the same word.
+//
+// The (?!ക്കൂ) guard must stay immediately after മണി, BEFORE the optional
+// groups: മണിക്ക is a strict prefix of the duration word മണിക്കൂർ, and a
+// trailing guard backtracks into a bare മണി match and lets മണിക്കൂർ through.
+const HOUR_UNIT = `മണി(?!ക്കൂ)(?:യ്)?(?:ക്ക്?)?`;
+
 const WEEKDAYS: { word: string; index: number }[] = [
   { word: "ഞായർ", index: 0 },
   { word: "തിങ്കൾ", index: 1 },
@@ -170,7 +179,7 @@ function resolveDuration(text: string): DurationMatch | null {
 
 function resolveClockTime(text: string): ClockMatch | null {
   const halfPastAfter = text.match(
-    new RegExp(`(${NUMBER_PATTERN})\\s*മണി\\s*കഴിഞ്ഞ്\\s*അര`)
+    new RegExp(`(${NUMBER_PATTERN})\\s*${HOUR_UNIT}\\s*കഴിഞ്ഞ്\\s*അര`)
   );
   if (halfPastAfter) {
     const rawHour = parseMalayalamNumber(halfPastAfter[1]);
@@ -180,7 +189,7 @@ function resolveClockTime(text: string): ClockMatch | null {
     }
   }
 
-  const halfPastBefore = text.match(new RegExp(`അര\\s*(${NUMBER_PATTERN})\\s*മണിക്ക്`));
+  const halfPastBefore = text.match(new RegExp(`അര\\s*(${NUMBER_PATTERN})\\s*${HOUR_UNIT}`));
   if (halfPastBefore) {
     const rawHour = parseMalayalamNumber(halfPastBefore[1]);
     if (rawHour !== null) {
@@ -190,7 +199,7 @@ function resolveClockTime(text: string): ClockMatch | null {
   }
 
   for (const period of PERIOD_WORDS) {
-    const withHourRegex = new RegExp(`${period.word}\\s*(${NUMBER_PATTERN})\\s*മണിക്ക്`);
+    const withHourRegex = new RegExp(`${period.word}\\s*(${NUMBER_PATTERN})\\s*${HOUR_UNIT}`);
     const withHour = text.match(withHourRegex);
     if (withHour) {
       const rawHour = parseMalayalamNumber(withHour[1]);
@@ -218,7 +227,7 @@ function resolveClockTime(text: string): ClockMatch | null {
     }
   }
 
-  const bareRegex = new RegExp(`(${NUMBER_PATTERN})\\s*മണിക്ക്`);
+  const bareRegex = new RegExp(`(${NUMBER_PATTERN})\\s*${HOUR_UNIT}`);
   const bare = text.match(bareRegex);
   if (bare) {
     const rawHour = parseMalayalamNumber(bare[1]);
