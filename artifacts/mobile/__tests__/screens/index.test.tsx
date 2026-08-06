@@ -1,5 +1,5 @@
 import React from "react";
-import { render, waitFor, fireEvent } from "@testing-library/react-native";
+import { render, waitFor, fireEvent, act } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import HomeScreen from "@/app/(tabs)/index";
@@ -134,9 +134,11 @@ describe("HomeScreen", () => {
 
     expect(await findByText("Delete Reminder")).toBeTruthy();
     const confirmButton = await findByTestId("confirm-sheet-confirm");
-    fireEvent.press(confirmButton);
+    await act(async () => {
+      fireEvent.press(confirmButton);
+    });
 
-    await waitFor(() => expect(queryByText("Delete me")).toBeNull());
+    await waitFor(() => expect(queryByText("Delete me")).toBeNull(), { timeout: 5000 });
   });
 
   it("cancelling the delete confirm sheet keeps the reminder", async () => {

@@ -39,8 +39,8 @@ export default function HomeScreen() {
     setPendingDeleteId(id);
   };
 
-  const handleConfirmDelete = () => {
-    if (pendingDeleteId) deleteReminder(pendingDeleteId);
+  const handleConfirmDelete = async () => {
+    if (pendingDeleteId) await deleteReminder(pendingDeleteId);
     setPendingDeleteId(null);
   };
 

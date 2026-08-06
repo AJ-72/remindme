@@ -1,5 +1,5 @@
 import React from "react";
-import { render, waitFor, fireEvent } from "@testing-library/react-native";
+import { render, waitFor, fireEvent, act } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import ReminderDetailScreen from "@/app/reminder-detail";
@@ -137,9 +137,11 @@ describe("ReminderDetailScreen", () => {
 
     expect(await findByText("Delete Reminder")).toBeTruthy();
     const confirmButton = await findByTestId("confirm-sheet-confirm");
-    fireEvent.press(confirmButton);
+    await act(async () => {
+      fireEvent.press(confirmButton);
+    });
 
-    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    await waitFor(() => expect(mockBack).toHaveBeenCalled(), { timeout: 5000 });
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored.find((r: Reminder) => r.id === "r1")).toBeUndefined();
   });

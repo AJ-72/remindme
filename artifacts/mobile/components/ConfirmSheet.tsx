@@ -9,7 +9,7 @@ interface Props {
   confirmLabel: string;
   cancelLabel?: string;
   destructive?: boolean;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 }
 
