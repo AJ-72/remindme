@@ -111,7 +111,6 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [notesVisible, setNotesVisible] = useState(false);
   const [description, setDescription] = useState("");
   const [listening, setListening] = useState(false);
-  const [activeTab, setActiveTab] = useState<"type" | "speak">("type");
   const [micNotice, setMicNotice] = useState<string | null>(null);
   const [micNoticeDebugInfo, setMicNoticeDebugInfo] = useState<string | null>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
@@ -134,7 +133,6 @@ export default function QuickAddInput({ onSaved }: Props) {
       }
       micSourceRef.current = "shared";
       setListening(true);
-      setActiveTab("speak");
       startMicPulse();
       setMicNotice(null);
     } else if (micSourceRef.current === "shared") {
@@ -332,19 +330,15 @@ export default function QuickAddInput({ onSaved }: Props) {
     stopMicPulse();
   };
 
-  const handleTabPress = (tab: "type" | "speak") => {
-    setActiveTab(tab);
-    if (tab === "speak") {
-      if (!listening) {
-        startSpeakMode();
-      } else if (micSourceRef.current === "shared") {
-        // A shared audio file is already transcribing — surface the same
-        // busy notice pressing SPEAK would have shown via the old mic
-        // button, rather than silently no-op'ing.
-        setMicNotice("Still transcribing the shared audio…");
-      }
+  const handleMicPress = () => {
+    if (!listening) {
+      startSpeakMode();
+    } else if (micSourceRef.current === "shared") {
+      // A shared audio file is already transcribing — surface a busy
+      // notice rather than silently no-op'ing.
+      setMicNotice("Still transcribing the shared audio…");
     } else {
-      if (listening) stopSpeakMode();
+      stopSpeakMode();
     }
   };
 
@@ -422,35 +416,15 @@ export default function QuickAddInput({ onSaved }: Props) {
       alignItems: "center",
       justifyContent: "center",
     },
-    tabRow: {
-      flexDirection: "row",
-      gap: 4,
-      paddingHorizontal: 6,
-      paddingTop: 6,
-      marginTop: 6,
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
-    },
-    tab: {
-      flex: 1,
-      flexDirection: "row",
+    micBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
       alignItems: "center",
       justifyContent: "center",
-      gap: 5,
-      paddingBottom: 6,
-      borderBottomWidth: 2,
-      borderBottomColor: "transparent",
     },
-    tabActive: {
-      borderBottomColor: colors.primary,
-    },
-    tabText: {
-      fontSize: 12,
-      fontFamily: "Inter_600SemiBold",
-      color: colors.mutedForeground,
-    },
-    tabTextActive: {
-      color: colors.primary,
+    micBtnListening: {
+      backgroundColor: colors.destructive,
     },
     pillRow: {
       flexDirection: "row",
@@ -600,7 +574,6 @@ export default function QuickAddInput({ onSaved }: Props) {
   return (
     <View style={styles.wrapper}>
       <View style={styles.bar}>
-        <Feather name="plus-circle" size={18} color={colors.mutedForeground} />
         <TextInput
           style={[styles.textInput, { fontFamily: getFontFamily(input, "400Regular") }]}
           placeholder="Add a reminder…"
@@ -614,6 +587,20 @@ export default function QuickAddInput({ onSaved }: Props) {
           editable={!saving}
           testID="quick-add-input"
         />
+        <Pressable
+          style={[styles.micBtn, listening && styles.micBtnListening]}
+          onPress={handleMicPress}
+          hitSlop={8}
+          testID="quick-add-mic"
+        >
+          <Animated.View style={{ transform: [{ scale: listening ? micPulse : 1 }] }}>
+            <Feather
+              name="mic"
+              size={16}
+              color={listening ? colors.primaryForeground : colors.mutedForeground}
+            />
+          </Animated.View>
+        </Pressable>
         <Pressable
           style={styles.alarmBtn}
           onPress={() => setNotesVisible((v) => !v)}
@@ -648,34 +635,6 @@ export default function QuickAddInput({ onSaved }: Props) {
           testID="quick-add-save"
         >
           <Feather name="check" size={16} color={canSave ? colors.primaryForeground : colors.mutedForeground} />
-        </Pressable>
-      </View>
-
-      <View style={styles.tabRow}>
-        <Pressable
-          style={[styles.tab, activeTab === "type" && styles.tabActive]}
-          onPress={() => handleTabPress("type")}
-          testID="quick-add-tab-type"
-        >
-          <Text style={[styles.tabText, activeTab === "type" && styles.tabTextActive]}>
-            TYPE
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, activeTab === "speak" && styles.tabActive]}
-          onPress={() => handleTabPress("speak")}
-          testID="quick-add-tab-speak"
-        >
-          <Animated.View style={{ transform: [{ scale: activeTab === "speak" ? micPulse : 1 }] }}>
-            <Feather
-              name="mic"
-              size={13}
-              color={activeTab === "speak" ? colors.primary : colors.mutedForeground}
-            />
-          </Animated.View>
-          <Text style={[styles.tabText, activeTab === "speak" && styles.tabTextActive]}>
-            SPEAK
-          </Text>
         </Pressable>
       </View>
 

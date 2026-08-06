@@ -149,7 +149,7 @@ describe("QuickAddInput", () => {
   });
 });
 
-describe("QuickAddInput — TYPE/SPEAK tabs", () => {
+describe("QuickAddInput — mic toggle", () => {
   beforeEach(() => {
     // SpeechService tracks its "active listening session" in module-level
     // state; some tests below (deliberately) start listening and never end
@@ -172,18 +172,11 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
     });
   });
 
-  it("has no standalone mic icon button", async () => {
-    const { queryByTestId } = renderComponent();
-    await waitFor(() => {
-      expect(queryByTestId("quick-add-mic")).toBeNull();
-    });
-  });
-
-  it("starts listening when the SPEAK tab is selected and permission/model are ready", async () => {
+  it("starts listening when the mic button is pressed and permission/model are ready", async () => {
     const { findByTestId } = renderComponent();
-    const speakTab = await findByTestId("quick-add-tab-speak");
+    const micButton = await findByTestId("quick-add-mic");
 
-    fireEvent.press(speakTab);
+    fireEvent.press(micButton);
 
     await waitFor(() => {
       expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledWith(
@@ -192,12 +185,12 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
     });
   });
 
-  it("uses the dictationLanguage setting, not the device locale, when SPEAK starts listening", async () => {
+  it("uses the dictationLanguage setting, not the device locale, when the mic starts listening", async () => {
     await AsyncStorage.setItem("@dictation_language_v1", "ml-IN");
 
     const { findByTestId } = renderComponent();
-    const speakTab = await findByTestId("quick-add-tab-speak");
-    fireEvent.press(speakTab);
+    const micButton = await findByTestId("quick-add-mic");
+    fireEvent.press(micButton);
 
     await waitFor(() => {
       expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledWith(
@@ -206,10 +199,10 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
     });
   });
 
-  it("populates the input field when a result event fires while listening via SPEAK", async () => {
+  it("populates the input field when a result event fires while listening", async () => {
     const { findByTestId } = renderComponent();
-    const speakTab = await findByTestId("quick-add-tab-speak");
-    fireEvent.press(speakTab);
+    const micButton = await findByTestId("quick-add-mic");
+    fireEvent.press(micButton);
 
     await waitFor(() => expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalled());
 
@@ -222,16 +215,15 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
     await waitFor(() => expect(titleInput.props.value).toBe("call mom tomorrow at 3pm"));
   });
 
-  it("stops listening when the TYPE tab is selected while SPEAK was active", async () => {
+  it("stops listening when the mic button is pressed again while listening", async () => {
     const stopListeningSpy = jest.spyOn(SpeechService, "stopListening");
     const { findByTestId } = renderComponent();
-    const speakTab = await findByTestId("quick-add-tab-speak");
-    const typeTab = await findByTestId("quick-add-tab-type");
+    const micButton = await findByTestId("quick-add-mic");
 
-    fireEvent.press(speakTab);
+    fireEvent.press(micButton);
     await waitFor(() => expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalled());
 
-    fireEvent.press(typeTab);
+    fireEvent.press(micButton);
 
     await waitFor(() => expect(stopListeningSpy).toHaveBeenCalled());
     stopListeningSpy.mockRestore();
@@ -246,8 +238,8 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
     const openSettingsSpy = jest.spyOn(Linking, "openSettings").mockResolvedValue();
 
     const { findByTestId } = renderComponent();
-    const speakTab = await findByTestId("quick-add-tab-speak");
-    fireEvent.press(speakTab);
+    const micButton = await findByTestId("quick-add-mic");
+    fireEvent.press(micButton);
 
     await waitFor(() => expect(openSettingsSpy).toHaveBeenCalled());
     expect(ExpoSpeechRecognitionModule.start).not.toHaveBeenCalled();
@@ -262,14 +254,14 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
     });
 
     const { findByTestId, findByText } = renderComponent();
-    const speakTab = await findByTestId("quick-add-tab-speak");
-    fireEvent.press(speakTab);
+    const micButton = await findByTestId("quick-add-mic");
+    fireEvent.press(micButton);
 
     expect(await findByText(/Preparing voice recognition/i)).toBeTruthy();
     expect(ExpoSpeechRecognitionModule.start).not.toHaveBeenCalled();
   });
 
-  it("pulses the SPEAK tab while a shared audio file transcribes", async () => {
+  it("shows the listening state while a shared audio file transcribes", async () => {
     (useSharedText as jest.Mock).mockReturnValue({
       sharedText: "",
       clearSharedText: jest.fn(),
@@ -277,17 +269,18 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
       sharedAudioNotice: null,
     });
 
-    const { UNSAFE_getAllByType } = renderComponent();
+    const { findByTestId } = renderComponent();
 
-    await waitFor(() => {
-      const micIcon = UNSAFE_getAllByType(Feather).find(
-        (node) => node.props.name === "mic"
-      );
-      expect(micIcon?.props.color).toBe("#6366f1");
+    await waitFor(async () => {
+      const micButton = await findByTestId("quick-add-mic");
+      const flatStyle = Array.isArray(micButton.props.style)
+        ? Object.assign({}, ...micButton.props.style)
+        : micButton.props.style;
+      expect(flatStyle.backgroundColor).toBe("#ef4444");
     });
   });
 
-  it("stops the SPEAK tab pulse once shared audio transcription finishes", async () => {
+  it("clears the listening state once shared audio transcription finishes", async () => {
     (useSharedText as jest.Mock).mockReturnValue({
       sharedText: "",
       clearSharedText: jest.fn(),
@@ -295,17 +288,18 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
       sharedAudioNotice: null,
     });
 
-    const { UNSAFE_getAllByType } = renderComponent();
+    const { findByTestId } = renderComponent();
 
-    await waitFor(() => {
-      const micIcon = UNSAFE_getAllByType(Feather).find(
-        (node) => node.props.name === "mic"
-      );
-      expect(micIcon?.props.color).toBe("#7c7c9d");
+    await waitFor(async () => {
+      const micButton = await findByTestId("quick-add-mic");
+      const flatStyle = Array.isArray(micButton.props.style)
+        ? Object.assign({}, ...micButton.props.style)
+        : micButton.props.style;
+      expect(flatStyle.backgroundColor).toBeUndefined();
     });
   });
 
-  it("does not stop a shared-audio transcription session when SPEAK is pressed (Finding 2b), and shows a busy notice instead", async () => {
+  it("does not stop a shared-audio transcription session when the mic is pressed (Finding 2b), and shows a busy notice instead", async () => {
     const stopListeningSpy = jest.spyOn(SpeechService, "stopListening");
     (useSharedText as jest.Mock).mockReturnValue({
       sharedText: "",
@@ -315,9 +309,9 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
     });
 
     const { findByTestId, findByText } = renderComponent();
-    const speakTab = await findByTestId("quick-add-tab-speak");
+    const micButton = await findByTestId("quick-add-mic");
 
-    fireEvent.press(speakTab);
+    fireEvent.press(micButton);
 
     expect(await findByText(/Still transcribing the shared audio/i)).toBeTruthy();
     expect(stopListeningSpy).not.toHaveBeenCalled();
@@ -327,17 +321,17 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
   it("does not clobber an in-progress live mic session when a shared-audio transcription starts and finishes (Finding 2a's QuickAddInput-observable half)", async () => {
     const stopListeningSpy = jest.spyOn(SpeechService, "stopListening");
     const { findByTestId, rerender, UNSAFE_getAllByType } = renderComponent();
-    const speakTab = await findByTestId("quick-add-tab-speak");
+    const micButton = await findByTestId("quick-add-mic");
 
     // Start a real live mic session first (permission granted, model ready
     // per the outer beforeEach).
-    fireEvent.press(speakTab);
+    fireEvent.press(micButton);
     await waitFor(() => expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalled());
 
     const getMicColor = () =>
       UNSAFE_getAllByType(Feather).find((node) => node.props.name === "mic")?.props.color;
 
-    await waitFor(() => expect(getMicColor()).toBe("#6366f1"));
+    await waitFor(() => expect(getMicColor()).toBe("#ffffff"));
 
     // Now simulate a shared audio file starting to transcribe while the
     // live session is still active — this must NOT touch the live
@@ -356,7 +350,7 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
       </RemindersProvider>
     );
 
-    expect(getMicColor()).toBe("#6366f1");
+    expect(getMicColor()).toBe("#ffffff");
     expect(stopListeningSpy).not.toHaveBeenCalled();
 
     // ...and back to false again.
@@ -375,7 +369,7 @@ describe("QuickAddInput — TYPE/SPEAK tabs", () => {
     );
 
     // The live session survived the blip untouched: still active, never stopped.
-    expect(getMicColor()).toBe("#6366f1");
+    expect(getMicColor()).toBe("#ffffff");
     expect(stopListeningSpy).not.toHaveBeenCalled();
     stopListeningSpy.mockRestore();
   });
