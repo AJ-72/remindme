@@ -279,3 +279,47 @@ describe("parseMalayalamDateTime — period word after the hour", () => {
     expect(title).toBe("നടത്തം");
   });
 });
+
+describe("parseMalayalamDateTime — colon clock times", () => {
+  const now = new Date("2026-07-29T10:00:00");
+
+  it("parses HH:MM with a period word's AM bias", () => {
+    const { title, date } = parseMalayalamDateTime("രാവിലെ 7:30 ന് മരുന്ന്", now);
+    expect(date!.getHours()).toBe(7);
+    expect(date!.getMinutes()).toBe(30);
+    expect(title).toBe("മരുന്ന്"); // was 9:00 / "7:30 ന് മരുന്ന്"
+  });
+
+  it("parses HH:MM with a period word's PM bias", () => {
+    const { date } = parseMalayalamDateTime("വൈകിട്ട് 6:45 ന് മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(18);
+    expect(date!.getMinutes()).toBe(45);
+  });
+
+  it("parses a bare HH:MM with the bare-hour AM/PM heuristic", () => {
+    const { title, date } = parseMalayalamDateTime("7:30 ന് മരുന്ന്", now);
+    expect(date!.getHours()).toBe(19); // 7 -> PM per applyBareHourBias
+    expect(date!.getMinutes()).toBe(30);
+    expect(title).toBe("മരുന്ന്");
+  });
+
+  it("parses HH:MM without the ന് particle", () => {
+    const { title, date } = parseMalayalamDateTime("രാവിലെ 10:15 ക്ലാസ്", now);
+    expect(date!.getHours()).toBe(10);
+    expect(date!.getMinutes()).toBe(15);
+    expect(title).toBe("ക്ലാസ്");
+  });
+
+  it("composes a day word with a colon time", () => {
+    const { title, date } = parseMalayalamDateTime("നാളെ രാവിലെ 7:30 ന് മരുന്ന്", now);
+    expect(date!.getDate()).toBe(30);
+    expect(date!.getHours()).toBe(7);
+    expect(date!.getMinutes()).toBe(30);
+    expect(title).toBe("മരുന്ന്");
+  });
+
+  it("ignores out-of-range clock values rather than inventing a time", () => {
+    // 12-hour clock only, per product decision.
+    expect(parseMalayalamDateTime("25:99 ന് മീറ്റിംഗ്", now).date).toBeNull();
+  });
+});

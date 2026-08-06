@@ -57,6 +57,10 @@ const NUMBER_PATTERN = `(?:\\d+|[൦-൯]+|${NUMBER_WORD_KEYS.join("|")})`;
 // trailing guard backtracks into a bare മണി match and lets മണിക്കൂർ through.
 const HOUR_UNIT = `മണി(?!ക്കൂ)(?:യ്)?(?:ക്ക്?)?`;
 
+// A colon clock time, e.g. "7:30", optionally followed by the temporal
+// particle ന് ("at"). 12-hour clock only — see the 1..12 validation below.
+const COLON_TIME = `(\\d{1,2}):(\\d{2})(?:\\s*ന്)?`;
+
 const WEEKDAYS: { word: string; index: number }[] = [
   { word: "ഞായർ", index: 0 },
   { word: "തിങ്കൾ", index: 1 },
@@ -199,6 +203,27 @@ function resolveClockTime(text: string): ClockMatch | null {
   }
 
   for (const period of PERIOD_WORDS) {
+    const colonOrderedRegexes = [
+      new RegExp(`${period.word}\\s*${COLON_TIME}`),
+      new RegExp(`${COLON_TIME}\\s*${period.word}`),
+    ];
+    for (const regex of colonOrderedRegexes) {
+      const match = text.match(regex);
+      if (match) {
+        const rawHour = parseInt(match[1], 10);
+        const minute = parseInt(match[2], 10);
+        if (rawHour >= 1 && rawHour <= 12 && minute <= 59) {
+          return {
+            matchedText: match[0],
+            hour: applyBias(rawHour, period.bias),
+            minute,
+          };
+        }
+      }
+    }
+  }
+
+  for (const period of PERIOD_WORDS) {
     const orderedRegexes = [
       new RegExp(`${period.word}\\s*(${NUMBER_PATTERN})\\s*${HOUR_UNIT}`),
       new RegExp(`(${NUMBER_PATTERN})\\s*${HOUR_UNIT}\\s*${period.word}`),
@@ -229,10 +254,25 @@ function resolveClockTime(text: string): ClockMatch | null {
       const windowBefore = text.slice(Math.max(0, periodIndex - 20), periodIndex);
       const hourNearby =
         new RegExp(HOUR_UNIT).test(windowAfter) ||
-        new RegExp(HOUR_UNIT).test(windowBefore);
+        new RegExp(HOUR_UNIT).test(windowBefore) ||
+        new RegExp(COLON_TIME).test(windowAfter) ||
+        new RegExp(COLON_TIME).test(windowBefore);
       if (!hourNearby) {
         return { matchedText: period.word, hour: period.defaultHour, minute: 0 };
       }
+    }
+  }
+
+  const colonMatch = text.match(new RegExp(COLON_TIME));
+  if (colonMatch) {
+    const rawHour = parseInt(colonMatch[1], 10);
+    const minute = parseInt(colonMatch[2], 10);
+    if (rawHour >= 1 && rawHour <= 12 && minute <= 59) {
+      return {
+        matchedText: colonMatch[0],
+        hour: applyBareHourBias(rawHour),
+        minute,
+      };
     }
   }
 
