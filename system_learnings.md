@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-06 — `Alert.alert` cannot be styled — use a custom Modal sheet for any confirm dialog that needs app styling
+
+**Symptom:** delete-confirmation dialog looked visually out of place (plain OS system alert) next to the rest of the app's themed UI.
+
+**ROOT CAUSE:** `Alert.alert` (React Native's `react-native` module) renders the platform's native OS dialog — it has no style/theme props and cannot be customized. This is inherent to the API, not a bug.
+
+**FIX:** replaced both delete-confirmation call sites (`app/(tabs)/index.tsx`, `app/reminder-detail.tsx`) with a shared `components/ConfirmSheet.tsx` — a transparent `Modal` + `Pressable` overlay bottom sheet, matching the existing bottom-sheet pattern already used elsewhere (e.g. QuickAddInput's "no time found" sheet, Settings' debug-logs sheet). Any future confirm/destructive-action prompt should use `ConfirmSheet` (or the same Modal+Pressable sheet pattern), never `Alert.alert`, if it needs to match app styling.
+
+---
+
 ## 2026-08-04 — EAS cloud build failing: local `android/` dir leaking into the upload
 
 **Symptom:** `eas build` from `artifacts/mobile` failed with two errors: (1) `android/local.properties` (Windows-specific SDK path) flagged as leaking into the EAS upload, and (2) Gradle "No matching variant" / "No variants exist" errors for `react-native-community/datetimepicker`, `async-storage`, `gesture-handler`, `keyboard-controller` — as if the build was resolving against stale cached autolinking metadata instead of a fresh one.
