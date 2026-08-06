@@ -86,6 +86,12 @@ export function startListening(
     lang: locale,
     interimResults: true,
     requiresOnDeviceRecognition: onDevice,
+    // Without this, recognition ends at the first pause in speech (iOS
+    // 17-: after 3s of silence; iOS 18+/Android: as soon as any isFinal
+    // result comes in) — the mic then reads as "stopped" mid-sentence.
+    // continuous keeps the session open until the user (or an error)
+    // ends it via stopListening()/.stop().
+    continuous: true,
   } as any);
 
   return { busy: false };
