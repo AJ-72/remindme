@@ -9,6 +9,18 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-06 — Malayalam hour word `മണി` needed a case-suffix-aware pattern, with a lookahead-guard trap against `മണിക്കൂർ`
+
+**Symptom:** user reported dictated/typed times being ignored — "9 മണിക്ക്" sometimes not recognized, and times silently defaulting to a period word's default hour (e.g. "വൈകിട്ട് 5 മണി" → 18:00 instead of 17:00) whenever the hour lacked the exact literal suffix the parser hardcoded.
+
+**ROOT CAUSE:** `utils/malayalamDateParser.ts` hardcoded the single surface form `മണിക്ക്` in ~6 regexes. Malayalam is agglutinative — the hour word `മണി` legitimately appears bare, or with dative-case suffixes speech recognizers spell inconsistently (`മണിക്ക്` / `മണിയ്ക്ക്` / `മണിക്ക`). Any form other than the one hardcoded literal was invisible to the parser, so the period-word fallback's default hour silently won instead.
+
+**FIX:** added one shared `HOUR_UNIT` pattern and used it everywhere. **Non-obvious trap:** `മണിക്ക` is a strict prefix of `മണിക്കൂർ` (the *duration* unit, "N hours from now", used by `resolveDuration`) — a naive pattern matches inside it and misreads "2 മണിക്കൂർ കഴിഞ്ഞ്" (2 hours from now) as "2 o'clock". The obvious fix — a trailing negative lookahead `മണി(?:യ്)?(?:ക്ക്?)?(?!ൂ)` — is **silently broken**: the optional suffix groups backtrack, the regex engine settles for matching bare `മണി`, and the lookahead then sees `ക` (not `ൂ`) right after and passes anyway. Verified empirically with a standalone Node repro before trusting it. The guard must sit immediately after `മണി`, *before* the optional groups: `മണി(?!ക്കൂ)(?:യ്)?(?:ക്ക്?)?`. A word-boundary guard was also considered and rejected — it blocks `മണിക്കൂർ` correctly but also breaks realistic no-space speech output like `"9 മണിക്ക്മീറ്റിംഗ്"`.
+
+**Lesson:** when one Unicode/script token is a literal prefix of another, negative-lookahead placement relative to optional groups is not interchangeable — test the guard against the collision case directly (e.g. in a throwaway Node script) rather than trusting that "it has a lookahead" is sufficient.
+
+---
+
 ## 2026-08-06 — Fire-and-forget async handler raced a test's `waitFor` under parallel jest workers
 
 **Symptom:** `index.test.tsx`'s delete-confirm test failed nondeterministically — reliably green with `jest --runInBand`, reliably red in default parallel mode. Looked like cross-suite pollution at first but reproduced identically on an unmodified checkout via `git stash`, ruling that out.
