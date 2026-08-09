@@ -59,6 +59,12 @@
         }
       ],
       [
+        "./plugins/withLargeNotificationIcon",
+        {
+          "icon": "./assets/images/icon.png"
+        }
+      ],
+      [
         "expo-share-intent",
         {
           "androidIntentFilters": [
