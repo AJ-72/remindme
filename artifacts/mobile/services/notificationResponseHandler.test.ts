@@ -5,6 +5,7 @@ import {
 import {
   MARK_DONE_ACTION_ID,
   SNOOZE_ACTION_ID,
+  SNOOZE_MORE_ACTION_ID,
 } from "@/services/ReminderService";
 
 const DEFAULT_ACTION_IDENTIFIER = "expo.modules.notifications.actions.DEFAULT";
@@ -51,9 +52,33 @@ describe("handleNotificationResponse", () => {
   it("navigates to the detail screen on a body tap", async () => {
     const deps = makeDeps();
     await handleNotificationResponse(makeResponse(DEFAULT_ACTION_IDENTIFIER), deps);
-    expect(deps.navigateToDetail).toHaveBeenCalledWith("r1");
+    expect(deps.navigateToDetail).toHaveBeenCalledWith("r1", { openSnoozeSheet: false });
     expect(deps.markDoneById).not.toHaveBeenCalled();
     expect(deps.scheduleSnoozeNotification).not.toHaveBeenCalled();
+  });
+
+  // Android notification actions cannot open a sub-menu, so reaching the full
+  // preset list means opening the app with the sheet already showing.
+  it("opens the app to the snooze sheet on the More options action", async () => {
+    const deps = makeDeps();
+    await handleNotificationResponse(makeResponse(SNOOZE_MORE_ACTION_ID), deps);
+    expect(deps.navigateToDetail).toHaveBeenCalledWith("r1", { openSnoozeSheet: true });
+  });
+
+  it("does not snooze or mark done when opening the sheet", async () => {
+    const deps = makeDeps();
+    await handleNotificationResponse(makeResponse(SNOOZE_MORE_ACTION_ID), deps);
+    expect(deps.scheduleSnoozeNotification).not.toHaveBeenCalled();
+    expect(deps.updateSnoozeById).not.toHaveBeenCalled();
+    expect(deps.markDoneById).not.toHaveBeenCalled();
+  });
+
+  // The one-tap button must keep working untouched alongside the new one.
+  it("still snoozes with the stored preset on the quick Snooze action", async () => {
+    const deps = makeDeps();
+    await handleNotificationResponse(makeResponse(SNOOZE_ACTION_ID), deps);
+    expect(deps.scheduleSnoozeNotification).toHaveBeenCalled();
+    expect(deps.navigateToDetail).not.toHaveBeenCalled();
   });
 
   it("marks the reminder done on the Mark Done action, without navigating", async () => {

@@ -33,8 +33,14 @@ export default function NotificationResponseHandler() {
       updateSnoozeById,
       getSnoozePreset,
       loadReminderById,
-      navigateToDetail: (id: string) => {
-        router.push({ pathname: "/reminder-detail", params: { id } });
+      navigateToDetail: (id: string, options: { openSnoozeSheet: boolean }) => {
+        router.push({
+          pathname: "/reminder-detail",
+          // Router params serialize to strings, so the flag travels as "1"
+          // rather than a boolean the screen would receive as the string
+          // "false" and read as truthy.
+          params: options.openSnoozeSheet ? { id, openSnooze: "1" } : { id },
+        });
       },
     };
 

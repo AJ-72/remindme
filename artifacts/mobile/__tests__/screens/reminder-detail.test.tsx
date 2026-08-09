@@ -16,6 +16,8 @@ const mockPush = jest.fn();
 const mockBack = jest.fn();
 const mockReplace = jest.fn();
 const mockCanGoBack = jest.fn().mockReturnValue(true);
+// Mutable so a test can arrive with the notification's openSnooze param set.
+let mockSearchParams: Record<string, string> = { id: "r1" };
 
 jest.mock("expo-router", () => ({
   router: {
@@ -24,7 +26,7 @@ jest.mock("expo-router", () => ({
     replace: (...args: any[]) => mockReplace(...args),
     canGoBack: (...args: any[]) => mockCanGoBack(...args),
   },
-  useLocalSearchParams: () => ({ id: "r1" }),
+  useLocalSearchParams: () => mockSearchParams,
 }));
 
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
@@ -59,6 +61,7 @@ function renderScreen() {
 beforeEach(async () => {
   jest.clearAllMocks();
   mockCanGoBack.mockReturnValue(true);
+  mockSearchParams = { id: "r1" };
   await (AsyncStorage as any).clear();
 });
 
@@ -116,6 +119,24 @@ describe("ReminderDetailScreen", () => {
     expect(mockBack).not.toHaveBeenCalled();
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].datetime).toBe(FUTURE);
+  });
+
+  // Arriving from the notification's "More…" action, which can't render the
+  // preset list in the tray and so hands off to the sheet here.
+  it("opens the snooze sheet immediately when the openSnooze param is set", async () => {
+    mockSearchParams = { id: "r1", openSnooze: "1" };
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByText } = renderScreen();
+
+    expect(await findByText("Snooze until…")).toBeTruthy();
+  });
+
+  it("does not open the sheet without the param", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { queryByText, findByText } = renderScreen();
+
+    await findByText("Test reminder");
+    expect(queryByText("Snooze until…")).toBeNull();
   });
 
   it("choosing a preset reschedules the reminder and navigates back", async () => {

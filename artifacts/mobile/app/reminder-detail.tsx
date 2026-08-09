@@ -39,9 +39,14 @@ export default function ReminderDetailScreen() {
     snoozePreset,
     setSnoozePreset,
   } = useReminders();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, openSnooze } = useLocalSearchParams<{
+    id: string;
+    openSnooze?: string;
+  }>();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [snoozeSheetVisible, setSnoozeSheetVisible] = useState(false);
+  // Opens straight to the sheet when arriving from the notification's "More…"
+  // action, which exists precisely because the tray can't show the presets.
+  const [snoozeSheetVisible, setSnoozeSheetVisible] = useState(openSnooze === "1");
 
   const reminder = reminders.find((r) => r.id === id);
 

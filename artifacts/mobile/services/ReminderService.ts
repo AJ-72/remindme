@@ -35,6 +35,10 @@ export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 // button silently do nothing. Renaming needs a dual-registration migration
 // (backlog item 17).
 export const SNOOZE_ACTION_ID = "SNOOZE_10";
+// Opens the app to the snooze sheet instead of snoozing directly. Android
+// notification actions can't show a sub-menu, so the full preset list is only
+// reachable in-app. Unlike SNOOZE_ACTION_ID this value has no legacy baggage.
+export const SNOOZE_MORE_ACTION_ID = "SNOOZE_MORE";
 export const MARK_DONE_ACTION_ID = "MARK_DONE";
 
 // Android's setExactAndAllowWhileIdle (used natively by expo-notifications)
@@ -229,6 +233,17 @@ export async function setupSnoozeCategory(preset: SnoozePreset): Promise<void> {
         options: {
           isDestructive: false,
           isAuthenticationRequired: false,
+        },
+      },
+      {
+        identifier: SNOOZE_MORE_ACTION_ID,
+        buttonTitle: "More…",
+        options: {
+          isDestructive: false,
+          isAuthenticationRequired: false,
+          // The only action here that must foreground the app — it exists to
+          // show the snooze sheet, which can't be rendered from the tray.
+          opensAppToForeground: true,
         },
       },
       {

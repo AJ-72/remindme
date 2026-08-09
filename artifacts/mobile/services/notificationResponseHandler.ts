@@ -1,6 +1,7 @@
 import {
   MARK_DONE_ACTION_ID,
   SNOOZE_ACTION_ID,
+  SNOOZE_MORE_ACTION_ID,
   type NotificationData,
   type Reminder,
 } from "@/services/ReminderService";
@@ -31,7 +32,7 @@ export interface NotificationResponseHandlerDeps {
     datetime: string,
     notificationId: string | undefined
   ) => Promise<void>;
-  navigateToDetail: (id: string) => void;
+  navigateToDetail: (id: string, options: { openSnoozeSheet: boolean }) => void;
   getSnoozePreset: () => Promise<SnoozePreset>;
   loadReminderById: (id: string) => Promise<Reminder | undefined>;
 }
@@ -56,7 +57,14 @@ export async function handleNotificationResponse(
   if (!isNotificationData(data)) return;
 
   if (response.actionIdentifier === deps.defaultActionIdentifier) {
-    deps.navigateToDetail(data.reminderId);
+    deps.navigateToDetail(data.reminderId, { openSnoozeSheet: false });
+    return;
+  }
+
+  // Opens the app rather than snoozing here: the preset list is a sheet, and
+  // a notification action can't render one.
+  if (response.actionIdentifier === SNOOZE_MORE_ACTION_ID) {
+    deps.navigateToDetail(data.reminderId, { openSnoozeSheet: true });
     return;
   }
 
