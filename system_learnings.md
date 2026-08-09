@@ -9,6 +9,20 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-09 — The Bash tool is Git Bash, so PowerShell here-strings silently corrupt commit messages
+
+**WHAT:** a `git commit -m @'...'@` through the **Bash** tool produced a commit whose subject line began with a literal `@`. Fixed with `git commit --amend -F - <<'EOF' ... EOF`.
+
+**ROOT CAUSE:** this environment offers two shells with different syntax, and the repo's own docs describe the PowerShell one. PowerShell's here-string (`@'...'@`) is the correct way to pass a multi-line commit message *via the PowerShell tool*. The Bash tool runs Git Bash (POSIX sh), where `@'` is not syntax at all — it's just an at-sign followed by a quoted string, so the `@` becomes the first character of the message and the closing `'@` is swallowed as trailing text. **Nothing errors.** The commit succeeds and looks fine until you read `git log`.
+
+**FIX / RULE:** match the heredoc form to the tool. Bash tool → `-F - <<'EOF'`. PowerShell tool → `@'...'@` with the closing delimiter at column 0. When a commit message is multi-line, read back `git log -1 --format=%s` before moving on — a mangled subject is invisible from the commit's own success output, which prints only the truncated first line.
+
+**Related trap in the same session:** the working directory persists between Bash calls, so an earlier `cd artifacts/mobile` made a later bare `ls -a` report the *mobile* directory while it read as a repo-root listing. Prefer absolute paths (or a leading `cd /c/workspace/remindme`) in any command whose output you intend to interpret as "the repo root".
+
+**WHERE:** commit `d85ce5e` (amended). No source change.
+
+---
+
 ## 2026-08-09 — Independent settings need one channel per COMBINATION, and `useState(prop)` never resyncs
 
 Three device-reported bugs from the same build, two sharing a root cause worth generalizing.
