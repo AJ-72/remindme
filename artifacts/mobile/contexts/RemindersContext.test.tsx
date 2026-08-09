@@ -7,7 +7,11 @@ import {
   useReminders,
   type Reminder,
 } from "@/contexts/RemindersContext";
-import { DEFAULT_ALARM_KEY, STORAGE_KEY } from "@/services/ReminderService";
+import {
+  DEFAULT_ALARM_KEY,
+  SNOOZE_PRESET_KEY,
+  STORAGE_KEY,
+} from "@/services/ReminderService";
 
 jest.mock("expo-haptics");
 
@@ -36,6 +40,8 @@ function Probe() {
     snoozeReminder,
     defaultAlarmEnabled,
     setDefaultAlarmEnabled,
+    snoozePreset,
+    setSnoozePreset,
   } = useReminders();
   return (
     <View>
@@ -77,6 +83,19 @@ function Probe() {
       </Text>
       <Text testID="snooze-r1" onPress={() => snoozeReminder("r1")}>
         snooze
+      </Text>
+      <Text testID="snooze-preset">{JSON.stringify(snoozePreset)}</Text>
+      <Text
+        testID="set-preset-tomorrow"
+        onPress={() => setSnoozePreset({ kind: "tomorrow" })}
+      >
+        set preset tomorrow
+      </Text>
+      <Text
+        testID="snooze-r1-tomorrow"
+        onPress={() => snoozeReminder("r1", { kind: "tomorrow" })}
+      >
+        snooze tomorrow
       </Text>
     </View>
   );
@@ -290,5 +309,65 @@ describe("RemindersProvider", () => {
     );
 
     addEventListenerSpy.mockRestore();
+  });
+
+  it("exposes the stored snooze preset and defaults to 15 minutes", async () => {
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+    expect(getByTestId("snooze-preset").props.children).toBe(
+      JSON.stringify({ kind: "minutes", minutes: 15 })
+    );
+  });
+
+  it("setSnoozePreset persists the choice and updates the exposed value", async () => {
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+
+    await act(async () => {
+      getByTestId("set-preset-tomorrow").props.onPress();
+    });
+
+    await waitFor(() =>
+      expect(getByTestId("snooze-preset").props.children).toBe(
+        JSON.stringify({ kind: "tomorrow" })
+      )
+    );
+    expect(await AsyncStorage.getItem(SNOOZE_PRESET_KEY)).toBe(
+      JSON.stringify({ kind: "tomorrow" })
+    );
+  });
+
+  it("snoozeReminder with an explicit preset uses it rather than the default", async () => {
+    const scheduled = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ id: "r1", datetime: scheduled.toISOString() })])
+    );
+
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+
+    await act(async () => {
+      getByTestId("snooze-r1-tomorrow").props.onPress();
+    });
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(new Date(stored[0].datetime).getTime()).toBe(
+        scheduled.getTime() + 24 * 60 * 60 * 1000
+      );
+    });
   });
 });

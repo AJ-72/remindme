@@ -18,16 +18,23 @@ import {
   getDefaultAlarmEnabled,
   getDictationLanguage,
   getShowDescriptionEnabled,
+  getSnoozePreset,
   initNotifications,
   loadReminders,
   setDefaultAlarmEnabled as serviceSetDefaultAlarmEnabled,
   setDictationLanguage as serviceSetDictationLanguage,
   setShowDescriptionEnabled as serviceSetShowDescriptionEnabled,
+  setSnoozePreset as serviceSetSnoozePreset,
+  setupSnoozeCategory,
   snoozeReminder as serviceSnooze,
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
+import {
+  DEFAULT_SNOOZE_PRESET,
+  type SnoozePreset,
+} from "@/utils/snoozePresets";
 
-export type { Reminder, NotificationData, DictationLanguage };
+export type { Reminder, NotificationData, DictationLanguage, SnoozePreset };
 export {
   SNOOZE_ACTION_ID,
   SNOOZE_CATEGORY_ID,
@@ -45,7 +52,9 @@ interface RemindersContextType {
   ) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
   toggleComplete: (id: string) => Promise<void>;
-  snoozeReminder: (id: string) => Promise<void>;
+  snoozeReminder: (id: string, preset?: SnoozePreset) => Promise<void>;
+  snoozePreset: SnoozePreset;
+  setSnoozePreset: (preset: SnoozePreset) => Promise<void>;
   loading: boolean;
   defaultAlarmEnabled: boolean;
   setDefaultAlarmEnabled: (enabled: boolean) => Promise<void>;
@@ -70,6 +79,8 @@ export function RemindersProvider({
   const [showDescriptionInNotifications, setShowDescriptionInNotificationsState] =
     useState(false);
   const [dictationLanguage, setDictationLanguageState] = useState<DictationLanguage>("en-US");
+  const [snoozePreset, setSnoozePresetState] =
+    useState<SnoozePreset>(DEFAULT_SNOOZE_PRESET);
 
   useEffect(() => {
     Promise.all([
@@ -77,12 +88,14 @@ export function RemindersProvider({
       getDefaultAlarmEnabled(),
       getShowDescriptionEnabled(),
       getDictationLanguage(),
+      getSnoozePreset(),
     ])
-      .then(([loadedReminders, defaultAlarm, showDescription, dictLang]) => {
+      .then(([loadedReminders, defaultAlarm, showDescription, dictLang, preset]) => {
         setReminders(loadedReminders);
         setDefaultAlarmEnabledState(defaultAlarm);
         setShowDescriptionInNotificationsState(showDescription);
         setDictationLanguageState(dictLang);
+        setSnoozePresetState(preset);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -94,7 +107,10 @@ export function RemindersProvider({
         loadReminders().then(setReminders);
       }
     });
-    return () => sub.remove();
+    // Guard the unsubscribe: addEventListener isn't guaranteed to hand back a
+    // subscription in every environment, and an unmount that throws here takes
+    // down the whole teardown path.
+    return () => sub?.remove?.();
   }, []);
 
   const setDefaultAlarmEnabled = useCallback(async (enabled: boolean) => {
@@ -155,13 +171,22 @@ export function RemindersProvider({
   );
 
   const snoozeReminder = useCallback(
-    async (id: string) => {
-      const updated = await serviceSnooze(reminders, id);
+    async (id: string, preset?: SnoozePreset) => {
+      const updated = await serviceSnooze(reminders, id, preset ?? snoozePreset);
       setReminders(updated);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     },
-    [reminders]
+    [reminders, snoozePreset]
   );
+
+  const setSnoozePreset = useCallback(async (preset: SnoozePreset) => {
+    await serviceSetSnoozePreset(preset);
+    setSnoozePresetState(preset);
+    // Re-register so the notification-tray button label matches. Fire-and-
+    // forget by design: setupSnoozeCategory swallows its own errors, and a
+    // stale label is cosmetic — the action ID and handler still work.
+    setupSnoozeCategory(preset);
+  }, []);
 
   return (
     <RemindersContext.Provider
@@ -172,6 +197,8 @@ export function RemindersProvider({
         deleteReminder,
         toggleComplete,
         snoozeReminder,
+        snoozePreset,
+        setSnoozePreset,
         loading,
         defaultAlarmEnabled,
         setDefaultAlarmEnabled,
