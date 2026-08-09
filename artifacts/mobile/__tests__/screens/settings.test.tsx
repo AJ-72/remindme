@@ -1,4 +1,5 @@
 import React from "react";
+import { StyleSheet } from "react-native";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -92,6 +93,22 @@ describe("SettingsScreen", () => {
         JSON.stringify(true)
       )
     );
+  });
+
+  // Regression: these titles rendered in the tree but were invisible on device.
+  // The shared alarmLabel style carried flex:1, which is right for a row child
+  // but wrong here — each title sits in a nested column View next to its
+  // sub-label, and flex:1 in a column collapses it to zero height. A text query
+  // alone can't catch that, so assert the style too.
+  it.each([
+    ["Play alarm sound by default"],
+    ["Show description in notifications"],
+    ["Debug logs"],
+  ])("renders the %s row title without a height-collapsing flex", async (title) => {
+    const { findByText } = renderScreen();
+    const label = await findByText(title);
+    const style = StyleSheet.flatten(label.props.style);
+    expect(style.flex).toBeUndefined();
   });
 
   it("shows a placeholder when the debug logs row is tapped with no logs recorded yet", async () => {

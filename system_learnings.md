@@ -9,6 +9,18 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-09 — `flex: 1` on a `Text` inside a nested column `View` makes the label invisible on device
+
+**Symptom:** on the Settings screen, the row titles ("Play alarm sound by default", "Show description in notifications") were invisible on a real Android device — only the grey sub-label under each one rendered. Every test passed and the text was present in the rendered tree.
+
+**ROOT CAUSE:** the shared `alarmLabel` style carried `flex: 1`. That was correct when the label was a direct child of the card's `flexDirection: "row"` container, but the markup had since moved it inside a nested `<View style={{ flex: 1 }}>` alongside its sub-label. In a **column** (RN's default `flexDirection`), `flex: 1` makes the title compete with the sub-label for *vertical* space and collapse to zero height. Rule: row-level flex belongs on the wrapping `View`, never on the `Text` that ends up nested inside it.
+
+**Why it was invisible to the test suite:** Jest renders a tree, not pixels — `findByText` finds a zero-height element just fine. The existing settings tests only asserted the *sub*-labels, so nothing failed. The regression test added for this asserts `StyleSheet.flatten(label.props.style).flex` is `undefined`; a text query alone cannot catch a layout collapse.
+
+**WHERE:** `artifacts/mobile/app/(tabs)/settings.tsx` (`alarmLabel` style + the three rows using it), test at `artifacts/mobile/__tests__/screens/settings.test.tsx`.
+
+---
+
 ## 2026-08-07 — `artifacts/mockup-sandbox` typecheck fails on duplicate `@types/react`; it is NOT caused by your change
 
 **Symptom:** `pnpm run typecheck` (repo root) exits 1 with `TS2322` in `artifacts/mockup-sandbox/src/components/ui/calendar.tsx` and `spinner.tsx`, complaining `Type 'VoidOrUndefinedOnly' is not assignable to type 'VoidOrUndefinedOnly'. Two different types with this name exist, but they are unrelated.` Output above it shows `artifacts/mobile typecheck: Done` — the mobile package is clean.

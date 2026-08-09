@@ -97,8 +97,11 @@ export default function SettingsScreen() {
       alignItems: "center",
       gap: 12,
     },
+    // No flex here: this label sits inside a nested column View alongside its
+    // sub-label. flex:1 in a column makes the title fight the sub-label for
+    // vertical space and collapse to zero height. The row-level flex belongs
+    // on the wrapping View, not on the Text.
     alarmLabel: {
-      flex: 1,
       fontSize: 15,
       fontFamily: "Inter_500Medium",
       color: colors.foreground,
