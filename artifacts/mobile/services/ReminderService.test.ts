@@ -11,6 +11,7 @@ import {
   MARK_DONE_ACTION_ID,
   STORAGE_KEY,
   addReminder,
+  cancelScheduledForReminder,
   channelIdForAlarm,
   getVibrationEnabled,
   setVibrationEnabled,
@@ -44,6 +45,7 @@ import {
   dismissNotificationAsync,
   requestPermissionsAsync,
   setNotificationCategoryAsync,
+  getAllScheduledNotificationsAsync,
 } from "expo-notifications";
 
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
@@ -386,6 +388,78 @@ describe("rescheduleAllFutureReminders", () => {
     );
     await rescheduleAllFutureReminders();
     expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  // The duplicate-notification bug: notifications fire ALARM_EARLY_OFFSET_MS
+  // before their datetime, so for that last minute a reminder has already been
+  // delivered while datetime is still in the future. Rescheduling it there
+  // cancels nothing (the notification is delivered, not pending) and shows a
+  // second copy — the stored id is overwritten, orphaning the first.
+  it("skips a reminder already delivered inside the early-trigger window", async () => {
+    const r = makeReminder({
+      completed: false,
+      datetime: new Date(Date.now() + ALARM_EARLY_OFFSET_MS / 2).toISOString(),
+    });
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify([r])
+    );
+    await rescheduleAllFutureReminders();
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it("still reschedules a reminder beyond the early-trigger window", async () => {
+    const r = makeReminder({
+      completed: false,
+      datetime: new Date(Date.now() + ALARM_EARLY_OFFSET_MS + 60 * 1000).toISOString(),
+    });
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify([r])
+    );
+    await rescheduleAllFutureReminders();
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("cancelScheduledForReminder", () => {
+  const makeRequest = (identifier: string, reminderId: string) => ({
+    identifier,
+    content: { data: { reminderId } },
+  });
+
+  it("cancels every scheduled notification carrying the reminder id", async () => {
+    (getAllScheduledNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      makeRequest("orphan-1", "r1"),
+      makeRequest("current", "r1"),
+      makeRequest("other-reminder", "r2"),
+    ]);
+
+    await cancelScheduledForReminder("r1");
+
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("orphan-1");
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("current");
+    expect(cancelScheduledNotificationAsync).not.toHaveBeenCalledWith("other-reminder");
+  });
+
+  it("does nothing when no scheduled notification matches", async () => {
+    (getAllScheduledNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      makeRequest("other", "r2"),
+    ]);
+
+    await cancelScheduledForReminder("r1");
+
+    expect(cancelScheduledNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it("tolerates malformed entries without throwing", async () => {
+    (getAllScheduledNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      null,
+      { identifier: "no-data" },
+      { content: { data: { reminderId: "r1" } } }, // no identifier
+      makeRequest("good", "r1"),
+    ]);
+
+    await expect(cancelScheduledForReminder("r1")).resolves.toBeUndefined();
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("good");
   });
 });
 

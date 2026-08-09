@@ -339,6 +339,34 @@ export async function scheduleNotification(
   }
 }
 
+/**
+ * Cancels every SCHEDULED notification carrying this reminderId, regardless of
+ * whether its id matches the one stored on the reminder.
+ *
+ * Every other cancel path keys off the single notificationId held in
+ * AsyncStorage, so if a second notification is ever scheduled for a reminder,
+ * its id overwrites the first and that first one becomes an orphan nothing can
+ * reach. This sweeps by payload instead, making such duplicates self-healing.
+ * Only touches pending triggers — an already-delivered notification can't be
+ * un-delivered, which is why the caller must also avoid creating one.
+ */
+export async function cancelScheduledForReminder(reminderId: string): Promise<void> {
+  if (Platform.OS === "web" || !Notifications) return;
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    if (!Array.isArray(scheduled)) return;
+    for (const request of scheduled) {
+      const data = request?.content?.data as NotificationData | undefined;
+      if (data?.reminderId !== reminderId) continue;
+      const identifier = request?.identifier;
+      if (!identifier) continue;
+      try {
+        await Notifications.cancelScheduledNotificationAsync(identifier);
+      } catch {}
+    }
+  } catch {}
+}
+
 export async function cancelNotification(
   notificationId?: string
 ): Promise<void> {
@@ -548,11 +576,21 @@ export async function rescheduleAllFutureReminders(): Promise<void> {
   let changed = false;
   const updated = await Promise.all(
     reminders.map(async (reminder) => {
-      if (reminder.completed || new Date(reminder.datetime) <= now) {
+      // Notifications are scheduled ALARM_EARLY_OFFSET_MS before their
+      // datetime, so a reminder inside that window has ALREADY been delivered
+      // even though its datetime is still in the future. Rescheduling it here
+      // cancels nothing — cancelScheduledNotificationAsync only stops a
+      // pending trigger, it can't un-deliver a notification sitting in the
+      // tray — and shows a second copy, while overwriting notificationId so
+      // the first becomes an orphan nothing can cancel later.
+      const deliveryTime = new Date(reminder.datetime).getTime() - ALARM_EARLY_OFFSET_MS;
+      if (reminder.completed || deliveryTime <= now.getTime()) {
         return reminder;
       }
-      // Cancel any previously scheduled notification to prevent duplicates,
-      // then schedule a fresh one with the updated ID.
+      // Cancel by payload, not just by the stored id: a reminder that already
+      // picked up a duplicate has an orphan the stored id can't reach, and
+      // this is the path that would otherwise re-arm it every 15 minutes.
+      await cancelScheduledForReminder(reminder.id);
       await cancelNotification(reminder.notificationId);
       const notificationId = await scheduleNotification(reminder, reminder.id);
       if (notificationId !== undefined) {

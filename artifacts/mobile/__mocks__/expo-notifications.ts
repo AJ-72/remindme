@@ -4,6 +4,12 @@ export const scheduleNotificationAsync = jest
 export const cancelScheduledNotificationAsync = jest
   .fn()
   .mockResolvedValue(undefined);
+// Defaults to empty; a test that needs to exercise the orphan sweep in
+// cancelScheduledForReminder mocks a resolved value with real request shapes.
+export const getAllScheduledNotificationsAsync = jest
+  .fn()
+  .mockResolvedValue([] as unknown[]);
+
 export const dismissNotificationAsync = jest
   .fn()
   .mockResolvedValue(undefined);
