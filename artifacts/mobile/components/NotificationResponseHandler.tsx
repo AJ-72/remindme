@@ -2,6 +2,8 @@ import { router } from "expo-router";
 import React, { useEffect, useRef } from "react";
 
 import {
+  getSnoozePreset,
+  loadReminderById,
   markDoneById,
   scheduleSnoozeNotification,
   updateSnoozeById,
@@ -29,6 +31,8 @@ export default function NotificationResponseHandler() {
       markDoneById,
       scheduleSnoozeNotification,
       updateSnoozeById,
+      getSnoozePreset,
+      loadReminderById,
       navigateToDetail: (id: string) => {
         router.push({ pathname: "/reminder-detail", params: { id } });
       },

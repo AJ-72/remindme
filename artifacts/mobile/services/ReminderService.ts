@@ -517,6 +517,11 @@ export async function rescheduleAllFutureReminders(): Promise<void> {
   }
 }
 
+export async function loadReminderById(id: string): Promise<Reminder | undefined> {
+  const reminders = await loadReminders();
+  return reminders.find((r) => r.id === id);
+}
+
 export async function markDoneById(id: string): Promise<void> {
   const reminders = await loadReminders();
   const target = reminders.find((r) => r.id === id);

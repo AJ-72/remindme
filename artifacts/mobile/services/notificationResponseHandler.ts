@@ -1,9 +1,10 @@
 import {
   MARK_DONE_ACTION_ID,
   SNOOZE_ACTION_ID,
-  SNOOZE_MINUTES,
   type NotificationData,
+  type Reminder,
 } from "@/services/ReminderService";
+import { resolveSnoozeTarget, type SnoozePreset } from "@/utils/snoozePresets";
 
 export interface NotificationResponseLike {
   actionIdentifier: string;
@@ -21,13 +22,18 @@ export interface NotificationResponseHandlerDeps {
   defaultActionIdentifier: string;
   lastHandledId: { current: string | null };
   markDoneById: (id: string) => Promise<void>;
-  scheduleSnoozeNotification: (data: NotificationData) => Promise<string | undefined>;
+  scheduleSnoozeNotification: (
+    data: NotificationData,
+    target: Date
+  ) => Promise<string | undefined>;
   updateSnoozeById: (
     id: string,
     datetime: string,
     notificationId: string | undefined
   ) => Promise<void>;
   navigateToDetail: (id: string) => void;
+  getSnoozePreset: () => Promise<SnoozePreset>;
+  loadReminderById: (id: string) => Promise<Reminder | undefined>;
 }
 
 function isNotificationData(value: unknown): value is NotificationData {
@@ -55,9 +61,15 @@ export async function handleNotificationResponse(
   }
 
   if (response.actionIdentifier === SNOOZE_ACTION_ID) {
-    const notificationId = await deps.scheduleSnoozeNotification(data);
-    const datetime = new Date(Date.now() + SNOOZE_MINUTES * 60 * 1000).toISOString();
-    await deps.updateSnoozeById(data.reminderId, datetime, notificationId);
+    const preset = await deps.getSnoozePreset();
+    // "tomorrow" needs the reminder's own scheduled time, which the
+    // notification payload doesn't carry — look it up. Falling back to now
+    // keeps a minutes-preset snooze working even if the lookup fails.
+    const reminder = await deps.loadReminderById(data.reminderId);
+    const base = reminder?.datetime ?? new Date().toISOString();
+    const target = resolveSnoozeTarget(preset, base, new Date());
+    const notificationId = await deps.scheduleSnoozeNotification(data, target);
+    await deps.updateSnoozeById(data.reminderId, target.toISOString(), notificationId);
     return;
   }
 

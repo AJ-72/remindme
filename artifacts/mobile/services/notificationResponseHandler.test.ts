@@ -5,7 +5,6 @@ import {
 import {
   MARK_DONE_ACTION_ID,
   SNOOZE_ACTION_ID,
-  SNOOZE_MINUTES,
 } from "@/services/ReminderService";
 
 const DEFAULT_ACTION_IDENTIFIER = "expo.modules.notifications.actions.DEFAULT";
@@ -35,6 +34,16 @@ function makeDeps() {
     scheduleSnoozeNotification: jest.fn().mockResolvedValue("new-notif"),
     updateSnoozeById: jest.fn().mockResolvedValue(undefined),
     navigateToDetail: jest.fn(),
+    getSnoozePreset: jest
+      .fn()
+      .mockResolvedValue({ kind: "minutes", minutes: 15 } as const),
+    loadReminderById: jest.fn().mockResolvedValue({
+      id: "r1",
+      title: "T",
+      description: "",
+      datetime: new Date("2026-08-07T08:30:00").toISOString(),
+      completed: false,
+    }),
   };
 }
 
@@ -54,7 +63,7 @@ describe("handleNotificationResponse", () => {
     expect(deps.navigateToDetail).not.toHaveBeenCalled();
   });
 
-  it("schedules a snooze and persists the new schedule on the Snooze action, without navigating", async () => {
+  it("schedules a snooze at the preset's target and persists it, without navigating", async () => {
     const deps = makeDeps();
     const data = {
       reminderId: "r1",
@@ -67,16 +76,62 @@ describe("handleNotificationResponse", () => {
     await handleNotificationResponse(makeResponse(SNOOZE_ACTION_ID, { data }), deps);
     const after = Date.now();
 
-    expect(deps.scheduleSnoozeNotification).toHaveBeenCalledWith(data);
     expect(deps.navigateToDetail).not.toHaveBeenCalled();
+
+    const [passedData, target] = deps.scheduleSnoozeNotification.mock.calls[0];
+    expect(passedData).toEqual(data);
+    const snoozeMs = 15 * 60 * 1000;
+    expect(target.getTime()).toBeGreaterThanOrEqual(before + snoozeMs);
+    expect(target.getTime()).toBeLessThanOrEqual(after + snoozeMs);
 
     const [id, datetime, notificationId] = deps.updateSnoozeById.mock.calls[0];
     expect(id).toBe("r1");
     expect(notificationId).toBe("new-notif");
-    const ms = new Date(datetime).getTime();
-    const snoozeMs = SNOOZE_MINUTES * 60 * 1000;
-    expect(ms).toBeGreaterThanOrEqual(before + snoozeMs);
-    expect(ms).toBeLessThanOrEqual(after + snoozeMs);
+    // The persisted datetime must match the scheduled target exactly.
+    expect(datetime).toBe(target.toISOString());
+  });
+
+  it("uses the reminder's own datetime for the tomorrow preset", async () => {
+    const deps = makeDeps();
+    deps.getSnoozePreset.mockResolvedValue({ kind: "tomorrow" } as const);
+    const scheduled = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    deps.loadReminderById.mockResolvedValue({
+      id: "r1",
+      title: "T",
+      description: "",
+      datetime: scheduled.toISOString(),
+      completed: false,
+    });
+    const data = {
+      reminderId: "r1",
+      title: "T",
+      body: "B",
+      alarm: true,
+      channelId: "reminders-alarm",
+    };
+
+    await handleNotificationResponse(makeResponse(SNOOZE_ACTION_ID, { data }), deps);
+
+    const [, target] = deps.scheduleSnoozeNotification.mock.calls[0];
+    expect(target.getTime()).toBe(scheduled.getTime() + 24 * 60 * 60 * 1000);
+  });
+
+  it("still snoozes by the minutes preset when the reminder can't be loaded", async () => {
+    const deps = makeDeps();
+    deps.loadReminderById.mockResolvedValue(undefined);
+    const data = {
+      reminderId: "r1",
+      title: "T",
+      body: "B",
+      alarm: true,
+      channelId: "reminders-alarm",
+    };
+    const before = Date.now();
+
+    await handleNotificationResponse(makeResponse(SNOOZE_ACTION_ID, { data }), deps);
+
+    const [, target] = deps.scheduleSnoozeNotification.mock.calls[0];
+    expect(target.getTime()).toBeGreaterThanOrEqual(before + 15 * 60 * 1000);
   });
 
   it("ignores an unknown action identifier", async () => {
