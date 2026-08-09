@@ -29,6 +29,8 @@ export default function SettingsScreen() {
     setDefaultAlarmEnabled,
     showDescriptionInNotifications,
     setShowDescriptionInNotifications,
+    vibrationEnabled,
+    setVibrationEnabled,
     dictationLanguage,
     setDictationLanguage,
   } = useReminders();
@@ -250,6 +252,28 @@ export default function SettingsScreen() {
             onValueChange={(v) => setDefaultAlarmEnabled(v)}
             trackColor={{ false: colors.muted, true: colors.primary + "66" }}
             thumbColor={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
+          />
+        </View>
+        <View style={[styles.alarmCard, styles.descriptionCard]}>
+          <Feather
+            name={vibrationEnabled ? "smartphone" : "slash"}
+            size={18}
+            color={vibrationEnabled ? colors.primary : colors.mutedForeground}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alarmLabel}>Vibrate</Text>
+            <Text style={styles.alarmSubLabel}>
+              {vibrationEnabled
+                ? "Notification will vibrate, even when sound is off"
+                : "Notification will not vibrate"}
+            </Text>
+          </View>
+          <Switch
+            testID="vibration-switch"
+            value={vibrationEnabled}
+            onValueChange={(v) => setVibrationEnabled(v)}
+            trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+            thumbColor={vibrationEnabled ? colors.primary : colors.mutedForeground}
           />
         </View>
         <View style={[styles.alarmCard, styles.descriptionCard]}>

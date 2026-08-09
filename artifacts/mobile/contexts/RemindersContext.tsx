@@ -19,12 +19,14 @@ import {
   getDictationLanguage,
   getShowDescriptionEnabled,
   getSnoozePreset,
+  getVibrationEnabled,
   initNotifications,
   loadReminders,
   setDefaultAlarmEnabled as serviceSetDefaultAlarmEnabled,
   setDictationLanguage as serviceSetDictationLanguage,
   setShowDescriptionEnabled as serviceSetShowDescriptionEnabled,
   setSnoozePreset as serviceSetSnoozePreset,
+  setVibrationEnabled as serviceSetVibrationEnabled,
   setupSnoozeCategory,
   snoozeReminder as serviceSnooze,
   toggleComplete as serviceToggle,
@@ -60,6 +62,8 @@ interface RemindersContextType {
   setDefaultAlarmEnabled: (enabled: boolean) => Promise<void>;
   showDescriptionInNotifications: boolean;
   setShowDescriptionInNotifications: (enabled: boolean) => Promise<void>;
+  vibrationEnabled: boolean;
+  setVibrationEnabled: (enabled: boolean) => Promise<void>;
   dictationLanguage: DictationLanguage;
   setDictationLanguage: (lang: DictationLanguage) => Promise<void>;
 }
@@ -81,6 +85,7 @@ export function RemindersProvider({
   const [dictationLanguage, setDictationLanguageState] = useState<DictationLanguage>("en-US");
   const [snoozePreset, setSnoozePresetState] =
     useState<SnoozePreset>(DEFAULT_SNOOZE_PRESET);
+  const [vibrationEnabled, setVibrationEnabledState] = useState(true);
 
   useEffect(() => {
     Promise.all([
@@ -89,13 +94,15 @@ export function RemindersProvider({
       getShowDescriptionEnabled(),
       getDictationLanguage(),
       getSnoozePreset(),
+      getVibrationEnabled(),
     ])
-      .then(([loadedReminders, defaultAlarm, showDescription, dictLang, preset]) => {
+      .then(([loadedReminders, defaultAlarm, showDescription, dictLang, preset, vibration]) => {
         setReminders(loadedReminders);
         setDefaultAlarmEnabledState(defaultAlarm);
         setShowDescriptionInNotificationsState(showDescription);
         setDictationLanguageState(dictLang);
         setSnoozePresetState(preset);
+        setVibrationEnabledState(vibration);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -125,6 +132,11 @@ export function RemindersProvider({
     },
     []
   );
+
+  const setVibrationEnabled = useCallback(async (enabled: boolean) => {
+    await serviceSetVibrationEnabled(enabled);
+    setVibrationEnabledState(enabled);
+  }, []);
 
   const setDictationLanguage = useCallback(async (lang: DictationLanguage) => {
     await serviceSetDictationLanguage(lang);
@@ -204,6 +216,8 @@ export function RemindersProvider({
         setDefaultAlarmEnabled,
         showDescriptionInNotifications,
         setShowDescriptionInNotifications,
+        vibrationEnabled,
+        setVibrationEnabled,
         dictationLanguage,
         setDictationLanguage,
       }}

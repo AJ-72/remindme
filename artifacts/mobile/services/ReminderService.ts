@@ -24,6 +24,7 @@ export const STORAGE_KEY = "@reminders_v1";
 export const DEFAULT_ALARM_KEY = "@default_alarm_v1";
 export const SHOW_DESCRIPTION_KEY = "@show_description_v1";
 export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
+export const VIBRATION_KEY = "@vibration_v1";
 export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
@@ -96,6 +97,23 @@ export async function getShowDescriptionEnabled(): Promise<boolean> {
 
 export async function setShowDescriptionEnabled(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(SHOW_DESCRIPTION_KEY, JSON.stringify(enabled));
+}
+
+export async function getVibrationEnabled(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(VIBRATION_KEY);
+    if (raw !== null) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (typeof parsed === "boolean") return parsed;
+    }
+  } catch {}
+  // Defaults on: turning off sound shouldn't also silence the buzz, which is
+  // the whole point of the separate setting.
+  return true;
+}
+
+export async function setVibrationEnabled(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(VIBRATION_KEY, JSON.stringify(enabled));
 }
 
 export async function getDictationLanguage(): Promise<DictationLanguage> {
@@ -179,6 +197,18 @@ async function setupNotificationChannel(): Promise<void> {
         Notifications.AndroidNotificationVisibility.PUBLIC,
       showBadge: true,
     });
+    // Sound off but vibration on. This needs its OWN channel ID rather than a
+    // tweak to "reminders-silent": per the note above, Android caches channel
+    // config by ID for the lifetime of the install, so flipping enableVibrate
+    // on the existing silent channel would be silently ignored for every user
+    // who already has it. Existing channels are left exactly as they are.
+    await Notifications.setNotificationChannelAsync("reminders-vibrate", {
+      name: "Reminders (Vibrate only)",
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 400, 200, 400],
+      enableVibrate: true,
+      sound: null,
+    });
     await Notifications.setNotificationChannelAsync("reminders-silent", {
       name: "Reminders (Silent)",
       importance: Notifications.AndroidImportance.HIGH,
@@ -241,8 +271,13 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   }
 }
 
-export function channelIdForAlarm(alarm: boolean): string {
-  return alarm ? "reminders-alarm" : "reminders-silent";
+// Vibration defaults to true so callers written before the setting existed
+// keep the buzz rather than silently landing on the fully-silent channel.
+// When alarm is on the vibrate argument is irrelevant: the alarm channel's
+// vibration pattern is part of its own (immutable) config.
+export function channelIdForAlarm(alarm: boolean, vibrate: boolean = true): string {
+  if (alarm) return "reminders-alarm";
+  return vibrate ? "reminders-vibrate" : "reminders-silent";
 }
 
 export async function scheduleNotification(
@@ -260,7 +295,7 @@ export async function scheduleNotification(
       Math.max(now.getTime(), trigger.getTime() - ALARM_EARLY_OFFSET_MS)
     );
     const alarmOn = reminder.alarm !== false;
-    const channelId = channelIdForAlarm(alarmOn);
+    const channelId = channelIdForAlarm(alarmOn, await getVibrationEnabled());
     const body = await resolveNotificationBody(reminder.description);
     const id = await Notifications.scheduleNotificationAsync({
       content: {
@@ -480,7 +515,7 @@ export async function snoozeReminder(
       title: target.title,
       body,
       alarm: alarmOn,
-      channelId: channelIdForAlarm(alarmOn),
+      channelId: channelIdForAlarm(alarmOn, await getVibrationEnabled()),
     },
     snoozeTarget
   );

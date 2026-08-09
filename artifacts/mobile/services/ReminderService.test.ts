@@ -12,6 +12,9 @@ import {
   STORAGE_KEY,
   addReminder,
   channelIdForAlarm,
+  getVibrationEnabled,
+  setVibrationEnabled,
+  VIBRATION_KEY,
   deleteReminder,
   editReminder,
   SNOOZE_PRESET_KEY,
@@ -550,11 +553,45 @@ describe("permission onboarding", () => {
 
 describe("channelIdForAlarm", () => {
   it("returns the alarm channel when alarm is true", () => {
-    expect(channelIdForAlarm(true)).toBe("reminders-alarm");
+    expect(channelIdForAlarm(true, true)).toBe("reminders-alarm");
   });
 
-  it("returns the silent channel when alarm is false", () => {
-    expect(channelIdForAlarm(false)).toBe("reminders-silent");
+  // Sound implies vibration on the alarm channel — its pattern is baked into
+  // the channel config, so there is no sound-without-vibration variant.
+  it("returns the alarm channel when alarm is on regardless of vibration", () => {
+    expect(channelIdForAlarm(true, false)).toBe("reminders-alarm");
+  });
+
+  it("returns the silent-but-vibrating channel when only vibration is on", () => {
+    expect(channelIdForAlarm(false, true)).toBe("reminders-vibrate");
+  });
+
+  it("returns the fully silent channel when both are off", () => {
+    expect(channelIdForAlarm(false, false)).toBe("reminders-silent");
+  });
+
+  // Vibration defaults on: a user who turns off sound still expects to feel
+  // the reminder. Callers that predate the setting must not silently land on
+  // the fully-silent channel.
+  it("defaults to vibrating when the vibration argument is omitted", () => {
+    expect(channelIdForAlarm(false)).toBe("reminders-vibrate");
+  });
+});
+
+describe("vibration setting persistence", () => {
+  it("defaults to enabled when nothing is stored", async () => {
+    expect(await getVibrationEnabled()).toBe(true);
+  });
+
+  it("round-trips a stored false value", async () => {
+    await setVibrationEnabled(false);
+    expect(await AsyncStorage.getItem(VIBRATION_KEY)).toBe(JSON.stringify(false));
+    expect(await getVibrationEnabled()).toBe(false);
+  });
+
+  it("falls back to enabled when the stored value is corrupt", async () => {
+    await AsyncStorage.setItem(VIBRATION_KEY, "not json");
+    expect(await getVibrationEnabled()).toBe(true);
   });
 });
 

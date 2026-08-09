@@ -9,6 +9,7 @@ import {
   DEFAULT_ALARM_KEY,
   SHOW_DESCRIPTION_KEY,
   DICTATION_LANGUAGE_KEY,
+  VIBRATION_KEY,
 } from "@/services/ReminderService";
 import { logDebug } from "@/services/DebugLogService";
 
@@ -102,6 +103,7 @@ describe("SettingsScreen", () => {
   // alone can't catch that, so assert the style too.
   it.each([
     ["Play alarm sound by default"],
+    ["Vibrate"],
     ["Show description in notifications"],
     ["Debug logs"],
   ])("renders the %s row title without a height-collapsing flex", async (title) => {
@@ -109,6 +111,49 @@ describe("SettingsScreen", () => {
     const label = await findByText(title);
     const style = StyleSheet.flatten(label.props.style);
     expect(style.flex).toBeUndefined();
+  });
+
+  // Vibration is independent of sound: the reported bug was that turning off
+  // "play sound" also killed the buzz, with no way to get it back.
+  it("shows the vibration switch on by default", async () => {
+    const { findByTestId, findByText } = renderScreen();
+    const switchEl = await findByTestId("vibration-switch");
+    await waitFor(() => expect(switchEl.props.value).toBe(true));
+    expect(
+      await findByText("Notification will vibrate, even when sound is off")
+    ).toBeTruthy();
+  });
+
+  it("reflects a stored false vibration setting", async () => {
+    await AsyncStorage.setItem(VIBRATION_KEY, JSON.stringify(false));
+    const { findByTestId, findByText } = renderScreen();
+    const switchEl = await findByTestId("vibration-switch");
+    await waitFor(() => expect(switchEl.props.value).toBe(false));
+    expect(await findByText("Notification will not vibrate")).toBeTruthy();
+  });
+
+  it("toggling vibration persists the new setting to storage", async () => {
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("vibration-switch");
+
+    fireEvent(switchEl, "valueChange", false);
+
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        VIBRATION_KEY,
+        JSON.stringify(false)
+      )
+    );
+  });
+
+  it("leaves vibration on when the alarm sound is switched off", async () => {
+    const { findByTestId } = renderScreen();
+    const alarmSwitch = await findByTestId("default-alarm-switch");
+
+    fireEvent(alarmSwitch, "valueChange", false);
+
+    const vibrationSwitch = await findByTestId("vibration-switch");
+    await waitFor(() => expect(vibrationSwitch.props.value).toBe(true));
   });
 
   it("shows a placeholder when the debug logs row is tapped with no logs recorded yet", async () => {
