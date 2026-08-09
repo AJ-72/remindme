@@ -1,6 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Linking, Platform } from "react-native";
 import { getLocales } from "expo-localization";
+import {
+  DEFAULT_SNOOZE_PRESET,
+  isSnoozePreset,
+  type SnoozePreset,
+} from "@/utils/snoozePresets";
+
+export type { SnoozePreset };
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -16,6 +23,7 @@ export const DEFAULT_ALARM_KEY = "@default_alarm_v1";
 export const SHOW_DESCRIPTION_KEY = "@show_description_v1";
 export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
 export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
+export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 export const SNOOZE_ACTION_ID = "SNOOZE_10";
 export const MARK_DONE_ACTION_ID = "MARK_DONE";
@@ -94,6 +102,22 @@ export async function getDictationLanguage(): Promise<DictationLanguage> {
 
 export async function setDictationLanguage(lang: DictationLanguage): Promise<void> {
   await AsyncStorage.setItem(DICTATION_LANGUAGE_KEY, lang);
+}
+
+export async function getSnoozePreset(): Promise<SnoozePreset> {
+  try {
+    const raw = await AsyncStorage.getItem(SNOOZE_PRESET_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // A corrupt or outdated stored value must not be able to wedge snoozing.
+      if (isSnoozePreset(parsed)) return parsed;
+    }
+  } catch {}
+  return DEFAULT_SNOOZE_PRESET;
+}
+
+export async function setSnoozePreset(preset: SnoozePreset): Promise<void> {
+  await AsyncStorage.setItem(SNOOZE_PRESET_KEY, JSON.stringify(preset));
 }
 
 export async function resolveNotificationBody(

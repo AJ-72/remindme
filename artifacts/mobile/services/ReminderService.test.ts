@@ -15,8 +15,11 @@ import {
   channelIdForAlarm,
   deleteReminder,
   editReminder,
+  SNOOZE_PRESET_KEY,
   getDefaultAlarmEnabled,
   getDictationLanguage,
+  getSnoozePreset,
+  setSnoozePreset,
   hasCompletedPermissionOnboarding,
   markDoneById,
   markPermissionOnboardingComplete,
@@ -612,5 +615,31 @@ describe("updateSnoozeById", () => {
     await expect(
       updateSnoozeById("unknown", new Date().toISOString(), "x")
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("snooze preset persistence", () => {
+  it("defaults to 15 minutes when nothing is stored", async () => {
+    expect(await getSnoozePreset()).toEqual({ kind: "minutes", minutes: 15 });
+  });
+
+  it("round-trips a minutes preset", async () => {
+    await setSnoozePreset({ kind: "minutes", minutes: 30 });
+    expect(await getSnoozePreset()).toEqual({ kind: "minutes", minutes: 30 });
+  });
+
+  it("round-trips the tomorrow preset", async () => {
+    await setSnoozePreset({ kind: "tomorrow" });
+    expect(await getSnoozePreset()).toEqual({ kind: "tomorrow" });
+  });
+
+  it("falls back to the default when the stored value is corrupt", async () => {
+    await AsyncStorage.setItem(SNOOZE_PRESET_KEY, "not json{");
+    expect(await getSnoozePreset()).toEqual({ kind: "minutes", minutes: 15 });
+  });
+
+  it("falls back to the default when the stored value is valid JSON but not a preset", async () => {
+    await AsyncStorage.setItem(SNOOZE_PRESET_KEY, JSON.stringify({ kind: "yearly" }));
+    expect(await getSnoozePreset()).toEqual({ kind: "minutes", minutes: 15 });
   });
 });
