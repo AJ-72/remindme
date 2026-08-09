@@ -32,6 +32,29 @@ Mobile dev runs via Expo on Replit with specific env vars (`REPLIT_EXPO_DEV_DOMA
 
 Android builds use EAS: `pnpm --filter @workspace/mobile run build:android` (preview), `build:android:prod` (production), `build:android:dev` (dev client).
 
+**Running locally without EAS (no build-quota usage):** `npx expo start` (press `a`) serves JS to an already-installed dev client/emulator via Metro — no native build. For a full native build straight to a connected emulator/device, use `npx expo run:android` from `artifacts/mobile` — this compiles locally via Gradle and never touches EAS. On Windows this requires several environment fixes beyond what Android Studio sets up by default; see "Local Android builds on Windows" below.
+
+### Local Android builds on Windows
+
+`npx expo run:android` needs all of the following on Windows, or it fails in ways that look unrelated to each other:
+
+1. **`JAVA_HOME` must point to a JDK the RN/Kotlin Gradle toolchain supports (JDK 17–21).** If the system `java` on PATH is newer (e.g. JDK 26, increasingly common as a system default), Gradle fails with a cryptic `Error resolving plugin [id: 'com.facebook.react.settings'] > 26.0.2` — that "26.0.2" is actually your Java version being mis-parsed by Kotlin's `JavaVersion.parse`, not a plugin version. Fix: set `JAVA_HOME` to Android Studio's bundled JBR (`C:\Program Files\Android\Android Studio\jbr`, JDK 21) before running the build.
+2. **CMake must be upgraded past the AGP default (3.22.1).** CMake 3.22.1 bundles Ninja 1.10, which has a real bug in its Windows long-path handling (fixed in Ninja 1.12, see [ninja-build/ninja#1900](https://github.com/ninja-build/ninja/issues/1900)). Windows' own `LongPathsEnabled` registry setting does **not** fix this — Ninja's 260-char check is internal to the tool, independent of the OS long-path opt-in. Symptom: `ninja: error: Stat(...): Filename longer than 260 characters` or `manifest 'build.ninja' still dirty after 100 tries`, deep into an otherwise-successful build (typically on a native module with a long file tree, e.g. `react-native-keyboard-controller`, `react-native-worklets`). Fix: install a newer CMake (e.g. 4.1.x) via Android Studio → Settings → Languages & Frameworks → Android SDK → SDK Tools, then pin it explicitly in `artifacts/mobile/android/app/build.gradle`:
+   ```gradle
+   android {
+     externalNativeBuild {
+       cmake {
+         version "4.1.2"  // match whatever you installed
+       }
+     }
+   }
+   ```
+   Note: some individual native modules' own `android/build.gradle` (e.g. `react-native-worklets`) read a `CMAKE_VERSION` env var for their own build, but the **`:app` module itself does not** — it needs the explicit `externalNativeBuild.cmake.version` block above, or it silently keeps using 3.22.1 even with `CMAKE_VERSION` set in the shell. Since `android/` is prebuild-generated, this edit may need reapplying after a fresh `expo prebuild`.
+   After changing the CMake version, delete stale caches or the old absolute paths / broken ninja manifests persist: `android/app/.cxx`, `android/app/build`, `android/build`, `android/.gradle`.
+3. **pnpm's `.pnpm` store path adds nesting that makes marginal path-length cases worse** (not the root cause — real cause is #2 above — but it lowers the threshold at which the Ninja bug bites). If still hitting path-length issues after fixing CMake/Ninja, a repo living under a very long path (e.g. deeply nested user folders) compounds the problem further.
+
+Order of operations for a clean local build: fix JDK → fix CMake/Ninja version → clean `.cxx`/`build` caches → `npx expo run:android`.
+
 **Deploying from a local machine (not Replit):** `EXPO_TOKEN` used to come from a Replit Secret and isn't present outside Replit. Get a token from expo.dev → your account → Settings → Access Tokens, then:
 ```bash
 export EXPO_TOKEN=<your-token>
@@ -111,3 +134,4 @@ Expo Router with file-based routing under `artifacts/mobile/app/`. Screens impor
 - `replit.md` is currently an unfilled generic template — do not rely on it for run/operate info; this file (`CLAUDE.md`) is the canonical reference.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` hold design specs and implementation plans for past features (dated filenames) — useful history/precedent when working in an area they cover.
 - `handoffs/` holds dated handoff docs for some past features.
+- `system_learnings.md` — a running ledger of non-obvious fixes and config changes made while working in this repo, with root causes. Check it before debugging something that smells like it may have been hit before.
