@@ -24,9 +24,16 @@ P1. All project-related files/processes must stay inside the remindme project fo
 
 ## Major features
 
-The five headline features, tracked together so they don't get lost among bugs
+The headline features, tracked together so they don't get lost among bugs
 and tech debt. Each needs its own brainstorm → spec → plan cycle; none is a
 drop-in change.
+
+Strategic context: the 2026-08-09 adoption assessment found the app's real moat
+is on-device Malayalam parsing (no account, no network) rather than the reminder
+list itself, and that M4 — reminding other people — is the roadmap item with no
+incumbent. M7 was added later the same day and revises that report's read of M4
+Tier 2. Prefer features that deepen those two things over ones that widen the
+app's surface.
 
 M1. **Dark mode** - the app ignores the system light/dark setting. Two independent causes, both must be fixed: (a) `app.json` pins `"userInterfaceStyle": "light"`; (b) `constants/colors.ts` has no `dark` key at all, so `useColors()` falls back to the light palette by design (documented in the hook). Deferred 2026-08-09 as its own task because it needs a full dark palette authored from the light tokens plus an audit of every hardcoded color across all screens. Decide at the same time whether to add a Light/Dark/System override in Settings (would require `useColors` to read a persisted setting rather than `useColorScheme()` alone).
 
@@ -41,4 +48,18 @@ M4. **Remind someone else** - remind another person/contact, or a group ("remind
 
 M5. **Integrate with other apps / forward-to-remind** - create a reminder by forwarding or sharing from WhatsApp, Google Calendar, email, etc. Partially built: `expo-share-intent` already handles shared text, URLs, and audio (WhatsApp voice notes → transcription), see `contexts/SharedTextContext.tsx` and backlog item 2. Still open: images (item 2), calendar integration (item 3 — "Integrate with calendars?", which should be folded in here or explicitly split into read-events vs. create-reminder-from-event), and a general review of which apps' share payloads are worth first-class handling. Consolidates items 2 and 3 rather than replacing them.
 
+- **Sub-item: "leave now" reminders that deep-link to a cab app.** Considered and deliberately deprioritized 2026-08-09. Fire at *leave* time ("Leave now for Dr. Menon") with a button opening Uber/Ola with the destination pre-filled. **Deep link only — do not attempt the ride-request API or an Uber MCP server.** Requesting a ride is a privileged Uber scope requiring approval via a business-development contact; the community MCP servers on GitHub are unofficial wrappers over that same gated API (one ships a *mock* interface with deep-link fallback precisely because access is usually unavailable). MCP is a protocol for calling APIs, not for being authorized to call them, and it needs a model in the loop — which would spend the app's "on-device, no account, no network" differentiator to buy a commodity feature. Also note Uber is not the Indian default: Ola, Rapido and Namma Yatri hold serious share, and Rapido's bike taxis dominate exactly the short hops a reminder would trigger. Honest gap: a deep link cannot compute travel time, so *when to fire* is guesswork without a maps lookup. Reuses M4 Tier 1's `Linking.openURL` + fallback pattern almost verbatim. Low priority — competes with opening Uber directly, which takes about four seconds.
+
 M6. **Remind a contact from natural language** *(builds on M4 Tier 1)* - "Remind my husband to pick up milk" — resolving the recipient from the reminder text instead of tapping through a picker. M4 Tier 1 deliberately uses an explicit contact picker, so this is a later refinement on top of it: it needs contact resolution from free text, relationship aliases ("my husband" → a specific contact), and disambiguation ("which David?"). Note it would also need to work in Malayalam, where the parser is hand-written (`utils/malayalamDateParser.ts`).
+
+M7. **Group reminders with RSVP** *(shares M4 Tier 2's backend)* - raised 2026-08-09 as "book turfs or movie tickets via the group reminder". The booking is **not** the feature; the coordination around it is, and that reframing is the whole item.
+
+**The problem nobody owns.** Nine people in a WhatsApp group, "who's in for Saturday 6am football?", three confirm, two go silent, someone books anyway, two don't show, the payment split never resolves. Booking the turf itself is already easy (Hudle/Playo, ~30 seconds). The coordination dies in WhatsApp.
+
+**Why this is M4 Tier 2, not a new backend.** Tier 2 is defined as app-to-app delivery *with acknowledgement flowing back*. Acknowledgement **is** RSVP. A group reminder that tracks who confirmed is Tier 2 aimed at a group rather than one person — same push tokens, same identity model, same server, all of which have to be built either way.
+
+**Why it matters strategically.** The 2026-08-09 adoption assessment priced Tier 2 as a caregiving feature (diaspora child checking whether a parent took medication) — real but narrow, and it retains only one persona. Group coordination is a materially larger market on the *same* infrastructure, and it's the first roadmap item that gives the young-urban-professional persona a reason to stay rather than churn in week one. **This is a correction to that report's read of Tier 2, not a new feature area.**
+
+**Booking is the last tap, not the product.** Once N people confirm, deep-link out to Hudle / Playo / BookMyShow. Verified 2026-08-09: **BookMyShow publishes no official public API and runs no partner program** — everything available is scraping (Apify, Parse.bot) or reverse-engineered GitHub projects, which is ToS-violating and breaks without notice. Hudle and Playo document integration only for *venue partners*, not consumer apps. So the division is forced and also correct: we own coordination, they own the transaction. Same `Linking.openURL` pattern as M4 Tier 1. **Do not build a booking integration.**
+
+**Open questions before this gets a spec.** (a) It is arguably a *different app* — group RSVP for weekend football shares almost nothing with a Malayalam-parsing personal reminder list, and two products in one binary usually means neither gets good. (b) It forks with M4 Tier 2's caregiving use case: same infrastructure, different audience, and the audience choice drives the UI. (c) Group identity without accounts is unsolved — Tier 1's phone-number-as-key approach may or may not stretch to groups. (d) Malayalam support for group flows is unexamined.
