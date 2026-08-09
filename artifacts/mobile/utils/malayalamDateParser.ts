@@ -19,6 +19,16 @@ const MALAYALAM_NUMBER_WORDS: Record<string, number> = {
   "പന്ത്രണ്ട്": 12,
 };
 
+// Number words are agglutinative like മണി: the citation form ends in the
+// vowel-killer ്, but speakers and recognizers freely emit the -ു form
+// (അഞ്ച് / അഞ്ചു). Registering both spellings keeps every downstream pattern
+// suffix-agnostic without each one needing its own alternation.
+for (const [word, value] of Object.entries({ ...MALAYALAM_NUMBER_WORDS })) {
+  if (word.endsWith("്")) {
+    MALAYALAM_NUMBER_WORDS[`${word.slice(0, -1)}ു`] = value;
+  }
+}
+
 // Sorted longest-first so "പതിനൊന്ന്" (11) isn't cut short by a naive
 // substring match against a shorter word.
 const NUMBER_WORD_KEYS = Object.keys(MALAYALAM_NUMBER_WORDS).sort(
@@ -161,20 +171,40 @@ interface DurationMatch {
   offsetMs: number;
 }
 
-function resolveDuration(text: string): DurationMatch | null {
-  const hoursMatch = text.match(new RegExp(`(${NUMBER_PATTERN})\\s*മണിക്കൂർ\\s*കഴിഞ്ഞ്`));
-  if (hoursMatch) {
-    const count = parseMalayalamNumber(hoursMatch[1]);
-    if (count !== null) {
-      return { matchedText: hoursMatch[0], offsetMs: count * 60 * 60 * 1000 };
-    }
-  }
+// Duration units, each written to swallow its own case suffix. Minutes have
+// two spellings in practice: the native മിനിറ്റ് and the English loanword
+// മിനുട്ട്, which speech recognizers emit at least as often.
+//
+// Ordered hours-first: മണിക്കൂർ must be tried before any minute pattern so a
+// sentence containing both resolves to the larger unit, matching the previous
+// hardcoded order.
+const DURATION_UNITS: { unit: string; ms: number }[] = [
+  // The chillu ർ is its own character, not റ + a sign: the base form ends
+  // മണിക്കൂ + ർ, while the locative swaps that chillu for റിൽ. Alternate the
+  // two whole endings — making the റ optional strands a bare ർ in the title.
+  { unit: `മണിക്കൂ(?:ർ|റിൽ)`, ms: 60 * 60 * 1000 },
+  { unit: `മിനിറ്റ(?:ിൽ|്)?`, ms: 60 * 1000 },
+  { unit: `മിനുട്ട(?:ിൽ|്)?`, ms: 60 * 1000 },
+];
 
-  const minutesMatch = text.match(new RegExp(`(${NUMBER_PATTERN})\\s*മിനിറ്റ്\\s*കഴിഞ്ഞ്`));
-  if (minutesMatch) {
-    const count = parseMalayalamNumber(minutesMatch[1]);
-    if (count !== null) {
-      return { matchedText: minutesMatch[0], offsetMs: count * 60 * 1000 };
+// What marks the phrase as a duration rather than a clock time. Either the
+// explicit particle കഴിഞ്ഞ് ("having passed"), or nothing at all — because the
+// locative -ഇൽ ("in five minutes") is already absorbed into the unit patterns
+// above. Binding the suffix to the unit is deliberate: -ഇൽ is an ordinary
+// Malayalam locative that appears on unrelated title words (ഓഫീസിൽ, "at the
+// office"), so it must never be treated as a duration marker on its own.
+const DURATION_MARKER = `(?:കഴിഞ്ഞ്)?`;
+
+function resolveDuration(text: string): DurationMatch | null {
+  for (const { unit, ms } of DURATION_UNITS) {
+    const match = text.match(
+      new RegExp(`(${NUMBER_PATTERN})\\s*${unit}\\s*${DURATION_MARKER}`)
+    );
+    if (match) {
+      const count = parseMalayalamNumber(match[1]);
+      if (count !== null) {
+        return { matchedText: match[0], offsetMs: count * ms };
+      }
     }
   }
 

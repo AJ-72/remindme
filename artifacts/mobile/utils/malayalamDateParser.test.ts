@@ -195,6 +195,60 @@ describe("parseMalayalamDateTime — relative durations", () => {
   });
 });
 
+describe("parseMalayalamDateTime — loanword duration units and the -ഇൽ suffix", () => {
+  const now = new Date("2026-07-29T10:00:00");
+
+  // Speech recognizers emit the English loanword മിനുട്ട് at least as often as
+  // the native മിനിറ്റ്, and speakers say "in five minutes" (-ഇൽ, locative)
+  // rather than "five minutes having passed" (കഴിഞ്ഞ്). Neither was matched.
+  it("parses 'അഞ്ച് മിനുട്ടിൽ' as five minutes from now", () => {
+    const { date } = parseMalayalamDateTime("അഞ്ച് മിനുട്ടിൽ", now);
+    expect(date).not.toBeNull();
+    expect(date!.getTime()).toBe(now.getTime() + 5 * 60 * 1000);
+  });
+
+  it("parses the loanword with the കഴിഞ്ഞ് marker too", () => {
+    const { date } = parseMalayalamDateTime("പത്ത് മിനുട്ട് കഴിഞ്ഞ്", now);
+    expect(date!.getTime()).toBe(now.getTime() + 10 * 60 * 1000);
+  });
+
+  it("parses the native മിനിറ്റ് with the -ഇൽ suffix", () => {
+    const { date } = parseMalayalamDateTime("20 മിനിറ്റിൽ വിളിക്കണം", now);
+    expect(date!.getTime()).toBe(now.getTime() + 20 * 60 * 1000);
+  });
+
+  it("parses an hour duration with the -ഇൽ suffix", () => {
+    const { date } = parseMalayalamDateTime("2 മണിക്കൂറിൽ കോൾ", now);
+    expect(date!.getTime()).toBe(now.getTime() + 2 * 60 * 60 * 1000);
+  });
+
+  // The reported bug: ഇന്ന് matched as a day, the duration did not match, so
+  // the 9 AM day-default fired and the user saw "today 9:00 AM".
+  it("does not fall back to the 9 AM day default when a duration is present", () => {
+    const { date } = parseMalayalamDateTime("ഇന്ന് അഞ്ചു മിനുട്ടിൽ", now);
+    expect(date!.getTime()).toBe(now.getTime() + 5 * 60 * 1000);
+    expect(date!.getHours()).not.toBe(9);
+  });
+
+  it("accepts the -ു suffixed form of a number word", () => {
+    const { date } = parseMalayalamDateTime("അഞ്ചു മിനുട്ടിൽ", now);
+    expect(date!.getTime()).toBe(now.getTime() + 5 * 60 * 1000);
+  });
+
+  // -ഇൽ is an ordinary Malayalam locative ("in/at"). It must only count as a
+  // duration marker when bound to a time unit, never on unrelated title words.
+  it("does not treat an unrelated -ഇൽ word as a duration", () => {
+    const { date, title } = parseMalayalamDateTime("ഓഫീസിൽ പോകണം", now);
+    expect(date).toBeNull();
+    expect(title).toBe("ഓഫീസിൽ പോകണം");
+  });
+
+  it("strips the duration phrase from the title", () => {
+    const { title } = parseMalayalamDateTime("അഞ്ച് മിനുട്ടിൽ മരുന്ന് കഴിക്കണം", now);
+    expect(title).toBe("മരുന്ന് കഴിക്കണം");
+  });
+});
+
 describe("parseMalayalamDateTime — code-mixed input (v1 limitation)", () => {
   const now = new Date("2026-07-29T10:00:00");
 
