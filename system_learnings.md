@@ -9,6 +9,22 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-09 — Independent settings need one channel per COMBINATION, and `useState(prop)` never resyncs
+
+Three device-reported bugs from the same build, two sharing a root cause worth generalizing.
+
+**1. Vibration setting did nothing while sound was on.** `channelIdForAlarm(alarm, vibrate)` returned `"reminders-alarm"` whenever `alarm` was true, discarding the `vibrate` argument — on the theory that "the alarm channel's vibration is part of its own immutable config." That theory made the setting a **no-op in its most common state**: sound defaults on, so the ordinary user toggling vibration off saw no change. Android channel config is immutable by ID, so N independent notification settings need **2^N channels**, one per combination — there is no way to express a combination by editing a channel at runtime. Now four: `reminders-alarm`, `reminders-alarm-novibrate`, `reminders-vibrate`, `reminders-silent`. Also note `vibrationPattern` alone does not enable vibration — set `enableVibrate: true` explicitly (the alarm channel was missing it; existing installs keep the old config forever, so this only helps new ones).
+
+**2. `useState(someProp)` seeds once and never updates.** `QuickAddInput` did `useState(defaultAlarmEnabled)`. It lives on the home screen and **never unmounts**, and the setting loads asynchronously *after* mount — so the initial load and every later Settings change were both invisible to it. Fix: a `useEffect` syncing on change, guarded by a `useRef` "user has touched this" flag so a deliberate per-reminder override isn't clobbered. **Any `useState(x)` where `x` is a prop or context value is a resync bug waiting to happen unless the component remounts.**
+
+**3. Hardcoded reset after save.** The same screen did `setAlarm(true)` after saving, ignoring the user's default — a lit bell with sound off. Trivial once seen, invisible for weeks because **the component had zero alarm-state tests**.
+
+**Layout note (same build):** the multiline-input change set `alignItems: "flex-end"` on the quick-add row, which is right for the growing TextInput but pushed the mic/notes/alarm/save icons to the bottom of a tall capsule. Fix: wrap the buttons in their own `flexDirection: "row"` + `alignItems: "center"` group with a `minHeight` matching the button size, so they align to *each other* rather than the row baseline.
+
+**WHERE:** `services/ReminderService.ts` (`channelIdForAlarm`, `setupNotificationChannel`), `components/QuickAddInput.tsx` (alarm state + `actionRow`), tests in `services/ReminderService.test.ts` and `__tests__/components/QuickAddInput.test.tsx`.
+
+---
+
 ## 2026-08-09 — A test named for a behavior it never asserts is how the header date shipped missing
 
 **WHAT:** the home screen header was meant to show the current date beside "Today" (mockup 2a). It shipped without one and stayed that way until a user asked. Added `utils/formatHeaderDate.ts` and wired it into `app/(tabs)/index.tsx`.

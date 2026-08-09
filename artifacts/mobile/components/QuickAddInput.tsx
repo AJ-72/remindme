@@ -107,6 +107,9 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [parsedTitle, setParsedTitle] = useState("");
   const [parsedDate, setParsedDate] = useState<Date | null>(null);
   const [alarm, setAlarm] = useState(defaultAlarmEnabled);
+  // Tracks whether the user has overridden the alarm for the reminder they're
+  // currently composing, so the sync effect below doesn't undo that.
+  const alarmTouchedRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [notesVisible, setNotesVisible] = useState(false);
   const [description, setDescription] = useState("");
@@ -159,6 +162,17 @@ export default function QuickAddInput({ onSaved }: Props) {
     }
   }, [sharedText, clearSharedText]);
 
+  // useState only seeds on first mount, but this component lives on the home
+  // screen and never unmounts — so a Settings change (or the initial async
+  // load, which resolves after mount) would otherwise never reach the icon,
+  // leaving a lit bell while sound was off. Skipped once the user has
+  // toggled the alarm for the reminder in progress.
+  useEffect(() => {
+    if (!alarmTouchedRef.current) {
+      setAlarm(defaultAlarmEnabled);
+    }
+  }, [defaultAlarmEnabled]);
+
   useEffect(() => {
     const { title, date } = parseNaturalLanguage(input);
     setParsedTitle(title);
@@ -191,7 +205,10 @@ export default function QuickAddInput({ onSaved }: Props) {
       setInput("");
       setParsedTitle("");
       setParsedDate(null);
-      setAlarm(true);
+      // Back to the user's Settings default, not a hardcoded true — resetting
+      // to true left a lit bell after every save even with sound turned off.
+      alarmTouchedRef.current = false;
+      setAlarm(defaultAlarmEnabled);
       setDescription("");
       setNotesVisible(false);
       onSaved?.();
@@ -366,8 +383,9 @@ export default function QuickAddInput({ onSaved }: Props) {
     },
     bar: {
       flexDirection: "row",
-      // flex-end, not center: the input grows downward as it wraps, and a
-      // centered mic button would drift to the middle of a tall capsule.
+      // flex-end so the button cluster stays on the last line as the input
+      // grows. The buttons center themselves within that cluster (see
+      // actionRow) rather than each aligning to the row's baseline.
       alignItems: "flex-end",
       backgroundColor: colors.card,
       borderRadius: colors.radiusCapsule,
@@ -385,6 +403,16 @@ export default function QuickAddInput({ onSaved }: Props) {
             shadowRadius: 12,
             elevation: 3,
           }),
+    },
+    // Groups the mic/notes/alarm/save buttons so they align to each other
+    // instead of to the (possibly multi-line) input beside them. The 32px
+    // minHeight matches the button size, keeping the cluster centered against
+    // a single line of text as well as a tall one.
+    actionRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      minHeight: 32,
     },
     textInput: {
       flex: 1,
@@ -599,6 +627,7 @@ export default function QuickAddInput({ onSaved }: Props) {
           editable={!saving}
           testID="quick-add-input"
         />
+        <View style={styles.actionRow}>
         <Pressable
           style={[styles.micBtn, listening && styles.micBtnListening]}
           onPress={handleMicPress}
@@ -628,10 +657,14 @@ export default function QuickAddInput({ onSaved }: Props) {
         <Pressable
           style={styles.alarmBtn}
           onPress={() => {
+            alarmTouchedRef.current = true;
             setAlarm((a) => !a);
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           }}
           hitSlop={8}
+          accessibilityRole="button"
+          accessibilityState={{ selected: alarm }}
+          testID="quick-add-alarm-toggle"
         >
           <Feather
             name={alarm ? "bell" : "bell-off"}
@@ -648,6 +681,7 @@ export default function QuickAddInput({ onSaved }: Props) {
         >
           <Feather name="check" size={16} color={canSave ? colors.primaryForeground : colors.mutedForeground} />
         </Pressable>
+        </View>
       </View>
 
       {micNotice && (

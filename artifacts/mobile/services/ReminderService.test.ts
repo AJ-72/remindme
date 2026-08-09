@@ -630,10 +630,12 @@ describe("channelIdForAlarm", () => {
     expect(channelIdForAlarm(true, true)).toBe("reminders-alarm");
   });
 
-  // Sound implies vibration on the alarm channel — its pattern is baked into
-  // the channel config, so there is no sound-without-vibration variant.
-  it("returns the alarm channel when alarm is on regardless of vibration", () => {
-    expect(channelIdForAlarm(true, false)).toBe("reminders-alarm");
+  // Device testing showed turning vibration off did nothing while sound was
+  // on — the common case — because the alarm channel was returned regardless.
+  // Sound and vibration are independent, so all four combinations need a
+  // distinct channel.
+  it("returns the silent-alarm channel when sound is on but vibration is off", () => {
+    expect(channelIdForAlarm(true, false)).toBe("reminders-alarm-novibrate");
   });
 
   it("returns the silent-but-vibrating channel when only vibration is on", () => {

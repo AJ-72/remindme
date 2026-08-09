@@ -5,7 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import QuickAddInput from "@/components/QuickAddInput";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider, useSharedText } from "@/contexts/SharedTextContext";
-import { STORAGE_KEY } from "@/services/ReminderService";
+import { DEFAULT_ALARM_KEY, STORAGE_KEY } from "@/services/ReminderService";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { Linking, Platform, StyleSheet } from "react-native";
 import * as SpeechService from "@/services/SpeechService";
@@ -75,6 +75,59 @@ describe("QuickAddInput", () => {
     });
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].title).toBe("Call mom");
+  });
+
+  // The alarm icon must reflect the Settings default, not a hardcoded true.
+  // Two bugs shipped here: the state was seeded only on first mount (and this
+  // component never unmounts on the home screen), and saving reset it to true
+  // unconditionally — leaving a lit bell while sound was off in Settings.
+  it("shows the alarm off when the stored default is off", async () => {
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
+    const { findByTestId } = renderComponent();
+
+    const alarmBtn = await findByTestId("quick-add-alarm-toggle");
+    await waitFor(() =>
+      expect(alarmBtn.props.accessibilityState?.selected).toBe(false)
+    );
+  });
+
+  it("saves with alarm off when the stored default is off", async () => {
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
+    const { findByTestId } = renderComponent();
+
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.changeText(titleInput, "Call mom tomorrow at 3pm");
+    await waitFor(async () => {
+      const btn = await findByTestId("quick-add-alarm-toggle");
+      expect(btn.props.accessibilityState?.selected).toBe(false);
+    });
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].alarm).toBe(false);
+  });
+
+  it("returns the alarm to the stored default after saving, not to on", async () => {
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
+    const { findByTestId } = renderComponent();
+
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.changeText(titleInput, "Call mom tomorrow at 3pm");
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+
+    const alarmBtn = await findByTestId("quick-add-alarm-toggle");
+    await waitFor(() =>
+      expect(alarmBtn.props.accessibilityState?.selected).toBe(false)
+    );
   });
 
   it("saves a description entered via the notes toggle, alongside a parsed date", async () => {

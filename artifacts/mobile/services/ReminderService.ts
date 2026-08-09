@@ -194,6 +194,25 @@ async function setupNotificationChannel(): Promise<void> {
       name: "Reminders (Alarm)",
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 400, 200, 400],
+      // Explicit: a vibrationPattern alone does not guarantee vibration is
+      // enabled on the channel. Existing installs keep whatever this channel
+      // was created with — immutable by ID — but new ones get it right.
+      enableVibrate: true,
+      lightColor: "#6366f1",
+      sound: "alarm.wav",
+      bypassDnd: true,
+      lockscreenVisibility:
+        Notifications.AndroidNotificationVisibility.PUBLIC,
+      showBadge: true,
+    });
+    // Sound on, vibration off. Same alarm treatment as above minus the buzz —
+    // needed because channel config is immutable by ID, so this combination
+    // cannot be expressed by editing "reminders-alarm" at runtime.
+    await Notifications.setNotificationChannelAsync("reminders-alarm-novibrate", {
+      name: "Reminders (Alarm, no vibration)",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: null,
+      enableVibrate: false,
       lightColor: "#6366f1",
       sound: "alarm.wav",
       bypassDnd: true,
@@ -286,12 +305,15 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   }
 }
 
+// Sound and vibration are fully independent, so all four combinations map to
+// their own channel. An earlier version returned "reminders-alarm" whenever
+// sound was on, which silently made the vibration setting a no-op in its most
+// common state — turning vibration off while sound was on did nothing.
+//
 // Vibration defaults to true so callers written before the setting existed
-// keep the buzz rather than silently landing on the fully-silent channel.
-// When alarm is on the vibrate argument is irrelevant: the alarm channel's
-// vibration pattern is part of its own (immutable) config.
+// keep the buzz rather than landing on a silent channel.
 export function channelIdForAlarm(alarm: boolean, vibrate: boolean = true): string {
-  if (alarm) return "reminders-alarm";
+  if (alarm) return vibrate ? "reminders-alarm" : "reminders-alarm-novibrate";
   return vibrate ? "reminders-vibrate" : "reminders-silent";
 }
 
