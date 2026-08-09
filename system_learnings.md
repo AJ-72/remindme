@@ -9,6 +9,24 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-09 — Duplicate notifications: the early-trigger offset opens a 60s window where a delivered reminder still looks "pending"
+
+**Symptom:** two identical notifications for the same reminder, both showing "Now".
+
+**ROOT CAUSE:** `scheduleNotification` fires the trigger `ALARM_EARLY_OFFSET_MS` (60s) *before* the reminder's `datetime`, to counter Doze delivery lag. So for that final minute the notification has **already been delivered** while `datetime > now` is still true. `rescheduleAllFutureReminders` (BackgroundFetch, every 15 min) guarded only on `datetime <= now`, so inside that window it treated the reminder as pending, "cancelled" it — a no-op, since `cancelScheduledNotificationAsync` only stops a *pending trigger* and cannot un-deliver a notification already in the tray — and scheduled a second copy, which fired immediately.
+
+**The compounding failure:** the new id then overwrote `notificationId` in AsyncStorage. Every cancel path in this service keys off that single stored id, so the first notification became an **orphan nothing could ever cancel** — it would keep being re-armed on later reschedules.
+
+**FIX (two parts, both needed):**
+1. The reschedule guard subtracts the offset: `datetime - ALARM_EARLY_OFFSET_MS <= now` → skip.
+2. `cancelScheduledForReminder(reminderId)` sweeps `getAllScheduledNotificationsAsync()` and cancels every request whose `content.data.reminderId` matches, instead of trusting the stored id. This makes orphans already on users' devices self-healing.
+
+**Generalizable rule:** whenever a scheduled time is deliberately offset from a logical time, **every guard comparing "has this happened yet" must use the same offset**. Comparing against the logical time is off by exactly the offset window.
+
+**Testing note:** `getAllScheduledNotificationsAsync` was missing from `__mocks__/expo-notifications.ts`, so the sweep would have silently no-opped in tests while looking correct. When adding a code path that calls a new notification API, check the mock exports it — an absent mock function fails as `undefined`, not as a visible error.
+
+---
+
 ## 2026-08-09 — Notification action buttons need a TaskManager task; a React listener alone is a no-op when the app is closed
 
 **Symptom:** "Mark Done" on a fired reminder's notification did nothing. Tapping it dismissed the notification but the reminder stayed incomplete — though it often *did* apply later, once the app was next opened, which made it look intermittent.
