@@ -34,6 +34,7 @@ import {
   requestNotificationPermissions,
 } from "@/services/ReminderService";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
+import { registerNotificationResponseTask } from "@/tasks/notificationResponseTask";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -79,6 +80,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     registerRescheduleTask();
+    registerNotificationResponseTask();
   }, []);
 
   // Initial check on mount
