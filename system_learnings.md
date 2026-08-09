@@ -9,6 +9,55 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-09 — Notification action buttons need a TaskManager task; a React listener alone is a no-op when the app is closed
+
+**Symptom:** "Mark Done" on a fired reminder's notification did nothing. Tapping it dismissed the notification but the reminder stayed incomplete — though it often *did* apply later, once the app was next opened, which made it look intermittent.
+
+**ROOT CAUSE:** `MARK_DONE_ACTION_ID` sets `opensAppToForeground: false`, so Android delivers the action without launching the app. The only response handler was `addNotificationResponseReceivedListener` registered inside a React `useEffect` (`components/NotificationResponseHandler.tsx`) — which by definition only exists while the app is running. No JS ran at all.
+
+expo-notifications' own Android source says this explicitly, in `ExpoHandlingDelegate.handleNotificationResponse`:
+> "NOTE the listeners are not set up when the app is killed and is launched in response to tapping a notification button — this code is a noop in that case"
+
+and in the same function: `if (!isAppInForeground()) { runTaskManagerTasks(...) }`. **A TaskManager task is the supported path for headless action buttons on Android** — not only for remote push, which is how the docs read at first glance.
+
+**Why it looked intermittent:** the native side queues unhandled responses in `sPendingNotificationResponses`, and `getLastNotificationResponseAsync()` drains that queue on next launch. So the action was applied eventually — at next app open — rather than lost.
+
+**FIX:** `tasks/notificationResponseTask.ts` — `TaskManager.defineTask` at module load (imported from `index.ts`, same pattern as `rescheduleTask.ts`), registered via `Notifications.registerTaskAsync`. Reuses the existing pure `handleNotificationResponse` with headless deps: no navigator, and a per-invocation dedupe ref since each wake gets a fresh JS context.
+
+**Testing note:** `expo-task-manager` has no native module under Jest — importing anything that loads it throws `Cannot find native module 'ExpoTaskManager'`. Added `__mocks__/expo-task-manager.ts`, which also records defined tasks so the task body itself can be invoked in a test. iOS does not run background tasks for notification responses at all (expo matches that deliberately); there the foreground listener still handles them.
+
+---
+
+## 2026-08-09 — Android's large notification icon is only reachable from a config plugin, not from JS
+
+**WHAT:** to show the app icon in the expanded notification, added `plugins/withLargeNotificationIcon.js` (registered in `app.json`).
+
+**WHY NOT JS:** `ExpoNotificationBuilder.kt` sets the large icon from either (a) manifest meta-data `expo.modules.notifications.large_notification_icon`, or (b) `notificationContent.containsImage()`. Path (b) looks like a JS route but **`containsImage()` is implemented only by `RemoteNotificationContent`** (remote push, resolved from a download URL) — locally scheduled notifications never take that branch. So (a) is the only option, and `expo-notifications`' own config plugin exposes no setting for it.
+
+**WHY NOT A MANUAL MANIFEST EDIT:** `artifacts/mobile/android/` is prebuild-generated and gitignored — a hand-edit is wiped by the next `expo prebuild` and can't be committed. Same class of trap as the CMake pin in CLAUDE.md.
+
+**Don't confuse the two icons:** the small status-bar icon (`notification-icon.png`, set via the expo-notifications plugin's `icon` option) is **silhouetted by Android** — every non-transparent pixel becomes one flat tinted shape. A full-color app icon there renders as a solid square. That is platform behavior, not a bug, and it's why the large icon is a separate mechanism.
+
+**Verify with:** `npx expo prebuild --platform android --no-install`, then check the meta-data line in `android/app/src/main/AndroidManifest.xml` and that `android/app/src/main/res/drawable-{m,h,xh,xxh,xxxh}dpi/large_notification_icon.png` all exist at 64/96/128/192/256px.
+
+---
+
+## 2026-08-09 — Malayalam agglutination, round 2: duration units, the -ഇൽ locative, and fused fraction hours
+
+**WHAT:** three device-reported parser gaps, all the same underlying shape as the earlier `മണി` suffix issue.
+
+1. **`മിനുട്ട്` (loanword) vs `മിനിറ്റ്` (native)** — `resolveDuration` only matched the latter. Speech recognizers emit both.
+2. **The `-ഇൽ` locative** ("in five minutes") — only `കഴിഞ്ഞ്` was matched. **Bind `-ഇൽ` to the time unit, never treat it standalone**: it is an ordinary locative that appears on unrelated title words (`ഓഫീസിൽ` = "at the office"). There is a regression test pinning this.
+3. **Fused fraction hours** — `അഞ്ചര` (5:30) is one token (`അഞ്ച്` + `അര`), so the two-token "അര + മണി" patterns never saw it. Likewise `നാലേ മുക്കാല്` (4:45), `അഞ്ചേ കാൽ` (5:15). These branches **must run before the bare-hour branch** or `അഞ്ചര` is partially eaten as `അഞ്ച്` (5:00), silently dropping the `ര`.
+
+**Compounding symptom worth knowing:** `ഇന്ന് അഞ്ചു മിനുട്ടിൽ` resolved to *today 9:00 AM*. Not a separate bug — `ഇന്ന്` matched as a day, the duration didn't match, no clock time was found, so the `setHours(9,0,0,0)` day-default fired. **A wrong-looking time is often a missing match plus the 9 AM default, not a bad time calculation.**
+
+**The chillu trap:** `ർ` is its own character, not `റ` + a sign. Writing `മണിക്കൂറ?` to make the ending optional matches `മണിക്കൂ` and strands a bare `ർ` in the title. Alternate whole endings instead: `മണിക്കൂ(?:ർ|റിൽ)`.
+
+**A green test suite hid a real defect here.** The period-biased fraction branch built `matchedText` by joining `"<period> <fraction>"`, which `stripMatch` then couldn't find when the two words weren't adjacent (`രാവിലെ ഓഫീസിൽ അഞ്ചര`) — the replace silently no-opped and the whole phrase stayed in the title while the *time* resolved correctly. Every test passed because none used a non-adjacent phrase. `stripMatch` now takes several parts. **When a match spans words that need not be contiguous, strip each part independently rather than fabricating a span.**
+
+---
+
 ## 2026-08-09 — `flex: 1` on a `Text` inside a nested column `View` makes the label invisible on device
 
 **Symptom:** on the Settings screen, the row titles ("Play alarm sound by default", "Show description in notifications") were invisible on a real Android device — only the grey sub-label under each one rendered. Every test passed and the text was present in the rendered tree.
