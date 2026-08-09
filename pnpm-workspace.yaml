@@ -75,6 +75,26 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # Exactly ONE copy of the React type definitions across the whole workspace.
+  #
+  # Without this, two copies coexist: artifacts/mobile pins ~19.1.10 (Expo SDK 54
+  # requires it), while the catalog below asks for ^19.2.0. Packages that declare
+  # no @types/react of their own (recharts, react-day-picker, react-hook-form,
+  # react-resizable-panels) don't resolve either pin directly — they walk up the
+  # tree to pnpm's hoisted copy at node_modules/.pnpm/node_modules/@types/react,
+  # which was the 19.1.x one. mockup-sandbox's own code meanwhile resolved 19.2.x.
+  #
+  # When a type crosses that boundary TypeScript reports the deeply confusing
+  # "Two different types with this name exist, but they are unrelated" against
+  # Ref/VoidOrUndefinedOnly — e.g. react-day-picker's rootRef, or svg props
+  # passed into a lucide-react icon. Nothing is actually wrong with the code.
+  #
+  # Pinned to 19.1.x (not 19.2.x) because the React Native app is the higher-risk
+  # package and Expo expects that line; the sandbox compiles fine against it.
+  # If you raise this, raise artifacts/mobile's pin in the same commit and run
+  # `pnpm run typecheck` — a mismatch resurfaces the same error.
+  "@types/react": "19.1.17"
+  "@types/react-dom": "19.1.11"
   # replit uses linux-x64 only, we can exclude all other platforms
   "esbuild>@esbuild/darwin-arm64": "-"
   "esbuild>@esbuild/darwin-x64": "-"

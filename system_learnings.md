@@ -9,6 +9,22 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-09 — "Two different types with this name exist" means two copies of @types/react, and the culprit is pnpm's *hoisted* copy
+
+**WHAT:** `pnpm run typecheck` failed in `artifacts/mockup-sandbox` (2 errors in `calendar.tsx` and `spinner.tsx`) with `TS2322: ... Two different types with this name exist, but they are unrelated` on `Ref` / `VoidOrUndefinedOnly`. Fixed by pinning **one** `@types/react` for the whole workspace via `overrides` in `pnpm-workspace.yaml`.
+
+**ROOT CAUSE:** two copies coexisted — `19.1.17` (because `artifacts/mobile` pins `~19.1.10` for Expo SDK 54) and `19.2.14` (because the catalog asks `^19.2.0`). The non-obvious part is *how the old one reached the sandbox*: `recharts`, `react-day-picker`, `react-hook-form` and `react-resizable-panels` declare **no `@types/react` of their own**, so they resolve nothing locally and walk up to pnpm's hoisted copy at `node_modules/.pnpm/node_modules/@types/react` → `19.1.17`. The sandbox's own source resolved `19.2.14`. Any type crossing that boundary (`react-day-picker`'s `rootRef`; svg props spread into a `lucide-react` icon) compares two structurally identical but nominally unrelated types. **The source code was never wrong.**
+
+**HOW TO DIAGNOSE THIS CLASS FAST:** `tsc --traceResolution` and count the copies — `npx tsc -p tsconfig.json --noEmit --traceResolution | grep -oE "@types\+react@[0-9.]+" | sort | uniq -c`. Two lines means two copies; then `grep -B8` the old version and read the `======== Resolving` lines to see which packages pull it. This turns a wall of unreadable type text into a package list in one command.
+
+**FIX:** `overrides: "@types/react": "19.1.17"` (+ `@types/react-dom": "19.1.11"`). Pinned to the **19.1 line, not 19.2** — the React Native app is the higher-risk consumer and Expo expects that line; the sandbox compiles fine against it. Collapsing the duplicate graph removed ~700 lines from `pnpm-lock.yaml`.
+
+**RULE:** in a pnpm workspace, any type-only package consumed by more than one workspace member (`@types/react`, `@types/node`) needs a single pinned version in `overrides`, not per-package pins plus a catalog — those two mechanisms disagree silently and the resulting error names neither package. If you raise this pin, raise `artifacts/mobile`'s in the same commit.
+
+**WHERE:** `pnpm-workspace.yaml` (`overrides`, with the full explanation inline), `pnpm-lock.yaml`.
+
+---
+
 ## 2026-08-09 — The Bash tool is Git Bash, so PowerShell here-strings silently corrupt commit messages
 
 **WHAT:** a `git commit -m @'...'@` through the **Bash** tool produced a commit whose subject line began with a literal `@`. Fixed with `git commit --amend -F - <<'EOF' ... EOF`.
