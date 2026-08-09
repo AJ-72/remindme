@@ -12,10 +12,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import ConfirmSheet from "@/components/ConfirmSheet";
+import SnoozeSheet from "@/components/SnoozeSheet";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
+import type { SnoozePreset } from "@/utils/snoozePresets";
 
 function goBack() {
   if (router.canGoBack()) {
@@ -28,10 +30,18 @@ function goBack() {
 export default function ReminderDetailScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { reminders, loading, toggleComplete, snoozeReminder, deleteReminder } =
-    useReminders();
+  const {
+    reminders,
+    loading,
+    toggleComplete,
+    snoozeReminder,
+    deleteReminder,
+    snoozePreset,
+    setSnoozePreset,
+  } = useReminders();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [snoozeSheetVisible, setSnoozeSheetVisible] = useState(false);
 
   const reminder = reminders.find((r) => r.id === id);
 
@@ -40,8 +50,16 @@ export default function ReminderDetailScreen() {
     goBack();
   };
 
-  const handleSnooze = async () => {
-    await snoozeReminder(id);
+  const handleSnooze = () => {
+    setSnoozeSheetVisible(true);
+  };
+
+  const handleSelectSnoozePreset = async (preset: SnoozePreset) => {
+    setSnoozeSheetVisible(false);
+    // The chosen preset becomes the new default, so the notification-tray
+    // button converges on whatever the user actually uses.
+    await setSnoozePreset(preset);
+    await snoozeReminder(id, preset);
     goBack();
   };
 
@@ -237,7 +255,7 @@ export default function ReminderDetailScreen() {
               testID="snooze-button"
             >
               <Feather name="clock" size={16} color={colors.foreground} />
-              <Text style={styles.secondaryBtnText}>Snooze 10 min</Text>
+              <Text style={styles.secondaryBtnText}>Snooze</Text>
             </Pressable>
             <Pressable
               style={[styles.actionBtn, styles.secondaryBtn]}
@@ -267,6 +285,13 @@ export default function ReminderDetailScreen() {
         destructive
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
+      />
+
+      <SnoozeSheet
+        visible={snoozeSheetVisible}
+        current={snoozePreset}
+        onSelect={handleSelectSnoozePreset}
+        onCancel={() => setSnoozeSheetVisible(false)}
       />
     </View>
   );
