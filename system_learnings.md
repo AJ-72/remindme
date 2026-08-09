@@ -9,6 +9,25 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-09 — India's booking platforms are all closed to consumer apps; MCP does not route around an approval gate
+
+**WHAT:** investigated integrating ride/turf/movie booking into reminders (M5 sub-item and M7 in `backlog.md`). All three targets are closed. Recording the findings so nobody re-runs this research.
+
+**WHAT WAS VERIFIED (2026-08-09):**
+- **BookMyShow** — no official public API, no partner program. Everything available is scraping (Apify, Parse.bot) or reverse-engineered GitHub projects. ToS-violating and breaks without notice. **Not viable.**
+- **Hudle / Playo** (turf) — document integration for *venue partners* only, not consumer apps. No public API spec.
+- **Uber** — requesting a ride is a **privileged scope requiring approval** through a business-development contact. Not self-serve.
+
+**THE NON-OBVIOUS PART — "just use the Uber MCP server" does not work.** The community MCP servers on GitHub are **unofficial wrappers over that same gated REST API**; one of them ships a *mock* interface with deep-link fallback precisely because real access usually isn't granted. **MCP is a protocol for calling APIs, not for being authorized to call them** — it cannot grant a scope the developer doesn't have. It also requires a model in the loop (server + per-call cost), which would spend this app's "on-device, no account, no network" property to buy a commodity feature. Generalizes: whenever an integration is blocked by *permission* rather than *plumbing*, no protocol or wrapper fixes it — check the scope/approval model before designing anything on top.
+
+**ARCHITECTURAL CONSEQUENCE (and it's the right design anyway):** own the coordination, deep-link the transaction — `Linking.openURL`, the same pattern M4 Tier 1 uses for `wa.me`. Do **not** build a booking integration.
+
+**Market note worth keeping:** Uber is not India's default — Ola, Rapido and Namma Yatri hold serious share, and Rapido's bike taxis cover exactly the short hops a reminder would trigger. Any single-provider ride integration addresses a minority of users.
+
+**WHERE:** `backlog.md` (M5 sub-item, M7). No source change.
+
+---
+
 ## 2026-08-09 — "Two different types with this name exist" means two copies of @types/react, and the culprit is pnpm's *hoisted* copy
 
 **WHAT:** `pnpm run typecheck` failed in `artifacts/mockup-sandbox` (2 errors in `calendar.tsx` and `spinner.tsx`) with `TS2322: ... Two different types with this name exist, but they are unrelated` on `Ref` / `VoidOrUndefinedOnly`. Fixed by pinning **one** `@types/react` for the whole workspace via `overrides` in `pnpm-workspace.yaml`.
