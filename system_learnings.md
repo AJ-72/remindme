@@ -9,6 +9,18 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-07 — `SNOOZE_ACTION_ID` must keep the value `"SNOOZE_10"` even though snooze is no longer 10 minutes
+
+**Context:** designing user-selectable snooze presets (5/15/30/60 min + "tomorrow same time"), which makes the constant name `SNOOZE_10` inaccurate and an obvious-looking cleanup target.
+
+**WHY IT MUST NOT BE RENAMED:** the *value* of `SNOOZE_ACTION_ID` (`services/ReminderService.ts`) is not internal — it is written into the `categoryIdentifier` of every notification handed to `expo-notifications`, so it lives inside notifications already scheduled on users' devices. `handleNotificationResponse` matches incoming `response.actionIdentifier` against it. Changing the string means any notification sitting in a tray across an app upgrade carries the old ID, matches nothing, and its Snooze button silently does nothing. Renaming needs a migration (register both IDs for one release, then drop the old), tracked as backlog item 17.
+
+**Related decision, same commit:** `SNOOZE_MINUTES` *is* deleted rather than kept as a dead export. It was the expected value in three arithmetic test assertions (`ReminderService.test.ts:256`, `:583`, `notificationResponseHandler.test.ts:77`); leaving it while production code stopped reading it would have left tests passing without proving anything.
+
+**Lesson:** before renaming a constant in this codebase, check whether its value crosses a persistence or OS boundary (AsyncStorage keys, notification category/action IDs, Android channel IDs). Those are wire formats with data already in the field, not just identifiers — the same reason `setupNotificationChannel()` carries a legacy-channel migration.
+
+---
+
 ## 2026-08-06 — Malayalam hour word `മണി` needed a case-suffix-aware pattern, with a lookahead-guard trap against `മണിക്കൂർ`
 
 **Symptom:** user reported dictated/typed times being ignored — "9 മണിക്ക്" sometimes not recognized, and times silently defaulting to a period word's default hour (e.g. "വൈകിട്ട് 5 മണി" → 18:00 instead of 17:00) whenever the hour lacked the exact literal suffix the parser hardcoded.
