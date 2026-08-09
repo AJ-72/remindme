@@ -9,6 +9,20 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-09 — A test named for a behavior it never asserts is how the header date shipped missing
+
+**WHAT:** the home screen header was meant to show the current date beside "Today" (mockup 2a). It shipped without one and stayed that way until a user asked. Added `utils/formatHeaderDate.ts` and wired it into `app/(tabs)/index.tsx`.
+
+**ROOT CAUSE — the gap was in the plan, not the implementation.** Task 3 of `docs/superpowers/plans/2026-08-03-mockup-2a-restyle.md` is titled *"Today title + date/count subtitle"*, but the markup it specifies in Step 3 reuses the previous subtitle logic verbatim (`"N upcoming"` / `"All caught up!"`). The date exists in the task's title and nowhere in its code. An implementer following the steps exactly — correct behavior — produces a header with no date.
+
+**Why nothing caught it:** the accompanying test was named `"shows a 'Today' header with a date and upcoming-count subtitle"` and asserted only `"Today"` and `"2 upcoming"`. **A test named for a behavior it doesn't check is worse than no test — it reads as coverage in every later audit.** When a test name mentions something, grep the body for an assertion on it.
+
+**Also note:** the rest of that restyle (`headerRow`, `headerAvatar`) *was* applied to `index.tsx`, yet the plan file itself is still untracked and uncommitted — so don't assume an uncommitted plan is unimplemented, or that a committed screen matches its plan.
+
+**Formatting decision:** month names are spelled out in the util rather than using `toLocaleDateString`. The required shape ("08, August 2026" — padded day, comma, full month, year) isn't reachable from one locale format, and `Intl` month names follow the *device* locale, which would silently render the header in Malayalam on a Malayalam-set phone.
+
+---
+
 ## 2026-08-09 — Duplicate notifications: the early-trigger offset opens a 60s window where a delivered reminder still looks "pending"
 
 **Symptom:** two identical notifications for the same reminder, both showing "Now".
