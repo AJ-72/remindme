@@ -9,6 +9,32 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-07 — `artifacts/mockup-sandbox` typecheck fails on duplicate `@types/react`; it is NOT caused by your change
+
+**Symptom:** `pnpm run typecheck` (repo root) exits 1 with `TS2322` in `artifacts/mockup-sandbox/src/components/ui/calendar.tsx` and `spinner.tsx`, complaining `Type 'VoidOrUndefinedOnly' is not assignable to type 'VoidOrUndefinedOnly'. Two different types with this name exist, but they are unrelated.` Output above it shows `artifacts/mobile typecheck: Done` — the mobile package is clean.
+
+**ROOT CAUSE:** two copies of `@types/react` resolve in the pnpm store, so `React.Ref<T>` from one is structurally identical to but nominally distinct from the other. `mockup-sandbox` has not been touched since `316333b` ("Initial commit"); the failure is environmental/dependency-graph, not code.
+
+**HOW TO CONFIRM IT'S PRE-EXISTING (do this rather than assuming either way):** `git stash push -u`, `git checkout <commit-before-your-work>`, run `pnpm --filter @workspace/mockup-sandbox run typecheck`, then `git checkout main && git stash pop`. If it fails there too, it is not yours. **Do not skip the `stash pop`** — checking out a detached HEAD mid-verification leaves your working tree behind if you forget.
+
+**Note on an earlier misjudgment:** this failure was once dismissed in-session as "files don't exist / not reproducible" after a `git ls-files` + `ls` check appeared to come up empty. The files do exist and the error is real and reproducible. Verify with the checkout-and-compare procedure above, not by a single spot check.
+
+**Lesson:** a root-level `pnpm run typecheck` covers every workspace package. Read the per-package lines — `<pkg> typecheck: Done` vs `Failed` — before concluding your change broke the build. Scope the check to the package you touched (`npx tsc -p tsconfig.json --noEmit` from `artifacts/mobile`) for a fast, unambiguous answer.
+
+---
+
+## 2026-08-07 — `AppState.addEventListener` cleanup in `RemindersContext` needed optional chaining
+
+**Symptom:** three newly added tests in `RemindersContext.test.tsx` failed with `TypeError: Cannot read properties of undefined (reading 'remove')` at the provider's unmount, even though the tests had nothing to do with `AppState`. The failure appeared only in tests positioned *after* the foreground-reload test.
+
+**ROOT CAUSE:** that earlier test does `jest.spyOn(AppState, "addEventListener").mockImplementation(...)` and calls `mockRestore()` at the end of its body. Combined with the suite's `jest.clearAllMocks()` in `beforeEach`, later tests can see an `addEventListener` that is still a mock and returns `undefined`. The provider then did `return () => sub.remove()` with no guard, so React's unmount teardown threw.
+
+**FIX:** `return () => sub?.remove?.();` in `contexts/RemindersContext.tsx`. This matches the defensive style used everywhere else in the codebase for native handles (`subscription?.remove()` in `NotificationResponseHandler.tsx`, `try/catch` around every `expo-notifications` call).
+
+**Lesson:** `mockRestore()` at the end of a test body is not cleanup — it doesn't run if anything above it throws, and it interacts badly with a global `clearAllMocks`. Prefer `afterEach`/`restoreMocks`. More importantly: an unsubscribe callback that assumes a native API returned a valid handle will take down the entire unmount path. Guard every teardown handle.
+
+---
+
 ## 2026-08-07 — `SNOOZE_ACTION_ID` must keep the value `"SNOOZE_10"` even though snooze is no longer 10 minutes
 
 **Context:** designing user-selectable snooze presets (5/15/30/60 min + "tomorrow same time"), which makes the constant name `SNOOZE_10` inaccurate and an obvious-looking cleanup target.
