@@ -6,6 +6,7 @@ import HomeScreen from "@/app/(tabs)/index";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
 import { STORAGE_KEY, type Reminder } from "@/services/ReminderService";
+import { formatHeaderDate } from "@/utils/formatHeaderDate";
 
 jest.mock("expo-haptics");
 jest.mock("expo-router", () => ({
@@ -63,9 +64,23 @@ describe("HomeScreen", () => {
         makeReminder({ id: "r2", title: "Task two", completed: false, datetime: FUTURE }),
       ])
     );
-    const { findByText } = renderScreen();
+    const { findByText, findByTestId } = renderScreen();
     expect(await findByText("Today")).toBeTruthy();
     expect(await findByText("2 upcoming")).toBeTruthy();
+    // This test was named "with a date" from the start but never asserted one,
+    // which is how the header shipped without it.
+    expect((await findByTestId("header-date")).props.children).toBe(
+      formatHeaderDate(new Date())
+    );
+  });
+
+  it("shows today's date beside the Today title", async () => {
+    const { findByTestId } = renderScreen();
+    const dateEl = await findByTestId("header-date");
+    // Matches the mockup's "08, August 2026" shape.
+    expect(dateEl.props.children).toMatch(
+      /^\d{2}, (January|February|March|April|May|June|July|August|September|October|November|December) \d{4}$/
+    );
   });
 
   it("shows 'All caught up!' as the subtitle when there are no upcoming reminders", async () => {

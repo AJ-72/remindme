@@ -17,6 +17,7 @@ import ReminderCard from "@/components/ReminderCard";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
+import { formatHeaderDate } from "@/utils/formatHeaderDate";
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -80,6 +81,25 @@ export default function HomeScreen() {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+    },
+    // flex so the title block yields space to the avatar rather than pushing
+    // it off-screen once the date sits alongside the title.
+    headerTitleBlock: {
+      flex: 1,
+    },
+    headerTitleRow: {
+      flexDirection: "row",
+      // baseline, not center: the date is much smaller than the title, and
+      // centering it against a 28px word makes it look like it's floating.
+      alignItems: "baseline",
+      gap: 8,
+    },
+    headerDate: {
+      fontSize: 13,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      // Lets the date shrink before the title does if the row runs out of room.
+      flexShrink: 1,
     },
     headerAvatar: {
       width: 38,
@@ -172,8 +192,13 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.headerTitle}>Today</Text>
+          <View style={styles.headerTitleBlock}>
+            <View style={styles.headerTitleRow}>
+              <Text style={styles.headerTitle}>Today</Text>
+              <Text style={styles.headerDate} testID="header-date">
+                {formatHeaderDate(new Date())}
+              </Text>
+            </View>
             <Text style={styles.headerSubtitle}>
               {upcoming.length === 0 ? "All caught up!" : `${upcoming.length} upcoming`}
             </Text>
