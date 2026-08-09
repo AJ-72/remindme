@@ -249,6 +249,89 @@ describe("parseMalayalamDateTime — loanword duration units and the -ഇൽ suf
   });
 });
 
+describe("parseMalayalamDateTime — fused fraction hour words", () => {
+  const now = new Date("2026-07-29T10:00:00"); // Wednesday
+
+  // അഞ്ചര is a single fused word (അഞ്ച് + അര), not two tokens, so the
+  // existing "അര + മണി" half-past patterns never see it.
+  it("parses അഞ്ചര as 5:30", () => {
+    const { title, date } = parseMalayalamDateTime("അഞ്ചര മീറ്റിംഗ്", now);
+    expect(date).not.toBeNull();
+    expect(date!.getHours()).toBe(17); // bare-hour heuristic: 5 -> PM
+    expect(date!.getMinutes()).toBe(30);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+
+  it("parses പത്തര as 10:30", () => {
+    const { date } = parseMalayalamDateTime("പത്തര മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(10); // 8-11 stay AM
+    expect(date!.getMinutes()).toBe(30);
+  });
+
+  it("honors a period word's bias on a fused half-hour", () => {
+    const { date } = parseMalayalamDateTime("രാവിലെ പത്തര ക്ലാസ്", now);
+    expect(date!.getHours()).toBe(10);
+    expect(date!.getMinutes()).toBe(30);
+  });
+
+  it("applies PM bias from a period word to a fused half-hour", () => {
+    const { date } = parseMalayalamDateTime("വൈകിട്ട് അഞ്ചര നടത്തം", now);
+    expect(date!.getHours()).toBe(17);
+    expect(date!.getMinutes()).toBe(30);
+  });
+
+  it("accepts the dative form അഞ്ചരയ്ക്ക്", () => {
+    const { title, date } = parseMalayalamDateTime("അഞ്ചരയ്ക്ക് മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(17);
+    expect(date!.getMinutes()).toBe(30);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+
+  // മുക്കാല് is three-quarters, so നാലേ മുക്കാല് is 4:45 — the fraction adds
+  // to the stated hour rather than counting down to the next one.
+  it("parses നാലേ മുക്കാല് as 4:45", () => {
+    const { title, date } = parseMalayalamDateTime("നാലേ മുക്കാല് മീറ്റിംഗ്", now);
+    expect(date).not.toBeNull();
+    expect(date!.getHours()).toBe(16);
+    expect(date!.getMinutes()).toBe(45);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+
+  it("parses അഞ്ചേ കാൽ as 5:15", () => {
+    const { date } = parseMalayalamDateTime("അഞ്ചേ കാൽ മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(17);
+    expect(date!.getMinutes()).toBe(15);
+  });
+
+  it("composes a day word with a fused fraction", () => {
+    const { title, date } = parseMalayalamDateTime("നാളെ അഞ്ചര മീറ്റിംഗ്", now);
+    expect(date!.getDate()).toBe(30);
+    expect(date!.getHours()).toBe(17);
+    expect(date!.getMinutes()).toBe(30);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+
+  // The period word and the fraction need not be adjacent. Joining them into
+  // one string to strip would find no such span and silently leave the entire
+  // phrase in the title, even though the time resolved correctly.
+  it("strips a period word and fraction separated by another word", () => {
+    const { title, date } = parseMalayalamDateTime(
+      "രാവിലെ ഓഫീസിൽ അഞ്ചര മീറ്റിംഗ്",
+      now
+    );
+    expect(date!.getHours()).toBe(5);
+    expect(date!.getMinutes()).toBe(30);
+    expect(title).toBe("ഓഫീസിൽ മീറ്റിംഗ്");
+  });
+
+  // Regression: the fraction branches must not shadow the plain hour path.
+  it("still parses a plain hour with no fraction", () => {
+    const { date } = parseMalayalamDateTime("അഞ്ച് മണിക്ക് മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(17);
+    expect(date!.getMinutes()).toBe(0);
+  });
+});
+
 describe("parseMalayalamDateTime — code-mixed input (v1 limitation)", () => {
   const now = new Date("2026-07-29T10:00:00");
 

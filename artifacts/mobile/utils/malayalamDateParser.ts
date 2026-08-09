@@ -71,6 +71,31 @@ const HOUR_UNIT = `മണി(?!ക്കൂ)(?:യ്)?(?:ക്ക്?)?`;
 // particle ന് ("at"). 12-hour clock only — see the 1..12 validation below.
 const COLON_TIME = `(\\d{1,2}):(\\d{2})(?:\\s*ന്)?`;
 
+// Fused fraction-of-hour words. Malayalam fuses the hour and the fraction
+// into one token — അഞ്ച് + അര becomes അഞ്ചര — so the two-token "അര മണി"
+// patterns never see them.
+//
+// Two shapes, distinguished by how the hour stem is written:
+//   -ര   half, fused directly onto the stem   അഞ്ചര = 5:30
+//   -ഏ   quarter words, hour takes the -ഏ linking form, fraction stands alone
+//        നാലേ മുക്കാല് = 4:45, അഞ്ചേ കാൽ = 5:15
+// Both ADD to the stated hour; there is no "quarter to" countdown form here.
+const HOUR_FRACTIONS: { suffix: string; minute: number }[] = [
+  { suffix: `ര`, minute: 30 },
+  { suffix: `േ\\s*മുക്കാല്?`, minute: 45 },
+  { suffix: `േ\\s*കാ(?:ൽ|ല്)`, minute: 15 },
+];
+
+// Hour stems in the fused form drop the citation vowel-killer: അഞ്ച് -> അഞ്ച,
+// പത്ത് -> പത്ത. Built from the number-word table so the two never drift.
+const FRACTION_HOUR_STEMS = Object.entries(MALAYALAM_NUMBER_WORDS)
+  .filter(([word]) => word.endsWith("്"))
+  .map(([word, value]) => ({ stem: word.slice(0, -1), value }))
+  .sort((a, b) => b.stem.length - a.stem.length);
+
+// Optional dative suffix on a fused fraction: അഞ്ചരയ്ക്ക്.
+const FRACTION_DATIVE = `(?:യ്?ക്ക്?)?`;
+
 const WEEKDAYS: { word: string; index: number }[] = [
   { word: "ഞായർ", index: 0 },
   { word: "തിങ്കൾ", index: 1 },
@@ -130,8 +155,17 @@ function resolveWeekday(text: string, now: Date): DayMatch | null {
   return null;
 }
 
-function stripMatch(text: string, matchedText: string): string {
-  return text.replace(matchedText, "").replace(/\s+/g, " ").trim();
+// Removes a matched phrase from the text. Accepts several parts because some
+// branches match words that are semantically one time expression but not
+// physically adjacent ("രാവിലെ ഓഫീസിൽ അഞ്ചര" — a period word and a fused
+// fraction with an unrelated word between them). Joining those into one string
+// and replacing it would silently no-op, leaving the whole phrase in the title.
+function stripMatch(text: string, matchedText: string | string[]): string {
+  const parts = Array.isArray(matchedText) ? matchedText : [matchedText];
+  return parts
+    .reduce((acc, part) => (part ? acc.replace(part, "") : acc), text)
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function cleanTitle(text: string): string {
@@ -142,7 +176,8 @@ function cleanTitle(text: string): string {
 }
 
 interface ClockMatch {
-  matchedText: string;
+  // May be several parts when the expression isn't contiguous — see stripMatch.
+  matchedText: string | string[];
   hour: number;
   minute: number;
 }
@@ -211,6 +246,22 @@ function resolveDuration(text: string): DurationMatch | null {
   return null;
 }
 
+// Finds a fused fraction hour (അഞ്ചര, നാലേ മുക്കാല്) anywhere in the text.
+// Returns the raw 1-12 hour and the minute; the caller applies AM/PM bias.
+function matchFusedFraction(
+  text: string
+): { matchedText: string; rawHour: number; minute: number } | null {
+  for (const { stem, value } of FRACTION_HOUR_STEMS) {
+    for (const { suffix, minute } of HOUR_FRACTIONS) {
+      const match = text.match(new RegExp(`${stem}${suffix}${FRACTION_DATIVE}`));
+      if (match) {
+        return { matchedText: match[0], rawHour: value, minute };
+      }
+    }
+  }
+  return null;
+}
+
 function resolveClockTime(text: string): ClockMatch | null {
   const halfPastAfter = text.match(
     new RegExp(`(${NUMBER_PATTERN})\\s*${HOUR_UNIT}\\s*കഴിഞ്ഞ്\\s*അര`)
@@ -229,6 +280,24 @@ function resolveClockTime(text: string): ClockMatch | null {
     if (rawHour !== null) {
       const hour = applyBareHourBias(rawHour);
       return { matchedText: halfPastBefore[0], hour, minute: 30 };
+    }
+  }
+
+  // Fused fractions must resolve before any bare-hour branch: അഞ്ചര would
+  // otherwise be partially eaten as അഞ്ച് (5:00), silently dropping the ര and
+  // losing the :30. Period-biased form first, matching the structure below.
+  for (const period of PERIOD_WORDS) {
+    const periodIndex = text.indexOf(period.word);
+    if (periodIndex === -1) continue;
+    const fraction = matchFusedFraction(text);
+    if (fraction) {
+      return {
+        // Two parts, not one joined string: the period word and the fraction
+        // need not be adjacent, and a fabricated span would strip nothing.
+        matchedText: [period.word, fraction.matchedText],
+        hour: applyBias(fraction.rawHour, period.bias),
+        minute: fraction.minute,
+      };
     }
   }
 
@@ -304,6 +373,15 @@ function resolveClockTime(text: string): ClockMatch | null {
         minute,
       };
     }
+  }
+
+  const bareFraction = matchFusedFraction(text);
+  if (bareFraction) {
+    return {
+      matchedText: bareFraction.matchedText,
+      hour: applyBareHourBias(bareFraction.rawHour),
+      minute: bareFraction.minute,
+    };
   }
 
   const bareRegex = new RegExp(`(${NUMBER_PATTERN})\\s*${HOUR_UNIT}`);
