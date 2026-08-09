@@ -131,7 +131,7 @@ Expo Router with file-based routing under `artifacts/mobile/app/`. Screens impor
 
 ## Pointers
 
-- `replit.md` is currently an unfilled generic template — do not rely on it for run/operate info; this file (`CLAUDE.md`) is the canonical reference.
+- `README.md` is the public-facing entry point, aimed at someone evaluating the repo (including how it was built with AI). This file (`CLAUDE.md`) remains the canonical run/operate reference — keep run instructions here, not there. A `replit.md` template was removed on 2026-08-09; ignore any lingering references to it.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` hold design specs and implementation plans for past features (dated filenames) — useful history/precedent when working in an area they cover.
 - `handoffs/` holds dated handoff docs for some past features.
 - `system_learnings.md` — a running ledger of non-obvious fixes and config changes made while working in this repo, with root causes. Check it before debugging something that smells like it may have been hit before.
