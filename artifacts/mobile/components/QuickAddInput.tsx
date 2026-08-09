@@ -366,7 +366,9 @@ export default function QuickAddInput({ onSaved }: Props) {
     },
     bar: {
       flexDirection: "row",
-      alignItems: "center",
+      // flex-end, not center: the input grows downward as it wraps, and a
+      // centered mic button would drift to the middle of a tall capsule.
+      alignItems: "flex-end",
       backgroundColor: colors.card,
       borderRadius: colors.radiusCapsule,
       borderWidth: 1,
@@ -387,8 +389,13 @@ export default function QuickAddInput({ onSaved }: Props) {
     textInput: {
       flex: 1,
       fontSize: 15,
+      lineHeight: 20,
       color: colors.foreground,
       paddingVertical: 0,
+      // Grows with the text instead of scrolling long input out of sight
+      // horizontally, then caps and scrolls internally so the capsule can
+      // never push the rest of the screen off. ~5 lines at lineHeight 20.
+      maxHeight: 100,
       ...(Platform.OS === "web" ? { outlineStyle: "none" } as any : {}),
     },
     notesInput: {
@@ -582,7 +589,12 @@ export default function QuickAddInput({ onSaved }: Props) {
           onChangeText={setInput}
           returnKeyType="done"
           onSubmitEditing={handleSave}
-          blurOnSubmit={false}
+          // multiline wraps long reminders into view instead of scrolling them
+          // off the right edge. blurOnSubmit must be true here: on a multiline
+          // input the return key inserts a newline by default and never fires
+          // onSubmitEditing, so Done would stop saving without it.
+          multiline
+          blurOnSubmit
           maxLength={300}
           editable={!saving}
           testID="quick-add-input"

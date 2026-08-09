@@ -7,7 +7,7 @@ import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider, useSharedText } from "@/contexts/SharedTextContext";
 import { STORAGE_KEY } from "@/services/ReminderService";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
-import { Linking, Platform } from "react-native";
+import { Linking, Platform, StyleSheet } from "react-native";
 import * as SpeechService from "@/services/SpeechService";
 
 jest.mock("expo-haptics");
@@ -49,6 +49,34 @@ beforeEach(async () => {
 });
 
 describe("QuickAddInput", () => {
+  // The title input is multiline so long reminders wrap into view instead of
+  // scrolling off the right edge. On a multiline TextInput the return key
+  // inserts a newline and never fires onSubmitEditing unless blurOnSubmit is
+  // true — so these two props have to stay in agreement or Done stops saving.
+  it("keeps the title input multiline with submit still wired up", async () => {
+    const { findByTestId } = renderComponent();
+    const titleInput = await findByTestId("quick-add-input");
+
+    expect(titleInput.props.multiline).toBe(true);
+    expect(titleInput.props.blurOnSubmit).toBe(true);
+    expect(StyleSheet.flatten(titleInput.props.style).maxHeight).toBeGreaterThan(0);
+  });
+
+  it("saves via the return key on the multiline title input", async () => {
+    const { findByTestId } = renderComponent();
+
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.changeText(titleInput, "Call mom tomorrow at 3pm");
+    fireEvent(titleInput, "submitEditing");
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].title).toBe("Call mom");
+  });
+
   it("saves a description entered via the notes toggle, alongside a parsed date", async () => {
     const { findByTestId, getByTestId } = renderComponent();
 
