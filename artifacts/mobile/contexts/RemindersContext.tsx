@@ -31,7 +31,6 @@ export type { Reminder, NotificationData, DictationLanguage };
 export {
   SNOOZE_ACTION_ID,
   SNOOZE_CATEGORY_ID,
-  SNOOZE_MINUTES,
   scheduleSnoozeNotification,
 } from "@/services/ReminderService";
 

@@ -9,7 +9,6 @@ import {
   SNOOZE_CATEGORY_ID,
   SNOOZE_ACTION_ID,
   MARK_DONE_ACTION_ID,
-  SNOOZE_MINUTES,
   STORAGE_KEY,
   addReminder,
   channelIdForAlarm,
@@ -26,6 +25,7 @@ import {
   requestNotificationPermissions,
   rescheduleAllFutureReminders,
   scheduleSnoozeNotification,
+  setupSnoozeCategory,
   setDefaultAlarmEnabled,
   setDictationLanguage,
   setShowDescriptionEnabled,
@@ -241,8 +241,8 @@ describe("notification scheduling", () => {
     expect(scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 
-  it("scheduleSnoozeNotification schedules at now + SNOOZE_MINUTES minus the early offset", async () => {
-    const before = Date.now();
+  it("scheduleSnoozeNotification schedules at the given target minus the early offset", async () => {
+    const target = new Date(Date.now() + 30 * 60 * 1000);
     const data: NotificationData = {
       reminderId: "r1",
       title: "Snoozed",
@@ -250,18 +250,12 @@ describe("notification scheduling", () => {
       alarm: true,
       channelId: "reminders-alarm",
     };
-    await scheduleSnoozeNotification(data);
-    const after = Date.now();
+    await scheduleSnoozeNotification(data, target);
 
     expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
     const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
-    const triggerMs = call.trigger.date.getTime();
-    const snoozeMs = SNOOZE_MINUTES * 60 * 1000;
-    expect(triggerMs).toBeGreaterThanOrEqual(
-      before + snoozeMs - ALARM_EARLY_OFFSET_MS
-    );
-    expect(triggerMs).toBeLessThanOrEqual(
-      after + snoozeMs - ALARM_EARLY_OFFSET_MS
+    expect(call.trigger.date.getTime()).toBe(
+      target.getTime() - ALARM_EARLY_OFFSET_MS
     );
   });
 });
@@ -311,7 +305,7 @@ describe("notification body consent gate", () => {
       description: "Buy milk and eggs",
       notificationId: "notif-r1",
     });
-    await snoozeReminder([r], "r1");
+    await snoozeReminder([r], "r1", { kind: "minutes", minutes: 15 });
     const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
     expect(call.content.body).toBe("Buy milk and eggs");
   });
@@ -533,6 +527,25 @@ describe("permission onboarding", () => {
       ])
     );
   });
+
+  it("labels the snooze action from the given preset", async () => {
+    await setupSnoozeCategory({ kind: "tomorrow" });
+    const actions = (setNotificationCategoryAsync as jest.Mock).mock.calls.at(-1)![1];
+    const snoozeAction = actions.find(
+      (a: { identifier: string }) => a.identifier === SNOOZE_ACTION_ID
+    );
+    expect(snoozeAction.buttonTitle).toBe("Snooze to tomorrow");
+  });
+
+  it("labels the snooze action from a stored minutes preset on permission setup", async () => {
+    await setSnoozePreset({ kind: "minutes", minutes: 30 });
+    await requestNotificationPermissions();
+    const actions = (setNotificationCategoryAsync as jest.Mock).mock.calls.at(-1)![1];
+    const snoozeAction = actions.find(
+      (a: { identifier: string }) => a.identifier === SNOOZE_ACTION_ID
+    );
+    expect(snoozeAction.buttonTitle).toBe("Snooze 30 min");
+  });
 });
 
 describe("channelIdForAlarm", () => {
@@ -572,9 +585,10 @@ describe("markDoneById", () => {
 describe("snoozeReminder", () => {
   it("cancels the old notification, schedules a new one, and updates datetime+notificationId", async () => {
     const r = makeReminder({ id: "r1", notificationId: "old-notif" });
+    const preset = { kind: "minutes", minutes: 15 } as const;
     const before = Date.now();
 
-    const result = await snoozeReminder([r], "r1");
+    const result = await snoozeReminder([r], "r1", preset);
 
     const after = Date.now();
     expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("old-notif");
@@ -583,14 +597,33 @@ describe("snoozeReminder", () => {
     const updated = result.find((x) => x.id === "r1")!;
     expect(updated.notificationId).toBe("mock-notif-id");
     const updatedMs = new Date(updated.datetime).getTime();
-    const snoozeMs = SNOOZE_MINUTES * 60 * 1000;
+    const snoozeMs = 15 * 60 * 1000;
     expect(updatedMs).toBeGreaterThanOrEqual(before + snoozeMs);
     expect(updatedMs).toBeLessThanOrEqual(after + snoozeMs);
   });
 
+  it("uses the reminder's own datetime for the tomorrow preset", async () => {
+    const scheduled = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const r = makeReminder({
+      id: "r1",
+      notificationId: "old-notif",
+      datetime: scheduled.toISOString(),
+    });
+
+    const result = await snoozeReminder([r], "r1", { kind: "tomorrow" });
+
+    const updated = result.find((x) => x.id === "r1")!;
+    expect(new Date(updated.datetime).getTime()).toBe(
+      scheduled.getTime() + 24 * 60 * 60 * 1000
+    );
+  });
+
   it("returns the list unchanged for an unknown id", async () => {
     const r = makeReminder({ id: "r1" });
-    const result = await snoozeReminder([r], "unknown-id");
+    const result = await snoozeReminder([r], "unknown-id", {
+      kind: "minutes",
+      minutes: 15,
+    });
     expect(result).toEqual([r]);
   });
 });

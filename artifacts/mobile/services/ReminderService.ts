@@ -4,6 +4,8 @@ import { getLocales } from "expo-localization";
 import {
   DEFAULT_SNOOZE_PRESET,
   isSnoozePreset,
+  resolveSnoozeTarget,
+  snoozeActionLabel,
   type SnoozePreset,
 } from "@/utils/snoozePresets";
 
@@ -25,9 +27,14 @@ export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
 export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
+// NOTE: the value must stay "SNOOZE_10" even though snooze is now
+// user-configurable. It is written into the categoryIdentifier of every
+// scheduled notification, so notifications already sitting in a user's tray
+// across an upgrade carry this exact string — changing it makes their Snooze
+// button silently do nothing. Renaming needs a dual-registration migration
+// (backlog item 17).
 export const SNOOZE_ACTION_ID = "SNOOZE_10";
 export const MARK_DONE_ACTION_ID = "MARK_DONE";
-export const SNOOZE_MINUTES = 10;
 
 // Android's setExactAndAllowWhileIdle (used natively by expo-notifications)
 // is documented to defer delivery by up to ~1 minute under normal operation,
@@ -182,13 +189,13 @@ async function setupNotificationChannel(): Promise<void> {
   } catch {}
 }
 
-async function setupSnoozeCategory(): Promise<void> {
+export async function setupSnoozeCategory(preset: SnoozePreset): Promise<void> {
   if (Platform.OS === "web" || !Notifications) return;
   try {
     await Notifications.setNotificationCategoryAsync(SNOOZE_CATEGORY_ID, [
       {
         identifier: SNOOZE_ACTION_ID,
-        buttonTitle: `Snooze ${SNOOZE_MINUTES} min`,
+        buttonTitle: snoozeActionLabel(preset),
         options: {
           isDestructive: false,
           isAuthenticationRequired: false,
@@ -220,7 +227,7 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   permissionRequestInFlight = (async () => {
     try {
       await setupNotificationChannel();
-      await setupSnoozeCategory();
+      await setupSnoozeCategory(await getSnoozePreset());
       const { status } = await Notifications.requestPermissionsAsync();
       return status === "granted";
     } catch {
@@ -299,13 +306,12 @@ export async function cancelNotification(
 }
 
 export async function scheduleSnoozeNotification(
-  data: NotificationData
+  data: NotificationData,
+  target: Date
 ): Promise<string | undefined> {
   if (Platform.OS === "web" || !Notifications) return undefined;
   try {
-    const snoozeDate = new Date(
-      Date.now() + SNOOZE_MINUTES * 60 * 1000 - ALARM_EARLY_OFFSET_MS
-    );
+    const snoozeDate = new Date(target.getTime() - ALARM_EARLY_OFFSET_MS);
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: data.title,
@@ -459,21 +465,26 @@ export async function toggleComplete(
 
 export async function snoozeReminder(
   current: Reminder[],
-  id: string
+  id: string,
+  preset: SnoozePreset
 ): Promise<Reminder[]> {
   const target = current.find((r) => r.id === id);
   if (!target) return current;
   await cancelNotification(target.notificationId);
   const alarmOn = target.alarm !== false;
   const body = await resolveNotificationBody(target.description);
-  const notificationId = await scheduleSnoozeNotification({
-    reminderId: id,
-    title: target.title,
-    body,
-    alarm: alarmOn,
-    channelId: channelIdForAlarm(alarmOn),
-  });
-  const datetime = new Date(Date.now() + SNOOZE_MINUTES * 60 * 1000).toISOString();
+  const snoozeTarget = resolveSnoozeTarget(preset, target.datetime, new Date());
+  const notificationId = await scheduleSnoozeNotification(
+    {
+      reminderId: id,
+      title: target.title,
+      body,
+      alarm: alarmOn,
+      channelId: channelIdForAlarm(alarmOn),
+    },
+    snoozeTarget
+  );
+  const datetime = snoozeTarget.toISOString();
   const reminders = current.map((r) =>
     r.id === id ? { ...r, datetime, notificationId } : r
   );
