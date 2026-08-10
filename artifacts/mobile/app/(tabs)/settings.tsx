@@ -25,6 +25,16 @@ import {
   buildBackupJson,
   importRemindersFromJson,
 } from "@/services/ReminderService";
+import {
+  useThemePreference,
+  type ThemePreference,
+} from "@/contexts/ThemeContext";
+
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "System" },
+];
 
 export default function SettingsScreen() {
   const colors = useColors();
@@ -40,6 +50,7 @@ export default function SettingsScreen() {
     setDictationLanguage,
     refreshFromStorage,
   } = useReminders();
+  const { preference, setPreference } = useThemePreference();
 
   const [logsVisible, setLogsVisible] = useState(false);
   const [logsText, setLogsText] = useState("");
@@ -373,6 +384,36 @@ export default function SettingsScreen() {
               showDescriptionInNotifications ? colors.primary : colors.mutedForeground
             }
           />
+        </View>
+
+        <View style={[styles.alarmCard, styles.languageCard]}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.languageLabel}>Appearance</Text>
+            <View style={styles.languagePillRow}>
+              {THEME_OPTIONS.map(({ value, label }) => (
+                <Pressable
+                  key={value}
+                  testID={`theme-${value}`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: preference === value }}
+                  style={[
+                    styles.languagePill,
+                    preference === value && styles.languagePillActive,
+                  ]}
+                  onPress={() => setPreference(value)}
+                >
+                  <Text
+                    style={[
+                      styles.languagePillText,
+                      preference === value && styles.languagePillTextActive,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
         </View>
 
         <View style={[styles.alarmCard, styles.languageCard]}>

@@ -9,6 +9,22 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-10 — A context read by `ErrorFallback` must not throw when its provider is missing
+
+**WHAT:** added the in-app Light/Dark/System override (Settings → Appearance, `@theme_preference_v1`, default `"system"`). New `contexts/ThemeContext.tsx`; `useColors()` now resolves `preference === "system" ? systemScheme : preference`.
+
+**WHY IT IS ITS OWN CONTEXT AND NOT A FIELD ON `RemindersContext`:** `ErrorFallback` calls `useColors()`, and it renders **inside** `ErrorBoundary`, which in `app/_layout.tsx` **wraps** all the providers. So `useColors()` can legitimately run with no provider above it. The house style — `useReminders()` throws `"must be used within RemindersProvider"` — is exactly wrong here: it would turn *any* caught error into a **crash while rendering the crash screen**, replacing a readable error page with a hard failure. `useThemePreference()` therefore returns the `"system"` default when the context is null instead of throwing, and there is a test asserting `useColors()` works bare.
+
+**Placement matters too:** `ThemeProvider` goes **outside** `ErrorBoundary`, so a crash screen still honours the user's chosen theme rather than snapping back to the system one.
+
+**GENERAL RULE:** before writing the standard throw-if-missing context hook, ask *what renders above this provider*. Anything reachable from an error boundary, a splash screen, or a suspense fallback needs a safe default rather than a throw. The throw is right for feature contexts; it is wrong for anything the failure path itself depends on.
+
+**Also note:** `setPreference` sets state *before* awaiting `AsyncStorage.setItem`, so the repaint is immediate rather than waiting on a disk write. Verified by a test that presses the pill and asserts the new colour without any explicit flush. No other test file needed a `ThemeProvider` added — the null-fallback keeps all 25 suites green, which is itself evidence the fallback works.
+
+**WHERE:** `contexts/ThemeContext.tsx` (+ test), `hooks/useColors.ts`, `app/_layout.tsx`, `app/(tabs)/settings.tsx`, `__tests__/screens/settings.test.tsx`.
+
+---
+
 ## 2026-08-10 — Dark mode: `app.json` and the StatusBar are separate blockers, and asserting a colour against its own token proves nothing
 
 **WHAT:** implemented dark mode (M1). Added a `dark` palette to `constants/colors.ts`, flipped `app.json`'s `userInterfaceStyle` from `"light"` to `"automatic"`, changed `<StatusBar style="dark" />` to `style="auto"`, and replaced all 15 hardcoded hex colours in UI files with tokens.

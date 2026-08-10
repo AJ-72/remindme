@@ -25,6 +25,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ExactAlarmBanner from "@/components/ExactAlarmBanner";
 import NotificationResponseHandler from "@/components/NotificationResponseHandler";
 import { RemindersProvider } from "@/contexts/RemindersContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
 import {
   checkExactAlarmPermission,
@@ -132,27 +133,32 @@ export default function RootLayout() {
           Hardcoding "dark" renders dark icons on a dark background, i.e.
           an invisible clock and battery. */}
       <StatusBar style="auto" />
-      <ErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <GestureHandlerRootView>
-            <KeyboardProvider>
-              <RemindersProvider>
-                <NotificationResponseHandler />
-                <SharedTextProvider>
-                  <View style={{ flex: 1 }}>
-                    {showAlarmBanner && (
-                      <ExactAlarmBanner
-                        onDismiss={() => setShowAlarmBanner(false)}
-                      />
-                    )}
-                    <RootLayoutNav />
-                  </View>
-                </SharedTextProvider>
-              </RemindersProvider>
-            </KeyboardProvider>
-          </GestureHandlerRootView>
-        </QueryClientProvider>
-      </ErrorBoundary>
+      {/* Outside ErrorBoundary on purpose: ErrorFallback calls useColors(),
+          so the provider has to be above it for a crash screen to honour the
+          user's theme. */}
+      <ThemeProvider>
+        <ErrorBoundary>
+          <QueryClientProvider client={queryClient}>
+            <GestureHandlerRootView>
+              <KeyboardProvider>
+                <RemindersProvider>
+                  <NotificationResponseHandler />
+                  <SharedTextProvider>
+                    <View style={{ flex: 1 }}>
+                      {showAlarmBanner && (
+                        <ExactAlarmBanner
+                          onDismiss={() => setShowAlarmBanner(false)}
+                        />
+                      )}
+                      <RootLayoutNav />
+                    </View>
+                  </SharedTextProvider>
+                </RemindersProvider>
+              </KeyboardProvider>
+            </GestureHandlerRootView>
+          </QueryClientProvider>
+        </ErrorBoundary>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }

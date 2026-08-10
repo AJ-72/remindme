@@ -14,6 +14,7 @@ import {
 } from "@/services/ReminderService";
 import { logDebug } from "@/services/DebugLogService";
 import darkColors from "@/constants/colors";
+import { ThemeProvider, THEME_PREFERENCE_KEY } from "@/contexts/ThemeContext";
 
 jest.mock("expo-haptics");
 jest.mock("react-native/Libraries/Utilities/useColorScheme");
@@ -28,9 +29,11 @@ function renderScreen() {
         insets: { top: 0, left: 0, right: 0, bottom: 0 },
       }}
     >
-      <RemindersProvider>
-        <SettingsScreen />
-      </RemindersProvider>
+      <ThemeProvider>
+        <RemindersProvider>
+          <SettingsScreen />
+        </RemindersProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }
@@ -326,5 +329,71 @@ describe("dark mode", () => {
     const flat = StyleSheet.flatten(header.props.style);
     expect(flat.color).toBe("#1a1a2e");
     expect(flat.color).not.toBe(darkColors.dark.foreground);
+  });
+});
+
+describe("appearance override", () => {
+  const mockScheme = useColorScheme as jest.MockedFunction<typeof useColorScheme>;
+
+  it("defaults to System when nothing is stored", async () => {
+    const { findByTestId } = renderScreen();
+    const systemPill = await findByTestId("theme-system");
+    expect(systemPill.props.accessibilityState.selected).toBe(true);
+  });
+
+  it("reflects a stored dark preference", async () => {
+    await AsyncStorage.setItem(THEME_PREFERENCE_KEY, "dark");
+    const { findByTestId } = renderScreen();
+
+    await waitFor(async () => {
+      const darkPill = await findByTestId("theme-dark");
+      expect(darkPill.props.accessibilityState.selected).toBe(true);
+    });
+  });
+
+  it("persists the chosen preference", async () => {
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("theme-dark"));
+
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(THEME_PREFERENCE_KEY)).toBe("dark")
+    );
+  });
+
+  it("repaints immediately when Dark is chosen on a light device", async () => {
+    mockScheme.mockReturnValue("light");
+    const { findByTestId, findByText } = renderScreen();
+
+    expect(StyleSheet.flatten((await findByText("Settings")).props.style).color).toBe(
+      "#1a1a2e"
+    );
+
+    fireEvent.press(await findByTestId("theme-dark"));
+
+    await waitFor(async () =>
+      expect(
+        StyleSheet.flatten((await findByText("Settings")).props.style).color
+      ).toBe("#e8e8f0")
+    );
+  });
+
+  it("returns to the device setting when System is chosen", async () => {
+    mockScheme.mockReturnValue("dark");
+    await AsyncStorage.setItem(THEME_PREFERENCE_KEY, "light");
+    const { findByTestId, findByText } = renderScreen();
+
+    await waitFor(async () =>
+      expect(
+        StyleSheet.flatten((await findByText("Settings")).props.style).color
+      ).toBe("#1a1a2e")
+    );
+
+    fireEvent.press(await findByTestId("theme-system"));
+
+    await waitFor(async () =>
+      expect(
+        StyleSheet.flatten((await findByText("Settings")).props.style).color
+      ).toBe("#e8e8f0")
+    );
   });
 });
