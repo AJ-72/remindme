@@ -9,6 +9,27 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-10 — De-duplicate by CONTENT, not id; and an `a.id === b.id` fast path silently swallows the collision case
+
+**WHAT:** added manual backup/restore (backlog item 1). `utils/reminderBackup.ts` holds pure serialize/parse/merge; `buildBackupJson`/`importRemindersFromJson` in `ReminderService.ts` wrap it with storage and scheduling.
+
+**THE MERGE RULE AND WHY:** identity is **content** — same title (trimmed, lowercased) at the same *instant* (`Date.parse`, so `...:00Z` and `...:00.000Z` match) — never id. Matching on id alone misses the most common restore path: export → reinstall → re-type a few reminders from memory → import, where the re-typed copy is the same reminder to the user but has a fresh id. Local always wins on conflict, so a restore can never un-complete a reminder the user has since ticked off.
+
+**THE TRAP (caught by a test, and it is subtle):** `isSameReminder` originally opened with `if (a.id === b.id) return true;` as an obvious fast path. It is not a fast path, it is a **behaviour change** — it makes two *genuinely different* reminders that happen to share an id compare as equal, so one gets silently dropped as a "duplicate" instead of being re-id'd. The id-collision test failed on exactly this. **Generalizes: in an equality predicate, a short-circuit on a field that is not part of the equality definition is a bug, not an optimization.** Verified by restoring the line and confirming that one test — and only that one — failed.
+
+**Other decisions worth keeping:**
+- `notificationId` is stripped on export and on merge. It refers to a notification scheduled on the *exporting* device and is meaningless on the importing one.
+- Import calls `rescheduleAllFutureReminders()` rather than scheduling inline — it already skips completed and past reminders and handles the `ALARM_EARLY_OFFSET_MS` window correctly (see the 2026-08-09 duplicate-notification entry). Imported reminders arrive with no `notificationId`, so there is nothing to cancel first.
+- `parseBackup` requires a `format` sentinel (`curiousmind.reminders.backup`), not just a `reminders` array — plenty of unrelated JSON would match the latter. A bad file touches storage **not at all**; picking the wrong document must be a no-op, not a partial import.
+- A backup from a *newer* version is rejected outright rather than imported minus the fields this build doesn't know about.
+- **No new dependency on purpose.** Export uses `Share.share`, import is paste-into-a-TextInput. `expo-document-picker` would have meant a native build, and this was a ship-blocker that needed to go out over-the-air.
+
+**Context gotcha:** `RemindersProvider` loads reminders once at mount, so a restore writing straight to AsyncStorage left the list stale on screen. Added `refreshFromStorage()` to the context and extracted the mount load into a shared `loadFromStorage` callback so the two paths can't drift.
+
+**WHERE:** `utils/reminderBackup.ts` (+ test), `services/ReminderService.ts` (`buildBackupJson`, `importRemindersFromJson`), `contexts/RemindersContext.tsx` (`refreshFromStorage`), `app/(tabs)/settings.tsx` (backup/restore rows + restore modal).
+
+---
+
 ## 2026-08-09 — India's booking platforms are all closed to consumer apps; MCP does not route around an approval gate
 
 **WHAT:** investigated integrating ride/turf/movie booking into reminders (M5 sub-item and M7 in `backlog.md`). All three targets are closed. Recording the findings so nobody re-runs this research.

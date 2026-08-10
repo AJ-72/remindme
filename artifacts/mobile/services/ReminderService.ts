@@ -9,6 +9,12 @@ import {
   type SnoozePreset,
 } from "@/utils/snoozePresets";
 
+import {
+  mergeReminders,
+  parseBackup,
+  serializeBackup,
+} from "@/utils/reminderBackup";
+
 export type { SnoozePreset };
 
 // eslint-disable-next-line
@@ -655,4 +661,77 @@ export async function updateSnoozeById(
     r.id === id ? { ...r, datetime, notificationId } : r
   );
   await saveReminders(updated);
+}
+
+// --- Backup / restore -------------------------------------------------------
+//
+// Reminders live only in AsyncStorage, so a phone change or reinstall loses
+// them all. That matters most for exactly the reminders users can least afford
+// to lose — annual land tax, a passport expiring in ten years — which is why
+// this is a manual export/import rather than waiting on cloud sync.
+
+export async function buildBackupJson(): Promise<string> {
+  const [
+    reminders,
+    defaultAlarmEnabled,
+    showDescriptionEnabled,
+    vibrationEnabled,
+    dictationLanguage,
+    snoozePreset,
+  ] = await Promise.all([
+    loadReminders(),
+    getDefaultAlarmEnabled(),
+    getShowDescriptionEnabled(),
+    getVibrationEnabled(),
+    getDictationLanguage(),
+    getSnoozePreset(),
+  ]);
+
+  return serializeBackup(reminders, {
+    defaultAlarmEnabled,
+    showDescriptionEnabled,
+    vibrationEnabled,
+    dictationLanguage,
+    snoozePreset,
+  });
+}
+
+export type ImportResult =
+  | { ok: true; added: number; duplicates: number; skipped: number }
+  | { ok: false; reason: string };
+
+export async function importRemindersFromJson(raw: string): Promise<ImportResult> {
+  const parsed = parseBackup(raw);
+  // Storage is not touched at all on a bad file — picking the wrong document
+  // from the share sheet must be a no-op, not a partial import.
+  if (!parsed.ok) return { ok: false, reason: parsed.reason };
+
+  const local = await loadReminders();
+  const { reminders, added, duplicates } = mergeReminders(local, parsed.backup.reminders);
+  await saveReminders(reminders);
+
+  // Imported reminders carry no notificationId (export strips it, and a
+  // foreign device's id means nothing here), so nothing is scheduled yet.
+  // rescheduleAllFutureReminders arms every future one and correctly skips
+  // completed and already-past reminders.
+  await rescheduleAllFutureReminders();
+
+  const settings = parsed.backup.settings;
+  if (settings.defaultAlarmEnabled !== undefined) {
+    await setDefaultAlarmEnabled(settings.defaultAlarmEnabled);
+  }
+  if (settings.showDescriptionEnabled !== undefined) {
+    await setShowDescriptionEnabled(settings.showDescriptionEnabled);
+  }
+  if (settings.vibrationEnabled !== undefined) {
+    await setVibrationEnabled(settings.vibrationEnabled);
+  }
+  if (settings.dictationLanguage !== undefined) {
+    await setDictationLanguage(settings.dictationLanguage);
+  }
+  if (settings.snoozePreset !== undefined && isSnoozePreset(settings.snoozePreset)) {
+    await setSnoozePreset(settings.snoozePreset);
+  }
+
+  return { ok: true, added, duplicates, skipped: parsed.skipped };
 }

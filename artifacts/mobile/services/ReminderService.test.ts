@@ -11,6 +11,8 @@ import {
   MARK_DONE_ACTION_ID,
   STORAGE_KEY,
   addReminder,
+  buildBackupJson,
+  importRemindersFromJson,
   cancelScheduledForReminder,
   channelIdForAlarm,
   getVibrationEnabled,
@@ -24,6 +26,8 @@ import {
   getSnoozePreset,
   setSnoozePreset,
   hasCompletedPermissionOnboarding,
+  loadReminders,
+  saveReminders,
   markDoneById,
   markPermissionOnboardingComplete,
   requestNotificationPermissions,
@@ -787,5 +791,182 @@ describe("snooze preset persistence", () => {
   it("falls back to the default when the stored value is valid JSON but not a preset", async () => {
     await AsyncStorage.setItem(SNOOZE_PRESET_KEY, JSON.stringify({ kind: "yearly" }));
     expect(await getSnoozePreset()).toEqual({ kind: "minutes", minutes: 15 });
+  });
+});
+
+describe("buildBackupJson", () => {
+  it("includes every stored reminder", async () => {
+    await saveReminders([
+      {
+        id: "a",
+        title: "Pay land tax",
+        description: "",
+        datetime: "2027-03-25T04:30:00.000Z",
+        completed: false,
+      },
+    ]);
+
+    const parsed = JSON.parse(await buildBackupJson());
+    expect(parsed.reminders).toHaveLength(1);
+    expect(parsed.reminders[0].title).toBe("Pay land tax");
+  });
+
+  it("captures the current settings", async () => {
+    await setDefaultAlarmEnabled(false);
+    await setDictationLanguage("ml-IN");
+
+    const parsed = JSON.parse(await buildBackupJson());
+    expect(parsed.settings.defaultAlarmEnabled).toBe(false);
+    expect(parsed.settings.dictationLanguage).toBe("ml-IN");
+  });
+
+  it("produces a file importRemindersFromJson accepts", async () => {
+    await saveReminders([
+      {
+        id: "a",
+        title: "Renew passport",
+        description: "",
+        datetime: "2034-01-01T00:00:00.000Z",
+        completed: false,
+      },
+    ]);
+    const json = await buildBackupJson();
+    await saveReminders([]);
+
+    const result = await importRemindersFromJson(json);
+    expect(result.ok).toBe(true);
+    expect((await loadReminders())[0].title).toBe("Renew passport");
+  });
+});
+
+describe("importRemindersFromJson", () => {
+  const backup = (reminders: unknown[]) =>
+    JSON.stringify({
+      format: "curiousmind.reminders.backup",
+      version: 1,
+      exportedAt: "2026-08-10T00:00:00.000Z",
+      reminders,
+      settings: {},
+    });
+
+  it("rejects a file that is not one of our backups without touching storage", async () => {
+    await saveReminders([
+      { id: "keep", title: "Keep me", description: "", datetime: "2027-01-01T00:00:00.000Z", completed: false },
+    ]);
+
+    const result = await importRemindersFromJson('{"some":"other file"}');
+
+    expect(result.ok).toBe(false);
+    expect(await loadReminders()).toHaveLength(1);
+  });
+
+  it("merges into existing reminders rather than replacing them", async () => {
+    await saveReminders([
+      { id: "local", title: "Local", description: "", datetime: "2027-01-01T00:00:00.000Z", completed: false },
+    ]);
+
+    const result = await importRemindersFromJson(
+      backup([
+        { id: "incoming", title: "Incoming", description: "", datetime: "2027-02-01T00:00:00.000Z", completed: false },
+      ])
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.added).toBe(1);
+    expect(await loadReminders()).toHaveLength(2);
+  });
+
+  it("does not duplicate a reminder the device already has", async () => {
+    const same = {
+      id: "same",
+      title: "Same thing",
+      description: "",
+      datetime: "2027-01-01T00:00:00.000Z",
+      completed: false,
+    };
+    await saveReminders([same]);
+
+    const result = await importRemindersFromJson(backup([same]));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.added).toBe(0);
+    expect(result.duplicates).toBe(1);
+    expect(await loadReminders()).toHaveLength(1);
+  });
+
+  it("reports how many corrupt entries it skipped", async () => {
+    const result = await importRemindersFromJson(
+      backup([
+        { id: "ok", title: "Fine", description: "", datetime: "2027-01-01T00:00:00.000Z", completed: false },
+        { id: "broken", title: "No datetime" },
+      ])
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.skipped).toBe(1);
+    expect(result.added).toBe(1);
+  });
+
+  it("schedules notifications for imported future reminders", async () => {
+    (scheduleNotificationAsync as jest.Mock).mockClear();
+
+    await importRemindersFromJson(
+      backup([
+        {
+          id: "future",
+          title: "Future thing",
+          description: "",
+          datetime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          completed: false,
+        },
+      ])
+    );
+
+    expect(scheduleNotificationAsync).toHaveBeenCalled();
+    const stored = await loadReminders();
+    expect(stored[0].notificationId).toBeDefined();
+  });
+
+  it("does not schedule anything for an imported past reminder", async () => {
+    (scheduleNotificationAsync as jest.Mock).mockClear();
+
+    await importRemindersFromJson(
+      backup([
+        {
+          id: "past",
+          title: "Past thing",
+          description: "",
+          datetime: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+          completed: false,
+        },
+      ])
+    );
+
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it("restores settings from the backup", async () => {
+    await setDefaultAlarmEnabled(true);
+    const json = JSON.stringify({
+      format: "curiousmind.reminders.backup",
+      version: 1,
+      exportedAt: "2026-08-10T00:00:00.000Z",
+      reminders: [],
+      settings: { defaultAlarmEnabled: false, dictationLanguage: "ml-IN" },
+    });
+
+    await importRemindersFromJson(json);
+
+    expect(await getDefaultAlarmEnabled()).toBe(false);
+    expect(await getDictationLanguage()).toBe("ml-IN");
+  });
+
+  it("leaves settings alone when the backup carries none", async () => {
+    await setDictationLanguage("ml-IN");
+    await importRemindersFromJson(backup([]));
+    expect(await getDictationLanguage()).toBe("ml-IN");
   });
 });

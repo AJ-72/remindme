@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,6 +21,10 @@ import {
   formatDebugLogs,
   getDebugLogs,
 } from "@/services/DebugLogService";
+import {
+  buildBackupJson,
+  importRemindersFromJson,
+} from "@/services/ReminderService";
 
 export default function SettingsScreen() {
   const colors = useColors();
@@ -33,10 +38,14 @@ export default function SettingsScreen() {
     setVibrationEnabled,
     dictationLanguage,
     setDictationLanguage,
+    refreshFromStorage,
   } = useReminders();
 
   const [logsVisible, setLogsVisible] = useState(false);
   const [logsText, setLogsText] = useState("");
+  const [restoreVisible, setRestoreVisible] = useState(false);
+  const [restoreText, setRestoreText] = useState("");
+  const [restoreError, setRestoreError] = useState("");
 
   const openLogs = async () => {
     const entries = await getDebugLogs();
@@ -52,6 +61,42 @@ export default function SettingsScreen() {
     } catch {
       // user cancelled or sharing isn't available — nothing to do
     }
+  };
+
+  const shareBackup = async () => {
+    try {
+      await Share.share({ message: await buildBackupJson() });
+    } catch {
+      // user cancelled or sharing isn't available — nothing to do
+    }
+  };
+
+  const openRestore = () => {
+    setRestoreText("");
+    setRestoreError("");
+    setRestoreVisible(true);
+  };
+
+  const confirmRestore = async () => {
+    const result = await importRemindersFromJson(restoreText);
+    if (!result.ok) {
+      setRestoreError(
+        "That doesn't look like a Reminders backup. Paste the whole backup text, including the outer { }."
+      );
+      return;
+    }
+
+    setRestoreVisible(false);
+    // The list is loaded once at provider mount, so it has to be told the
+    // store changed underneath it.
+    await refreshFromStorage();
+
+    const parts = [
+      `${result.added} added`,
+      result.duplicates ? `${result.duplicates} already here` : "",
+      result.skipped ? `${result.skipped} couldn't be read` : "",
+    ].filter(Boolean);
+    Alert.alert("Restored", `${parts.join(", ")}.`);
   };
 
   const handleClearLogs = () => {
@@ -224,6 +269,33 @@ export default function SettingsScreen() {
       fontFamily: "Inter_600SemiBold",
       color: colors.primaryForeground,
     },
+    restoreHelp: {
+      fontSize: 13,
+      lineHeight: 18,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginBottom: 12,
+    },
+    restoreInput: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      minHeight: 120,
+      maxHeight: 220,
+      textAlignVertical: "top",
+      fontSize: 12,
+      fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+      color: colors.foreground,
+    },
+    restoreError: {
+      fontSize: 13,
+      lineHeight: 18,
+      fontFamily: "Inter_400Regular",
+      color: colors.destructive,
+      marginTop: 10,
+    },
   });
 
   return (
@@ -358,6 +430,46 @@ export default function SettingsScreen() {
 
         <Pressable
           style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
+          onPress={shareBackup}
+          testID="backup-row"
+        >
+          <Feather name="upload" size={18} color={colors.mutedForeground} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alarmLabel}>Back up reminders</Text>
+            <Text style={styles.alarmSubLabel}>
+              Save a copy you can restore after changing phones
+            </Text>
+          </View>
+          <Feather
+            name="chevron-right"
+            size={18}
+            color={colors.mutedForeground}
+            style={styles.chevron}
+          />
+        </Pressable>
+
+        <Pressable
+          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
+          onPress={openRestore}
+          testID="restore-row"
+        >
+          <Feather name="download" size={18} color={colors.mutedForeground} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alarmLabel}>Restore from backup</Text>
+            <Text style={styles.alarmSubLabel}>
+              Paste a backup — your current reminders are kept
+            </Text>
+          </View>
+          <Feather
+            name="chevron-right"
+            size={18}
+            color={colors.mutedForeground}
+            style={styles.chevron}
+          />
+        </Pressable>
+
+        <Pressable
+          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
           onPress={openLogs}
           testID="debug-logs-row"
         >
@@ -404,6 +516,56 @@ export default function SettingsScreen() {
                 onPress={shareLogs}
               >
                 <Text style={styles.modalBtnTextPrimary}>Share</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={restoreVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setRestoreVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setRestoreVisible(false)}>
+          <Pressable onPress={() => {}} style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Restore from backup</Text>
+            <Text style={styles.restoreHelp}>
+              Paste the backup text you saved earlier. Reminders already on this phone
+              are kept — anything already here won&apos;t be added twice.
+            </Text>
+            <TextInput
+              style={styles.restoreInput}
+              value={restoreText}
+              onChangeText={(text) => {
+                setRestoreText(text);
+                if (restoreError) setRestoreError("");
+              }}
+              placeholder="Paste backup text here"
+              placeholderTextColor={colors.mutedForeground}
+              multiline
+              autoCorrect={false}
+              autoCapitalize="none"
+              testID="restore-input"
+            />
+            {restoreError ? (
+              <Text style={styles.restoreError}>{restoreError}</Text>
+            ) : null}
+            <View style={styles.modalBtnRow}>
+              <Pressable
+                style={[styles.modalBtn, styles.modalBtnSecondary]}
+                onPress={() => setRestoreVisible(false)}
+              >
+                <Text style={styles.modalBtnTextSecondary}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                onPress={confirmRestore}
+                testID="restore-confirm"
+              >
+                <Text style={styles.modalBtnTextPrimary}>Restore</Text>
               </Pressable>
             </View>
           </Pressable>

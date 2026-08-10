@@ -66,6 +66,12 @@ interface RemindersContextType {
   setVibrationEnabled: (enabled: boolean) => Promise<void>;
   dictationLanguage: DictationLanguage;
   setDictationLanguage: (lang: DictationLanguage) => Promise<void>;
+  /**
+   * Re-read reminders and settings from storage. Needed when something other
+   * than this context writes to the store — currently only a backup restore,
+   * which replaces the whole list behind the provider's back.
+   */
+  refreshFromStorage: () => Promise<void>;
 }
 
 const RemindersContext = createContext<RemindersContextType | null>(null);
@@ -87,26 +93,37 @@ export function RemindersProvider({
     useState<SnoozePreset>(DEFAULT_SNOOZE_PRESET);
   const [vibrationEnabled, setVibrationEnabledState] = useState(true);
 
+  // Shared by the initial mount and by refreshFromStorage, so a restore can
+  // never drift out of sync with what the provider loads at startup.
+  const loadFromStorage = useCallback(async () => {
+    const [loadedReminders, defaultAlarm, showDescription, dictLang, preset, vibration] =
+      await Promise.all([
+        loadReminders(),
+        getDefaultAlarmEnabled(),
+        getShowDescriptionEnabled(),
+        getDictationLanguage(),
+        getSnoozePreset(),
+        getVibrationEnabled(),
+      ]);
+    setReminders(loadedReminders);
+    setDefaultAlarmEnabledState(defaultAlarm);
+    setShowDescriptionInNotificationsState(showDescription);
+    setDictationLanguageState(dictLang);
+    setSnoozePresetState(preset);
+    setVibrationEnabledState(vibration);
+  }, []);
+
+  const refreshFromStorage = useCallback(async () => {
+    try {
+      await loadFromStorage();
+    } catch {}
+  }, [loadFromStorage]);
+
   useEffect(() => {
-    Promise.all([
-      loadReminders(),
-      getDefaultAlarmEnabled(),
-      getShowDescriptionEnabled(),
-      getDictationLanguage(),
-      getSnoozePreset(),
-      getVibrationEnabled(),
-    ])
-      .then(([loadedReminders, defaultAlarm, showDescription, dictLang, preset, vibration]) => {
-        setReminders(loadedReminders);
-        setDefaultAlarmEnabledState(defaultAlarm);
-        setShowDescriptionInNotificationsState(showDescription);
-        setDictationLanguageState(dictLang);
-        setSnoozePresetState(preset);
-        setVibrationEnabledState(vibration);
-      })
+    loadFromStorage()
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadFromStorage]);
 
   useEffect(() => {
     const sub = AppState.addEventListener("change", (nextState) => {
@@ -220,6 +237,7 @@ export function RemindersProvider({
         setVibrationEnabled,
         dictationLanguage,
         setDictationLanguage,
+        refreshFromStorage,
       }}
     >
       {children}
