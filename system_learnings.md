@@ -9,6 +9,27 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-10 — AsyncStorage is SQLite (`RKStorage`), so Android Auto Backup already covers it — and `allowBackup` is on by default
+
+**WHAT:** researched whether Android Auto Backup can replace Google Drive sync (backlog item 1). Not implemented — findings recorded because the test is deferred (backlog D1) and this is expensive to re-derive.
+
+**THE KEY FACT, verified from source not docs:** AsyncStorage on Android is **not** shared preferences — it is SQLite. `ReactDatabaseSupplier extends SQLiteOpenHelper` with `DATABASE_NAME = "RKStorage"`, so it lands in `getDatabasePath()`. Android documents **database files as included in Auto Backup by default**, and `android:allowBackup="true"` is **already in our generated manifest** (Expo emits it; nothing was configured). So the app may already have silent cloud backup — worth knowing before building anything Drive-shaped.
+
+**Why Auto Backup beats a Drive integration for this app:** data goes to the user's own Drive via the *device's* Google account — no OAuth, no Cloud project, no sensitive-scope review, no account model, no server. 25 MB/app, doesn't count against the user's quota, restores automatically at install. A Drive API integration buys the same outcome and breaks the "no sign-up" property.
+
+**TWO TRAPS THAT PRODUCE FALSE NEGATIVES** (both cost someone in the async-storage repo a long debugging session):
+1. **Uninstalling does not trigger a backup.** Android backs up on its own schedule (idle + Wi-Fi + 24h). It never captures the state right before an uninstall. Force it with `adb shell bmgr backupnow <pkg>` or you are restoring stale data.
+2. **Restore lands after install and BEFORE first launch.** Opening the app early makes a working restore look broken.
+   (Third, from that same report: a package-name mismatch between manifest and installed app silently breaks it.)
+
+**LIMITS worth remembering:** backup, not sync — one device, restored at install time; only the most recent backup is kept; Android-only; silent whenever any precondition fails (backup disabled, no Google account, never idle/Wi-Fi). On a battery-aggressive OEM ROM the preconditions may simply never be met, so **it is a bonus, never a promise** — do not ship copy claiming automatic backup without testing on a mid-range OEM device. Manual export stays primary: it is the only path identical across devices and the only one that works on iOS.
+
+**Future gotcha:** if `expo-secure-store` is ever added (likely for M4 Tier 2 auth) it **must** be excluded from Auto Backup — its keys are destroyed on uninstall and cannot be decrypted after a restore. The library auto-configures this *unless* custom backup rules exist, which they would by then.
+
+**WHERE:** `backlog.md` (D1 has the full adb procedure), `artifacts/mobile/app.json` / generated `AndroidManifest.xml`. No source change.
+
+---
+
 ## 2026-08-10 — De-duplicate by CONTENT, not id; and an `a.id === b.id` fast path silently swallows the collision case
 
 **WHAT:** added manual backup/restore (backlog item 1). `utils/reminderBackup.ts` holds pure serialize/parse/merge; `buildBackupJson`/`importRemindersFromJson` in `ReminderService.ts` wrap it with storage and scheduling.
