@@ -98,6 +98,15 @@ plugin. Needs a native build.
 speech recognizer's actual output is unverified. Settings → Debug logs shows
 the raw transcription.
 
+**D8. Dark mode, visually** — M1 is implemented and token-covered, but Jest
+asserts *token values*, not pixels. Walk every screen with the system theme
+set to dark: home list (incl. an overdue card and a completed one), add/edit,
+reminder detail, settings (incl. both modals), about, the snooze sheet, the
+confirm sheet, the exact-alarm banner, and the error fallback. Watch for text
+that vanishes into its background, the status bar, and modal overlays. Also
+toggle the system theme **while the app is open** — the switch should be
+immediate, since `useColorScheme()` is reactive.
+
 **D7. OEM battery-killer survival** — do scheduled alarms fire at all on
 Xiaomi/Oppo/Vivo with battery optimization at its default aggressive setting?
 This is the cross-cutting risk behind D1 and D4 and is currently a blind spot;
@@ -118,7 +127,7 @@ incumbent. M7 was added later the same day and revises that report's read of M4
 Tier 2. Prefer features that deepen those two things over ones that widen the
 app's surface.
 
-M1. **Dark mode** - the app ignores the system light/dark setting. Two independent causes, both must be fixed: (a) `app.json` pins `"userInterfaceStyle": "light"`; (b) `constants/colors.ts` has no `dark` key at all, so `useColors()` falls back to the light palette by design (documented in the hook). Deferred 2026-08-09 as its own task because it needs a full dark palette authored from the light tokens plus an audit of every hardcoded color across all screens. Decide at the same time whether to add a Light/Dark/System override in Settings (would require `useColors` to read a persisted setting rather than `useColorScheme()` alone).
+M1. **Dark mode** - [DONE 2026-08-10 — follows the system setting.] Both original causes fixed: `app.json` now sets `"userInterfaceStyle": "automatic"` (was `"light"`), and `constants/colors.ts` has a full `dark` palette so `useColors()` switches on `useColorScheme()`. Derived from the light tokens rather than inverted — the indigo brand hue is lightened (`#6366f1` -> `#818cf8`) because the original is too low-contrast on near-black, and surfaces step *up* in lightness with elevation since shadows are invisible on a dark ground. Also fixed `<StatusBar style="dark" />` in `app/_layout.tsx`, which would have rendered dark icons on a dark bar (invisible clock/battery). All 15 hardcoded hex colours in UI files replaced with tokens; two token pairs added for cases that had none (`destructiveBorder` for the overdue card border, `warningSurface`/`warningSurfaceForeground` for the exact-alarm banner). The single remaining literal is `shadowColor: "#000"` in `ErrorFallback`, which is correct in both schemes. Covered by `hooks/useColors.test.ts` (palette parity, valid hex, luminance direction) plus dark/light render tests on the settings screen. **STILL OPEN:** no in-app Light/Dark/System override — this follows the OS only; adding one means persisting a setting and reading it in `useColors` instead of `useColorScheme()`. **NEEDS DEVICE CHECK (see D8)** — Jest asserts tokens, not pixels.
 
 M2. **Recurring reminders** - "every day at 8", "every Monday", "monthly on the 1st". Repeatedly identified as the highest-value missing feature. Known constraints from earlier analysis (2026-08-07): (a) `chrono-node` does NOT return recurrence info — it silently drops "every day"/"daily" and the word is left stranded in the reminder title, so recurrence parsing must be built, not configured; (b) `malayalamDateParser.ts` has no recurrence support either; (c) the codebase schedules only one-shot `SchedulableTriggerInputTypes.DATE` triggers, so either a repeating trigger type or a rolling re-schedule-on-fire scheme is needed — the latter interacts with the boot-reschedule task and the ALARM_EARLY_OFFSET_MS window (see system_learnings 2026-08-09 duplicate-notification entry); (d) UI surface is larger than it first appears — `add-reminder.tsx` (~630 lines) and `QuickAddInput.tsx` (~810 lines) both need changes; (e) the `Reminder` interface and its AsyncStorage records need a migration.
 

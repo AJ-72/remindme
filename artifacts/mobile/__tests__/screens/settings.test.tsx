@@ -1,5 +1,5 @@
 import React from "react";
-import { Share, StyleSheet } from "react-native";
+import { Share, StyleSheet, useColorScheme } from "react-native";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -13,8 +13,10 @@ import {
   STORAGE_KEY,
 } from "@/services/ReminderService";
 import { logDebug } from "@/services/DebugLogService";
+import darkColors from "@/constants/colors";
 
 jest.mock("expo-haptics");
+jest.mock("react-native/Libraries/Utilities/useColorScheme");
 
 jest.spyOn(Share, "share").mockResolvedValue({ action: "sharedAction" } as never);
 
@@ -291,5 +293,38 @@ describe("backup and restore", () => {
     expect(await findByText(/doesn't look like a Reminders backup/i)).toBeTruthy();
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
     expect(stored).toHaveLength(1);
+  });
+});
+
+describe("dark mode", () => {
+  const mockScheme = useColorScheme as jest.MockedFunction<typeof useColorScheme>;
+
+  afterEach(() => {
+    mockScheme.mockReturnValue("light");
+  });
+
+  it("paints the screen with the dark background when the device is in dark mode", async () => {
+    mockScheme.mockReturnValue("dark");
+    const { findByText } = renderScreen();
+
+    const header = await findByText("Settings");
+    const flat = StyleSheet.flatten(header.props.style);
+    // Assert the rendered value directly, not `=== colors.dark.foreground`:
+    // comparing against the token makes the test follow the token anywhere,
+    // so it would still pass if the dark palette were given light-mode
+    // values. Verified by temporarily setting dark.foreground to the light
+    // value — the token-comparison version passed, this one fails.
+    expect(flat.color).toBe("#e8e8f0");
+    expect(flat.color).not.toBe(darkColors.light.foreground);
+  });
+
+  it("paints the screen with the light background in light mode", async () => {
+    mockScheme.mockReturnValue("light");
+    const { findByText } = renderScreen();
+
+    const header = await findByText("Settings");
+    const flat = StyleSheet.flatten(header.props.style);
+    expect(flat.color).toBe("#1a1a2e");
+    expect(flat.color).not.toBe(darkColors.dark.foreground);
   });
 });

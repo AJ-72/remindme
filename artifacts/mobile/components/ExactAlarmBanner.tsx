@@ -21,7 +21,7 @@ export default function ExactAlarmBanner({ onDismiss }: Props) {
       style={[
         styles.banner,
         {
-          backgroundColor: "#fffbeb",
+          backgroundColor: colors.warningSurface,
           borderColor: colors.warning,
           paddingTop: insets.top + 10,
         },
@@ -33,7 +33,7 @@ export default function ExactAlarmBanner({ onDismiss }: Props) {
         color={colors.warning}
         style={styles.icon}
       />
-      <Text style={[styles.message, { color: "#92400e" }]}>
+      <Text style={[styles.message, { color: colors.warningSurfaceForeground }]}>
         Exact alarm permission is off — reminders may fire late.{" "}
         <Text
           style={[styles.link, { color: colors.warning }]}
@@ -48,7 +48,7 @@ export default function ExactAlarmBanner({ onDismiss }: Props) {
         accessibilityLabel="Dismiss warning"
         style={styles.close}
       >
-        <Feather name="x" size={16} color="#92400e" />
+        <Feather name="x" size={16} color={colors.warningSurfaceForeground} />
       </Pressable>
     </View>
   );

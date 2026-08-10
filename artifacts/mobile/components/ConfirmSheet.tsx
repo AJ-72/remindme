@@ -79,7 +79,7 @@ export default function ConfirmSheet({
       flex: 1,
       paddingVertical: 13,
       borderRadius: 12,
-      backgroundColor: destructive ? "#ef4444" : colors.primary,
+      backgroundColor: destructive ? colors.destructive : colors.primary,
       alignItems: "center",
     },
     confirmText: {

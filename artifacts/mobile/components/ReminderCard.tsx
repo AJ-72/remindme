@@ -56,14 +56,14 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
       ...(Platform.OS === "web"
         ? { boxShadow: "0 2px 8px rgba(99,102,241,0.06)" }
         : {
-            shadowColor: "#6366f1",
+            shadowColor: colors.primary,
             shadowOffset: { width: 0, height: 2 },
             shadowOpacity: 0.06,
             shadowRadius: 8,
             elevation: 2,
           }),
       borderWidth: 1,
-      borderColor: overdue && !reminder.completed ? "#fca5a5" : colors.border,
+      borderColor: overdue && !reminder.completed ? colors.destructiveBorder : colors.border,
     },
     checkButton: {
       width: 24,
@@ -102,7 +102,7 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
     timeText: {
       fontSize: 12,
       fontFamily: "Inter_500Medium",
-      color: overdue && !reminder.completed ? "#ef4444" : colors.mutedForeground,
+      color: overdue && !reminder.completed ? colors.destructive : colors.mutedForeground,
     },
     deleteBtn: {
       padding: 6,
@@ -153,7 +153,7 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
             <Feather
               name={overdue && !reminder.completed ? "alert-circle" : "clock"}
               size={11}
-              color={overdue && !reminder.completed ? "#ef4444" : colors.mutedForeground}
+              color={overdue && !reminder.completed ? colors.destructive : colors.mutedForeground}
             />
             <Text style={styles.timeText}>{formatDatetime(reminder.datetime)}</Text>
           </View>

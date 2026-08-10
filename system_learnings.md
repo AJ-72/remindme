@@ -9,6 +9,42 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-10 — Dark mode: `app.json` and the StatusBar are separate blockers, and asserting a colour against its own token proves nothing
+
+**WHAT:** implemented dark mode (M1). Added a `dark` palette to `constants/colors.ts`, flipped `app.json`'s `userInterfaceStyle` from `"light"` to `"automatic"`, changed `<StatusBar style="dark" />` to `style="auto"`, and replaced all 15 hardcoded hex colours in UI files with tokens.
+
+**FOUR SEPARATE THINGS ALL HAD TO CHANGE** — fixing any one alone leaves the app in light mode, which is why this looked bigger than "just add a palette":
+1. `constants/colors.ts` had no `dark` key, and `useColors()` was written to fall back to light when it was absent (documented as intended for the scaffold).
+2. **`app.json` pinned `"userInterfaceStyle": "light"`**, which forces the OS to report light to the app no matter what the user set. Easy to miss because it is nowhere near the colour code.
+3. **`<StatusBar style="dark" />` was hardcoded** in `app/_layout.tsx` — dark icons on a dark bar means an invisible clock and battery. `"auto"` follows the scheme.
+4. Hardcoded hex literals scattered across 7 files bypassed the tokens entirely and would have stayed light-mode colours.
+
+**THE TEST TRAP, worth internalising:** the first version of the dark-mode screen test asserted `expect(flat.color).toBe(colors.dark.foreground)`. That **passes even when the dark palette contains light-mode values**, because the assertion follows the token wherever it goes — it only proves "the dark palette was used", never "the dark palette is dark". Verified by temporarily setting `dark.foreground` to the light value: the token-comparison test still passed while the screen was unreadable. Fixed by asserting the **literal** expected value plus `not.toBe(theOtherPalette)`. **Generalizable: a test that compares a rendered value against the same constant the code reads is a tautology.** Same family as the 2026-08-09 "test named for a behavior it never asserts" entry.
+
+**Palette design notes (not arbitrary):** derived from the light tokens, not inverted. The brand indigo is *lightened* (`#6366f1` → `#818cf8`) because the original is too low-contrast on near-black. Surfaces step **up** in lightness with elevation (background `#121218` < card `#1c1c25` < muted `#25252f`) since shadows are invisible against a dark ground. Two token pairs were added for cases that had none rather than reusing a near-miss: `destructiveBorder` (overdue card border) and `warningSurface`/`warningSurfaceForeground` (exact-alarm banner, a tinted surface — distinct from `warning`/`warningForeground`, which are for a solid warning-coloured control).
+
+**Guard added:** `hooks/useColors.test.ts` asserts the two palettes define **exactly the same token names**. A key present in light but missing in dark resolves to `undefined`, which React Native renders as no colour — usually black on black, and *only on dark-mode devices*, so it would never show up in normal testing.
+
+**Legitimately left alone:** `shadowColor: "#000"` in `ErrorFallback` — shadows are cast in black in both schemes.
+
+**WHERE:** `constants/colors.ts`, `hooks/useColors.ts` (+ new test), `app.json`, `app/_layout.tsx`, `app/reminder-detail.tsx`, `components/{ReminderCard,QuickAddInput,ConfirmSheet,ExactAlarmBanner}.tsx`, `__tests__/screens/settings.test.tsx`.
+
+---
+
+## 2026-08-10 — `now.getDate() + 1` is wrong on the last day of every month
+
+**WHAT:** `utils/formatDatetime.ts` had **no test at all** (found by auditing logic files against test files). Writing one exposed a real bug: the "Tomorrow" check compared `d.getDate() === now.getDate() + 1`, so on 31 August it looked for date 32 and never matched. Every "Tomorrow" label on the 28th–31st silently rendered as a date instead, and the same broke across year end.
+
+**FIX:** build tomorrow as a real `Date` (`setDate(getDate() + 1)`, which normalises the rollover) and compare day/month/year via a shared `isSameDay` helper.
+
+**RULE:** never do calendar arithmetic on the *component parts* of a date. Add to a `Date` and let it normalise. Any `getDate() + n`, `getMonth() + n`, or `getFullYear() + n` in a comparison is a boundary bug waiting for the end of the month.
+
+**PROCESS NOTE:** this was found by a coverage audit, not by a bug report — comparing every file in `services/`, `utils/`, `contexts/` against its test file. That audit found exactly one genuine gap and it contained a real bug, which is a good argument for repeating it after adding files.
+
+**WHERE:** `utils/formatDatetime.ts`, `utils/formatDatetime.test.ts` (new).
+
+---
+
 ## 2026-08-10 — AsyncStorage is SQLite (`RKStorage`), so Android Auto Backup already covers it — and `allowBackup` is on by default
 
 **WHAT:** researched whether Android Auto Backup can replace Google Drive sync (backlog item 1). Not implemented — findings recorded because the test is deferred (backlog D1) and this is expensive to re-derive.

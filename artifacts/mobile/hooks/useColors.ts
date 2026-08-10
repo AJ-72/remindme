@@ -8,18 +8,17 @@ import colors from "@/constants/colors";
  * The returned object contains all color tokens for the active palette
  * plus scheme-independent values like `radius`.
  *
- * Falls back to the light palette when no dark key is defined in
- * constants/colors.ts (the scaffold ships light-only by default).
- * When a sibling web artifact's dark tokens are synced into a `dark`
- * key, this hook will automatically switch palettes based on the
- * device's appearance setting.
+ * `useColorScheme()` returns null when the device expresses no preference,
+ * which is treated as light. Both palettes define the same token names —
+ * `hooks/useColors.test.ts` enforces that, since a token missing from one
+ * palette resolves to `undefined` and renders as no colour at all.
+ *
+ * Note this follows the SYSTEM setting; there is no in-app override. Adding
+ * one means persisting a setting and reading it here instead.
  */
 export function useColors() {
   const scheme = useColorScheme();
-  const palette =
-    scheme === "dark" && "dark" in colors
-      ? (colors as Record<string, typeof colors.light>).dark
-      : colors.light;
+  const palette = scheme === "dark" ? colors.dark : colors.light;
   return {
     ...palette,
     radius: colors.radius,

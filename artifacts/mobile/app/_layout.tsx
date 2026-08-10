@@ -128,7 +128,10 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" />
+      {/* "auto" flips the status-bar icons to match the current scheme.
+          Hardcoding "dark" renders dark icons on a dark background, i.e.
+          an invisible clock and battery. */}
+      <StatusBar style="auto" />
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView>

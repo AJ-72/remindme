@@ -161,7 +161,7 @@ export default function ReminderDetailScreen() {
     destructiveBtn: {
       backgroundColor: colors.card,
       borderWidth: 1,
-      borderColor: "#fca5a5",
+      borderColor: colors.destructiveBorder,
     },
     primaryBtnText: {
       fontSize: 15,
@@ -176,7 +176,7 @@ export default function ReminderDetailScreen() {
     destructiveBtnText: {
       fontSize: 15,
       fontFamily: "Inter_600SemiBold",
-      color: "#ef4444",
+      color: colors.destructive,
     },
     handledWrap: {
       flex: 1,
@@ -275,7 +275,7 @@ export default function ReminderDetailScreen() {
               onPress={handleDelete}
               testID="delete-button"
             >
-              <Feather name="trash-2" size={16} color="#ef4444" />
+              <Feather name="trash-2" size={16} color={colors.destructive} />
               <Text style={styles.destructiveBtnText}>Delete</Text>
             </Pressable>
           </View>
