@@ -15,7 +15,15 @@ Newest entries at the top.
 
 **WHY IT MATTERS:** any tooling that selects "the most recent session" by mtime can pick an arbitrary file. The reliable ordering signal is the timestamp on each file's **last JSONL line** (`tail -1`, no full read needed — these files reach 14 MB). The same tail timestamp identifies the *currently running* session's transcript when it must be excluded.
 
-**WHERE:** no source change; constraint recorded in the catchup spec's "Selecting newest" section.
+**THREE MORE TRANSCRIPT-PARSING TRAPS**, all verified against the real files while planning the extractor — anything reading these transcripts hits all of them:
+
+1. **`tail -1` does not give you the last timestamp.** The final JSONL line is frequently `{"type":"custom-title"}` or a `queue-operation`, neither of which carries a `timestamp`. Scan backwards for the last line that has one. Reading the trailing 64 KB is enough and keeps this fast on a 14 MB file.
+2. **`type:"user"` is mostly NOT human turns.** The same type carries `tool_result` blocks, `isMeta` injections (skill preambles, `<local-command-caveat>`), IDE tags (`<ide_selection>`, `<ide_opened_file>`), and sidechain/subagent turns. In one sampled session only 1 of the first 15 `user` entries was real human intent. Filter on `!isMeta && !isSidechain`, keep only `text` blocks, then strip the wrapper tags.
+3. **Keep the FINAL assistant text block.** Dropping all assistant prose looks right for token cost but destroys the "did this session end cleanly" signal — the last *human* turn is often just "yes". The final assistant message is 800–1,900 chars and routinely states "Next: …" outright.
+
+**Measured result:** 14,445,710 bytes → 19,523 chars (~740:1). `jq` is unavailable in this Git Bash env (as noted elsewhere in this ledger) but Node v24 is, and `node:test` is built in — no new dependency needed, which also avoids the `minimumReleaseAge` wait.
+
+**WHERE:** no source change yet; constraints recorded in the catchup spec's "Selecting newest" section and implemented per `docs/superpowers/plans/2026-08-14-catchup-skill.md` Tasks 1–2.
 
 ---
 
