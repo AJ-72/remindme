@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-14 — Claude Code transcript mtimes on this machine are bulk-touched; never use mtime to pick "the latest session"
+
+**WHAT:** while designing the `/catchup` skill (spec: `docs/superpowers/specs/2026-08-14-catchup-skill-design.md`), found that four of the seven `*.jsonl` transcripts in `C:\Users\anand\.claude\projects\c--workspace-remindme\` share the identical mtime `Aug 5 11:17` — something touched them in bulk, so file mtime does not order sessions by recency.
+
+**WHY IT MATTERS:** any tooling that selects "the most recent session" by mtime can pick an arbitrary file. The reliable ordering signal is the timestamp on each file's **last JSONL line** (`tail -1`, no full read needed — these files reach 14 MB). The same tail timestamp identifies the *currently running* session's transcript when it must be excluded.
+
+**WHERE:** no source change; constraint recorded in the catchup spec's "Selecting newest" section.
+
+---
+
 ## 2026-08-10 — A context read by `ErrorFallback` must not throw when its provider is missing
 
 **WHAT:** added the in-app Light/Dark/System override (Settings → Appearance, `@theme_preference_v1`, default `"system"`). New `contexts/ThemeContext.tsx`; `useColors()` now resolves `preference === "system" ? systemScheme : preference`.
