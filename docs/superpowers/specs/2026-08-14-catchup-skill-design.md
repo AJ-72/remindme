@@ -40,16 +40,19 @@ Resolution order:
 
 1. An explicit argument, if given, wins outright.
 2. Otherwise `last_run` from `.claude/catchup-state.md`.
-3. First run (no state file): fall back to the wider of *(a)* the date of the
-   most recent commit, or *(b)* 2 weeks. Say explicitly that this is a first
-   run and the window was inferred.
+3. First run (no state file): window start = the **earlier** of *(a)* the most
+   recent commit's date minus 3 days, or *(b)* 2 weeks ago. The buffer in (a)
+   guarantees the window always contains at least the latest burst of work — a
+   window starting *at* the last commit would be empty precisely when the
+   absence was longest. Say explicitly that this is a first run and the window
+   was inferred.
 
 ## Sources
 
 | Source | Answers | Read mode |
 |---|---|---|
 | `.claude/catchup-state.md` | When was I last here, at what HEAD | Full |
-| git — `log`, `status`, `stash list`, `diff --stat` | What changed; health signal | Scoped to window |
+| git — `log`, `status`, `stash list`, `diff --stat` | What changed; health signal | `log` scoped to window; `status`/`stash`/`diff` are current state, unwindowed |
 | `backlog.md` | What the project is for; what's next | **Full** |
 | Newest `*.jsonl` in `C:\Users\anand\.claude\projects\c--workspace-remindme\` | What I was mid-thought about | **Extractive only — never read directly** |
 | `system_learnings.md` | Prior root causes; ledger-gap detection | Referenced, not quoted wholesale |
@@ -61,9 +64,19 @@ Transcript files in this project reach **14 MB** (largest observed:
 `4dace283-….jsonl`, 14,445,710 bytes; second 9.7 MB). Reading one directly
 would exhaust the context window and is categorically forbidden by this design.
 
-The skill instead shells out to filter the **single newest** `*.jsonl` by mtime,
+The skill instead shells out to filter the **single newest** `*.jsonl`,
 **excluding the current session's own transcript**, and extracts only three
-things:
+things.
+
+**Selecting "newest" — do not trust mtime alone.** In this very directory four
+transcripts share the identical mtime (`Aug 5 11:17`) because something touched
+them in bulk. Order candidates by the timestamp on each file's **last JSONL
+line** (readable via `tail -1` without loading the file). The same signal
+identifies the current session's own transcript to exclude: it is the file
+whose tail timestamp is within the running session (or whose name matches the
+session id, if the environment exposes one).
+
+The three extractions:
 
 1. **User message text** — the human turns, which carry intent.
 2. **The final ~10 exchanges** — to judge whether the session ended cleanly or
@@ -90,8 +103,11 @@ sense.
 
 **3. Where you left off.** The weighted-first section:
 - Uncommitted and untracked files, grouped by area.
-- Each stash, **with a judgment** on whether commits landing since appear to
-  supersede it — not a bare `git stash list`.
+- **All stashes, always — never window-filtered.** Stashes are standing
+  in-flight state, not events; the current three all predate any plausible
+  window and are exactly what this section exists for. Each gets **a judgment**
+  on whether commits landing since appear to supersede it — not a bare
+  `git stash list`.
 - Last session's intent, the files it touched, and whether it ended clean or
   mid-task.
 
@@ -106,7 +122,9 @@ sense.
   discrepancy, never infer implementation status from tracked-ness.
 - **Ledger gap:** commits in the window that did not touch
   `system_learnings.md`. This mirrors the existing `Stop` hook
-  (`.claude/check-learnings-updated.sh`) but reports rather than blocks.
+  (`.claude/check-learnings-updated.sh`) but reports rather than blocks — and
+  it must note that docs-only/trivial commits are legitimately exempt (the
+  hook's own escape clause), so the flag reads as "worth checking", not a nag.
 - Anything the last session raised and left unresolved.
 
 **6. Proposed next step.** One concrete action, justified against **both** the
