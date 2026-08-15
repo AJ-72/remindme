@@ -63,6 +63,8 @@ Resolution order:
 Transcript files in this project reach **14 MB** (largest observed:
 `4dace283-….jsonl`, 14,445,710 bytes; second 9.7 MB). Reading one directly
 would exhaust the context window and is categorically forbidden by this design.
+Measured on that file during implementation: 14,445,710 bytes in, **19,387 chars
+out (~745:1)**.
 
 The skill instead shells out to filter the **single newest** `*.jsonl`,
 **excluding the current session's own transcript**, and extracts only three
@@ -83,9 +85,15 @@ The three extractions:
    was cut off mid-task.
 3. **File paths from `Edit`/`Write` tool calls** — the "where", obtained without
    reading any tool body.
+4. **The final assistant text block** — truncated; the "did it end clean" signal.
 
-Assistant prose and all tool results are discarded: verbose, and re-derivable
-from the commits. Only the filtered output is read into context.
+Assistant prose and all tool results are discarded, with one exception: the
+**final** assistant text block is kept (truncated to 2,000 chars). Verified
+during implementation — it is 800–1,900 chars in practice and routinely states
+"Next: …" outright, making it the only reliable signal for whether the session
+ended cleanly, which section 3 requires. The last *human* turn is frequently
+just "yes", which carries none of that. Everything else is verbose and
+re-derivable from the commits. Only the filtered output is read into context.
 
 Scope is deliberately **last session only**, not a multi-session sweep — the
 most recent session is where "where was I" actually lives, and the cost of
