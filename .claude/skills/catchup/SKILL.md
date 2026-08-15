@@ -127,12 +127,20 @@ If nothing changed in the window, say so in two lines. Do not pad six sections.
 
 ## Step 4 — Write state
 
-Write `.claude/catchup-state.md`:
+Write `.claude/catchup-state.md`. **Generate both values with commands — never
+hand-write the timestamp.** A guessed timestamp that lands in the future makes
+the *next* run's `git log --since=…` return nothing, silently hiding real work:
 
-```markdown
-last_run: <ISO timestamp>
-head: <sha from git rev-parse HEAD>
-in_flight: <one line on what was in flight at this run>
+```bash
+printf 'last_run: %s\nhead: %s\nin_flight: %s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git rev-parse HEAD)" \
+  "<one line on what was in flight at this run>" > .claude/catchup-state.md
+```
+
+Then sanity-check that it is not in the future:
+
+```bash
+git log --since="$(grep '^last_run:' .claude/catchup-state.md | cut -d' ' -f2)" --oneline | head -1
 ```
 
 Write the full briefing verbatim to `.claude/last-catchup.md`.
