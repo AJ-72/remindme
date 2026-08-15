@@ -9,6 +9,32 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-15 — A hand-written timestamp in a state file that drives `git log --since` fails SILENTLY
+
+**WHAT:** the `/catchup` skill writes `.claude/catchup-state.md` with a `last_run`
+timestamp, which the next run feeds to `git log --since=…`. The first end-to-end run
+wrote that timestamp by hand and landed **10 minutes in the future** (`03:20:00Z`
+guessed vs `03:09:43Z` actual).
+
+**WHY IT MATTERS:** a future-dated `--since` is not an error. `git log` returns **zero
+commits and exit 0**, so the next briefing would confidently report "nothing changed"
+while real work sat in the window. The failure is invisible from the output alone —
+the only tell was an explicit gap computation coming out **negative**.
+
+**FIX:** generate the value, never author it —
+`date -u +%Y-%m-%dT%H:%M:%SZ` — and sanity-check afterwards that
+`git log --since=<written value>` still returns something plausible.
+
+**GENERAL RULE:** never hand-write a timestamp that will later be used as a query
+bound. A model has no reliable clock, and every "no results" answer downstream looks
+identical to a legitimately empty result. This is the same shape as the mis-named test
+entry (2026-08-09): the artefact reads as working precisely because the failure mode
+produces a plausible-looking success.
+
+**WHERE:** `.claude/skills/catchup/SKILL.md` Step 4, commit `47b0689`.
+
+---
+
 ## 2026-08-14 — Claude Code transcript mtimes on this machine are bulk-touched; never use mtime to pick "the latest session"
 
 **WHAT:** while designing the `/catchup` skill (spec: `docs/superpowers/specs/2026-08-14-catchup-skill-design.md`), found that four of the seven `*.jsonl` transcripts in `C:\Users\anand\.claude\projects\c--workspace-remindme\` share the identical mtime `Aug 5 11:17` — something touched them in bulk, so file mtime does not order sessions by recency.
@@ -23,7 +49,7 @@ Newest entries at the top.
 
 **Measured result:** 14,445,710 bytes → 19,523 chars (~740:1). `jq` is unavailable in this Git Bash env (as noted elsewhere in this ledger) but Node v24 is, and `node:test` is built in — no new dependency needed, which also avoids the `minimumReleaseAge` wait.
 
-**WHERE:** no source change yet; constraints recorded in the catchup spec's "Selecting newest" section and implemented per `docs/superpowers/plans/2026-08-14-catchup-skill.md` Tasks 1–2.
+**WHERE:** implemented in `.claude/skills/catchup/transcript.js` (`lastActivityTs`, `selectSession`, `extract`), with regression tests pinning all three traps in `transcript.test.js` — including one asserting that content-timestamp ordering beats a deliberately newer mtime.
 
 ---
 
