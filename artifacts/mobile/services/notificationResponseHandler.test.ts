@@ -28,10 +28,20 @@ function makeResponse(
 }
 
 function makeDeps() {
+  // Stands in for the AsyncStorage-backed set, shared by every deps object a
+  // test builds so two "processes" can be simulated against one store.
+  const handled = new Set<string>();
   return {
     defaultActionIdentifier: DEFAULT_ACTION_IDENTIFIER,
     lastHandledId: { current: null as string | null },
+    handled,
+    hasHandledResponse: jest.fn(async (id: string) => handled.has(id)),
+    markResponseHandled: jest.fn(async (id: string) => {
+      handled.add(id);
+    }),
     markDoneById: jest.fn().mockResolvedValue(undefined),
+    cancelScheduledForReminder: jest.fn().mockResolvedValue(undefined),
+    cancelNotification: jest.fn().mockResolvedValue(undefined),
     scheduleSnoozeNotification: jest.fn().mockResolvedValue("new-notif"),
     updateSnoozeById: jest.fn().mockResolvedValue(undefined),
     navigateToDetail: jest.fn(),
@@ -182,6 +192,75 @@ describe("handleNotificationResponse", () => {
     await handleNotificationResponse(response, deps);
     await handleNotificationResponse(response, deps);
     expect(deps.navigateToDetail).toHaveBeenCalledTimes(1);
+  });
+
+  // The spam bug: one Snooze press reached both the headless task and the
+  // foreground listener, each with its own in-memory ref, so both scheduled.
+  it("dedups across JS contexts that share the persisted handled set", async () => {
+    const headless = makeDeps();
+    const foreground = makeDeps();
+    // One store, two "processes" — mirrors AsyncStorage being shared.
+    foreground.hasHandledResponse = jest.fn(async (id: string) =>
+      headless.handled.has(id)
+    );
+    foreground.markResponseHandled = jest.fn(async (id: string) => {
+      headless.handled.add(id);
+    });
+    const response = makeResponse(SNOOZE_ACTION_ID);
+
+    await handleNotificationResponse(response, headless);
+    await handleNotificationResponse(response, foreground);
+
+    expect(headless.scheduleSnoozeNotification).toHaveBeenCalledTimes(1);
+    expect(foreground.scheduleSnoozeNotification).not.toHaveBeenCalled();
+  });
+
+  // getLastNotificationResponseAsync() re-offers the same response on every
+  // cold start, and the component's ref is new on every mount — only the
+  // persisted mark can stop the replay from snoozing again.
+  it("does not re-snooze a replayed cold-start response in a fresh context", async () => {
+    const first = makeDeps();
+    const response = makeResponse(SNOOZE_ACTION_ID);
+    await handleNotificationResponse(response, first);
+
+    const relaunch = makeDeps();
+    relaunch.hasHandledResponse = jest.fn(async (id: string) =>
+      first.handled.has(id)
+    );
+    await handleNotificationResponse(response, relaunch);
+
+    expect(relaunch.scheduleSnoozeNotification).not.toHaveBeenCalled();
+  });
+
+  it("cancels everything still pending for the reminder before scheduling the snooze", async () => {
+    const deps = makeDeps();
+    deps.loadReminderById.mockResolvedValue({
+      id: "r1",
+      title: "T",
+      description: "",
+      datetime: new Date().toISOString(),
+      completed: false,
+      notificationId: "old-notif",
+    });
+
+    await handleNotificationResponse(makeResponse(SNOOZE_ACTION_ID), deps);
+
+    expect(deps.cancelScheduledForReminder).toHaveBeenCalledWith("r1");
+    expect(deps.cancelNotification).toHaveBeenCalledWith("old-notif");
+    const cancelOrder = deps.cancelScheduledForReminder.mock.invocationCallOrder[0];
+    const scheduleOrder =
+      deps.scheduleSnoozeNotification.mock.invocationCallOrder[0];
+    // Order matters: sweeping after scheduling would cancel the new one.
+    expect(cancelOrder).toBeLessThan(scheduleOrder);
+  });
+
+  it("does not mark a response with no reminderId as handled", async () => {
+    const deps = makeDeps();
+    await handleNotificationResponse(
+      makeResponse(DEFAULT_ACTION_IDENTIFIER, { data: null }),
+      deps
+    );
+    expect(deps.markResponseHandled).not.toHaveBeenCalled();
   });
 
   it("processes a different notification identifier normally after a previous one was handled", async () => {
