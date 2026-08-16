@@ -17,6 +17,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
+import ContactPickerModal from "@/components/ContactPickerModal";
+import type { PickableContact } from "@/services/ContactsService";
+import type { ReminderRecipient } from "@/services/ReminderService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import { getFontFamily } from "@/utils/getFontFamily";
 
@@ -54,6 +57,13 @@ export default function AddReminderScreen() {
 
   const existing = isEditing ? reminders.find((r) => r.id === id) : null;
 
+  // Who this reminder is about, if anyone. Undefined means an ordinary
+  // personal reminder - the key must never be written as undefined.
+  const [recipient, setRecipient] = useState<ReminderRecipient | undefined>(
+    undefined
+  );
+  const [pickerVisible, setPickerVisible] = useState(false);
+
   // Natural language input (add mode only)
   const [input, setInput] = useState("");
 
@@ -86,6 +96,7 @@ export default function AddReminderScreen() {
     setParsedTitle(existing.title);
     setParsedDate(new Date(existing.datetime));
     setAlarm(existing.alarm !== false);
+    setRecipient(existing.recipient);
   }, [isEditing, existing]);
 
   // Re-parse whenever input changes (not in edit mode — just use existing values)
@@ -129,6 +140,9 @@ export default function AddReminderScreen() {
         description: description.trim(),
         datetime: parsedDate.toISOString(),
         alarm,
+        // Spread rather than `recipient` so an unset value omits the key
+        // entirely - `'recipient' in obj` is true even when it holds undefined.
+        ...(recipient ? { recipient } : {}),
       };
       if (isEditing && id) {
         await editReminder(id, payload);
@@ -236,6 +250,28 @@ export default function AddReminderScreen() {
       fontSize: 12,
       fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
+    },
+    recipientRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+    },
+    recipientName: {
+      fontSize: 15,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.foreground,
+    },
+    recipientHint: {
+      fontSize: 12,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginTop: 2,
     },
     sectionLabel: {
       fontSize: 12,
@@ -460,6 +496,57 @@ export default function AddReminderScreen() {
             />
           </View>
 
+          {/* Sending - deliberately worded as "message someone", never
+              "remind someone else": Tier 1 rings the SENDER's phone and the
+              recipient is never contacted unless the sender acts. */}
+          <View>
+            <Text style={styles.sectionLabel}>Sending</Text>
+            <Pressable
+              testID="recipient-row"
+              style={styles.recipientRow}
+              onPress={() => setPickerVisible(true)}
+            >
+              <Feather
+                name={recipient ? "user-check" : "user-plus"}
+                size={16}
+                color={recipient ? colors.primary : colors.mutedForeground}
+              />
+              <View style={{ flex: 1 }}>
+                {recipient ? (
+                  <>
+                    <Text
+                      style={[
+                        styles.recipientName,
+                        { fontFamily: getFontFamily(recipient.name, "600SemiBold") },
+                      ]}
+                    >
+                      {recipient.name}
+                    </Text>
+                    <Text style={styles.recipientHint}>{recipient.phone}</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.recipientName}>
+                      Remind me to message someone
+                    </Text>
+                    <Text style={styles.recipientHint}>
+                      Your phone rings; you send the message
+                    </Text>
+                  </>
+                )}
+              </View>
+              {recipient ? (
+                <Pressable
+                  testID="recipient-clear"
+                  hitSlop={10}
+                  onPress={() => setRecipient(undefined)}
+                >
+                  <Feather name="x" size={16} color={colors.mutedForeground} />
+                </Pressable>
+              ) : null}
+            </Pressable>
+          </View>
+
           {/* Parsed preview */}
           <View>
             <Text style={styles.sectionLabel}>Parsed as</Text>
@@ -613,6 +700,17 @@ export default function AddReminderScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <ContactPickerModal
+        visible={pickerVisible}
+        onClose={() => setPickerVisible(false)}
+        onSelect={(c: PickableContact) => {
+          // Name is a SNAPSHOT - never re-resolved from contacts, so a deleted
+          // contact or a revoked permission cannot break an existing reminder.
+          setRecipient({ name: c.name, phone: c.phone, contactId: c.contactId });
+          setPickerVisible(false);
+        }}
+      />
 
       {/* Android date/time dialog */}
       {Platform.OS === "android" && pickerMode !== null && DateTimePicker && (

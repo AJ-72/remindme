@@ -2,6 +2,7 @@ import React from "react";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Contacts from "expo-contacts";
 import AddReminderScreen from "@/app/add-reminder";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { STORAGE_KEY, type Reminder } from "@/services/ReminderService";
@@ -52,6 +53,14 @@ beforeEach(async () => {
   jest.clearAllMocks();
   mockSearchParams = { id: "r1" };
   await (AsyncStorage as any).clear();
+  (Contacts.requestPermissionsAsync as jest.Mock).mockResolvedValue({
+    status: Contacts.PermissionStatus.GRANTED,
+  });
+  (Contacts.getContactsAsync as jest.Mock).mockResolvedValue({
+    data: [
+      { id: "c1", name: "Priya Menon", phoneNumbers: [{ number: "+91 98765 43210" }] },
+    ],
+  });
 });
 
 describe("AddReminderScreen — editing", () => {
@@ -94,5 +103,89 @@ describe("AddReminderScreen — adding", () => {
     await waitFor(() => expect(mockBack).toHaveBeenCalled());
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].description).toBe("Ask about the weekend trip");
+  });
+});
+
+describe("AddReminderScreen — recipient", () => {
+  it("does not write a recipient key at all when none is picked", async () => {
+    // A spread key holding undefined still satisfies `'recipient' in obj`, so
+    // the payload must omit it entirely rather than set it undefined.
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId } = renderScreen();
+
+    fireEvent.changeText(await findByTestId("edit-title-input"), "No recipient");
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect("recipient" in stored[0]).toBe(false);
+  });
+
+  it("shows an unset recipient row that opens the picker", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText } = renderScreen();
+
+    expect(await findByText("Remind me to message someone")).toBeTruthy();
+    fireEvent.press(await findByTestId("recipient-row"));
+    expect(await findByTestId("contact-search")).toBeTruthy();
+  });
+
+  it("stores the picked contact's name and raw phone on save", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText } = renderScreen();
+
+    fireEvent.press(await findByTestId("recipient-row"));
+    fireEvent.press(await findByText("Priya Menon"));
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].recipient).toEqual({
+      contactId: "c1",
+      name: "Priya Menon",
+      phone: "+91 98765 43210",
+    });
+  });
+
+  it("shows the chosen recipient's name on the row after picking", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText, findAllByText } = renderScreen();
+
+    fireEvent.press(await findByTestId("recipient-row"));
+    fireEvent.press(await findByText("Priya Menon"));
+
+    expect((await findAllByText("Priya Menon")).length).toBeGreaterThan(0);
+  });
+
+  it("clears a chosen recipient back to none", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText } = renderScreen();
+
+    fireEvent.press(await findByTestId("recipient-row"));
+    fireEvent.press(await findByText("Priya Menon"));
+    fireEvent.press(await findByTestId("recipient-clear"));
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect("recipient" in stored[0]).toBe(false);
+  });
+
+  it("loads an existing reminder's recipient into the row", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({ recipient: { name: "Anand", phone: "9123456789" } }),
+      ])
+    );
+    const { findByText } = renderScreen();
+    expect(await findByText("Anand")).toBeTruthy();
+  });
+
+  it("never labels the row in a way that implies delivery", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { queryByText, findByText } = renderScreen();
+    await findByText("Remind me to message someone");
+    expect(queryByText("Remind someone else")).toBeNull();
   });
 });
