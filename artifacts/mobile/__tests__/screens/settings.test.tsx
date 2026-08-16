@@ -6,6 +6,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import SettingsScreen from "@/app/(tabs)/settings";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import {
+  INVITE_NUDGE_ENABLED_KEY,
   DEFAULT_ALARM_KEY,
   SHOW_DESCRIPTION_KEY,
   DICTATION_LANGUAGE_KEY,
@@ -395,5 +396,41 @@ describe("appearance override", () => {
         StyleSheet.flatten((await findByText("Settings")).props.style).color
       ).toBe("#e8e8f0")
     );
+  });
+});
+
+describe("invite nudge setting", () => {
+  it("shows the nudge switch on by default", async () => {
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("invite-nudge-switch");
+    expect(switchEl.props.value).toBe(true);
+  });
+
+  it("shows the nudge switch off when the stored value is false", async () => {
+    await AsyncStorage.setItem(INVITE_NUDGE_ENABLED_KEY, "false");
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("invite-nudge-switch");
+    await waitFor(() => expect(switchEl.props.value).toBe(false));
+  });
+
+  it("toggling the switch persists the new value", async () => {
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("invite-nudge-switch");
+
+    fireEvent(switchEl, "valueChange", false);
+
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        INVITE_NUDGE_ENABLED_KEY,
+        "false"
+      )
+    );
+  });
+
+  it("the row label never implies the app delivers the message", async () => {
+    // Tier 1 cannot deliver to the recipient. No user-facing string may imply
+    // otherwise - this is the top risk on the feature and it is a copy risk.
+    const { findByText } = renderScreen();
+    expect(await findByText("Mention this app when messaging")).toBeTruthy();
   });
 });

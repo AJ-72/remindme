@@ -41,6 +41,13 @@ import {
   toggleComplete,
   updateSnoozeById,
   isSendReminder,
+  INVITE_NUDGE_COUNT_KEY,
+  INVITE_NUDGE_ENABLED_KEY,
+  INVITE_NUDGE_MAX_ENTRIES,
+  getInviteNudgeCount,
+  incrementInviteNudgeCount,
+  getInviteNudgeEnabled,
+  setInviteNudgeEnabled,
   type Reminder,
   type ReminderRecipient,
   type NotificationData,
@@ -1038,5 +1045,72 @@ describe("legacy reminders without a recipient field", () => {
     expect(loaded).toHaveLength(1);
     expect("recipient" in loaded[0]).toBe(false);
     expect(isSendReminder(loaded[0])).toBe(false);
+  });
+});
+
+describe("invite nudge count persistence", () => {
+  it("returns 0 for a phone never sent to", async () => {
+    expect(await getInviteNudgeCount("919876543210")).toBe(0);
+  });
+
+  it("increments per phone independently", async () => {
+    await incrementInviteNudgeCount("919876543210");
+    await incrementInviteNudgeCount("919876543210");
+    await incrementInviteNudgeCount("911111111111");
+    expect(await getInviteNudgeCount("919876543210")).toBe(2);
+    expect(await getInviteNudgeCount("911111111111")).toBe(1);
+  });
+
+  it("returns 0 rather than throwing when stored JSON is corrupt", async () => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce("{not json");
+    expect(await getInviteNudgeCount("919876543210")).toBe(0);
+  });
+
+  it("ignores a non-numeric stored value for a phone", async () => {
+    await AsyncStorage.setItem(
+      INVITE_NUDGE_COUNT_KEY,
+      JSON.stringify({ "919876543210": "lots" })
+    );
+    expect(await getInviteNudgeCount("919876543210")).toBe(0);
+  });
+
+  it("FIFO-caps the map so it cannot grow without bound", async () => {
+    const entries: Record<string, number> = {};
+    for (let i = 0; i < INVITE_NUDGE_MAX_ENTRIES + 10; i++) {
+      entries[`9${String(i).padStart(11, "0")}`] = 1;
+    }
+    await AsyncStorage.setItem(INVITE_NUDGE_COUNT_KEY, JSON.stringify(entries));
+    await incrementInviteNudgeCount("919999999999");
+    const raw = await AsyncStorage.getItem(INVITE_NUDGE_COUNT_KEY);
+    const parsed = JSON.parse(raw as string);
+    expect(Object.keys(parsed).length).toBeLessThanOrEqual(
+      INVITE_NUDGE_MAX_ENTRIES
+    );
+    // The just-written entry must survive the eviction.
+    expect(parsed["919999999999"]).toBe(1);
+  });
+});
+
+describe("global invite nudge setting", () => {
+  it("defaults to enabled", async () => {
+    expect(await getInviteNudgeEnabled()).toBe(true);
+  });
+
+  it("round-trips a disabled value", async () => {
+    await setInviteNudgeEnabled(false);
+    expect(await getInviteNudgeEnabled()).toBe(false);
+  });
+
+  it("round-trips back to enabled", async () => {
+    await setInviteNudgeEnabled(false);
+    await setInviteNudgeEnabled(true);
+    expect(await getInviteNudgeEnabled()).toBe(true);
+  });
+
+  it("falls back to enabled when storage throws", async () => {
+    (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(
+      new Error("boom")
+    );
+    expect(await getInviteNudgeEnabled()).toBe(true);
   });
 });

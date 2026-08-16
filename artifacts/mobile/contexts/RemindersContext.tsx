@@ -18,6 +18,7 @@ import {
   getDefaultAlarmEnabled,
   getDictationLanguage,
   getShowDescriptionEnabled,
+  getInviteNudgeEnabled,
   getSnoozePreset,
   getVibrationEnabled,
   initNotifications,
@@ -25,6 +26,7 @@ import {
   setDefaultAlarmEnabled as serviceSetDefaultAlarmEnabled,
   setDictationLanguage as serviceSetDictationLanguage,
   setShowDescriptionEnabled as serviceSetShowDescriptionEnabled,
+  setInviteNudgeEnabled as serviceSetInviteNudgeEnabled,
   setSnoozePreset as serviceSetSnoozePreset,
   setVibrationEnabled as serviceSetVibrationEnabled,
   setupSnoozeCategory,
@@ -62,6 +64,8 @@ interface RemindersContextType {
   setDefaultAlarmEnabled: (enabled: boolean) => Promise<void>;
   showDescriptionInNotifications: boolean;
   setShowDescriptionInNotifications: (enabled: boolean) => Promise<void>;
+  inviteNudgeEnabled: boolean;
+  setInviteNudgeEnabled: (enabled: boolean) => Promise<void>;
   vibrationEnabled: boolean;
   setVibrationEnabled: (enabled: boolean) => Promise<void>;
   dictationLanguage: DictationLanguage;
@@ -92,11 +96,12 @@ export function RemindersProvider({
   const [snoozePreset, setSnoozePresetState] =
     useState<SnoozePreset>(DEFAULT_SNOOZE_PRESET);
   const [vibrationEnabled, setVibrationEnabledState] = useState(true);
+  const [inviteNudgeEnabled, setInviteNudgeEnabledState] = useState(true);
 
   // Shared by the initial mount and by refreshFromStorage, so a restore can
   // never drift out of sync with what the provider loads at startup.
   const loadFromStorage = useCallback(async () => {
-    const [loadedReminders, defaultAlarm, showDescription, dictLang, preset, vibration] =
+    const [loadedReminders, defaultAlarm, showDescription, dictLang, preset, vibration, nudge] =
       await Promise.all([
         loadReminders(),
         getDefaultAlarmEnabled(),
@@ -104,6 +109,7 @@ export function RemindersProvider({
         getDictationLanguage(),
         getSnoozePreset(),
         getVibrationEnabled(),
+        getInviteNudgeEnabled(),
       ]);
     setReminders(loadedReminders);
     setDefaultAlarmEnabledState(defaultAlarm);
@@ -111,6 +117,7 @@ export function RemindersProvider({
     setDictationLanguageState(dictLang);
     setSnoozePresetState(preset);
     setVibrationEnabledState(vibration);
+    setInviteNudgeEnabledState(nudge);
   }, []);
 
   const refreshFromStorage = useCallback(async () => {
@@ -140,6 +147,11 @@ export function RemindersProvider({
   const setDefaultAlarmEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetDefaultAlarmEnabled(enabled);
     setDefaultAlarmEnabledState(enabled);
+  }, []);
+
+  const setInviteNudgeEnabled = useCallback(async (enabled: boolean) => {
+    await serviceSetInviteNudgeEnabled(enabled);
+    setInviteNudgeEnabledState(enabled);
   }, []);
 
   const setShowDescriptionInNotifications = useCallback(
@@ -233,6 +245,8 @@ export function RemindersProvider({
         setDefaultAlarmEnabled,
         showDescriptionInNotifications,
         setShowDescriptionInNotifications,
+        inviteNudgeEnabled,
+        setInviteNudgeEnabled,
         vibrationEnabled,
         setVibrationEnabled,
         dictationLanguage,

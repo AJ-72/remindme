@@ -44,6 +44,8 @@ export default function SettingsScreen() {
     setDefaultAlarmEnabled,
     showDescriptionInNotifications,
     setShowDescriptionInNotifications,
+    inviteNudgeEnabled,
+    setInviteNudgeEnabled,
     vibrationEnabled,
     setVibrationEnabled,
     dictationLanguage,
@@ -382,6 +384,31 @@ export default function SettingsScreen() {
             trackColor={{ false: colors.muted, true: colors.primary + "66" }}
             thumbColor={
               showDescriptionInNotifications ? colors.primary : colors.mutedForeground
+            }
+          />
+        </View>
+
+        <View style={[styles.alarmCard, styles.descriptionCard]}>
+          <Feather
+            name={inviteNudgeEnabled ? "gift" : "slash"}
+            size={18}
+            color={inviteNudgeEnabled ? colors.primary : colors.mutedForeground}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alarmLabel}>Mention this app when messaging</Text>
+            <Text style={styles.alarmSubLabel}>
+              {inviteNudgeEnabled
+                ? "Adds a short line to the first few messages you send someone"
+                : "Your messages go out with nothing extra added"}
+            </Text>
+          </View>
+          <Switch
+            testID="invite-nudge-switch"
+            value={inviteNudgeEnabled}
+            onValueChange={(v) => setInviteNudgeEnabled(v)}
+            trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+            thumbColor={
+              inviteNudgeEnabled ? colors.primary : colors.mutedForeground
             }
           />
         </View>

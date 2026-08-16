@@ -179,6 +179,74 @@ export async function setSnoozePreset(preset: SnoozePreset): Promise<void> {
   await AsyncStorage.setItem(SNOOZE_PRESET_KEY, JSON.stringify(preset));
 }
 
+export const INVITE_NUDGE_COUNT_KEY = "@invite_nudge_count_v1";
+export const INVITE_NUDGE_ENABLED_KEY = "@invite_nudge_enabled_v1";
+
+/**
+ * Cap on the per-contact counter map. Keyed by normalized phone digits rather
+ * than contactId, which changes across devices and contact merges.
+ */
+export const INVITE_NUDGE_MAX_ENTRIES = 200;
+
+async function readNudgeCounts(): Promise<Record<string, number>> {
+  try {
+    const raw = await AsyncStorage.getItem(INVITE_NUDGE_COUNT_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return {};
+    return parsed as Record<string, number>;
+  } catch {
+    // A corrupt map must not be able to wedge sending.
+    return {};
+  }
+}
+
+export async function getInviteNudgeCount(phoneDigits: string): Promise<number> {
+  const counts = await readNudgeCounts();
+  const n = counts[phoneDigits];
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/**
+ * Advance the per-contact counter. Call this ONLY on an actual send - calling
+ * it on screen render means opening the screen twice burns a nudge stage.
+ */
+export async function incrementInviteNudgeCount(
+  phoneDigits: string
+): Promise<void> {
+  const counts = await readNudgeCounts();
+  const current = typeof counts[phoneDigits] === "number" ? counts[phoneDigits] : 0;
+  counts[phoneDigits] = current + 1;
+
+  // FIFO eviction: insertion order is preserved for string keys, and the entry
+  // we just wrote is re-added last so it always survives.
+  const keys = Object.keys(counts);
+  if (keys.length > INVITE_NUDGE_MAX_ENTRIES) {
+    const survivor = counts[phoneDigits];
+    for (const k of keys.slice(0, keys.length - INVITE_NUDGE_MAX_ENTRIES)) {
+      delete counts[k];
+    }
+    delete counts[phoneDigits];
+    counts[phoneDigits] = survivor;
+  }
+
+  await AsyncStorage.setItem(INVITE_NUDGE_COUNT_KEY, JSON.stringify(counts));
+}
+
+export async function getInviteNudgeEnabled(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(INVITE_NUDGE_ENABLED_KEY);
+    return raw === null ? true : raw === "true";
+  } catch {
+    return true;
+  }
+}
+
+export async function setInviteNudgeEnabled(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(INVITE_NUDGE_ENABLED_KEY, String(enabled));
+}
+
 export async function resolveNotificationBody(
   description?: string
 ): Promise<string> {
