@@ -2,12 +2,18 @@ import { router } from "expo-router";
 import React, { useEffect, useRef } from "react";
 
 import {
+  cancelNotification,
+  cancelScheduledForReminder,
   getSnoozePreset,
   loadReminderById,
   markDoneById,
   scheduleSnoozeNotification,
   updateSnoozeById,
 } from "@/services/ReminderService";
+import {
+  hasHandledResponse,
+  markResponseHandled,
+} from "@/services/handledResponses";
 import { handleNotificationResponse } from "@/services/notificationResponseHandler";
 
 // eslint-disable-next-line
@@ -28,7 +34,11 @@ export default function NotificationResponseHandler() {
     const deps = {
       defaultActionIdentifier: Notifications.DEFAULT_ACTION_IDENTIFIER,
       lastHandledId,
+      hasHandledResponse,
+      markResponseHandled,
       markDoneById,
+      cancelScheduledForReminder,
+      cancelNotification,
       scheduleSnoozeNotification,
       updateSnoozeById,
       getSnoozePreset,
@@ -44,9 +54,23 @@ export default function NotificationResponseHandler() {
       },
     };
 
+    // NOT a queue drain: this keeps resolving with the same response on every
+    // launch until a newer one replaces it, and `lastHandledId` is a fresh ref
+    // on every mount. The persisted dedupe inside handleNotificationResponse is
+    // what stops the replay; clearing afterwards (where the SDK offers it) just
+    // keeps the stale response from being re-offered at all.
     Notifications.getLastNotificationResponseAsync()
-      .then((response: any) => {
-        if (response) handleNotificationResponse(response, deps);
+      .then(async (response: any) => {
+        if (!response) return;
+        await handleNotificationResponse(response, deps);
+        try {
+          // clearLastNotificationResponseAsync is the deprecated spelling;
+          // prefer the current one where the installed SDK has it.
+          const clear =
+            Notifications.clearLastNotificationResponse ??
+            Notifications.clearLastNotificationResponseAsync;
+          await clear?.();
+        } catch {}
       })
       .catch(() => {});
 

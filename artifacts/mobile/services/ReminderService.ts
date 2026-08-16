@@ -417,7 +417,12 @@ export async function scheduleSnoozeNotification(
 ): Promise<string | undefined> {
   if (Platform.OS === "web" || !Notifications) return undefined;
   try {
-    const snoozeDate = new Date(target.getTime() - ALARM_EARLY_OFFSET_MS);
+    // Clamped like scheduleNotification: a DATE trigger in the past is
+    // delivered immediately by expo-notifications, which for a target inside
+    // the early-offset window would turn a snooze into an instant re-alert.
+    const snoozeDate = new Date(
+      Math.max(Date.now(), target.getTime() - ALARM_EARLY_OFFSET_MS)
+    );
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: data.title,
@@ -576,6 +581,10 @@ export async function snoozeReminder(
 ): Promise<Reminder[]> {
   const target = current.find((r) => r.id === id);
   if (!target) return current;
+  // Sweep by payload as well as by the stored id: the stored id is the only
+  // handle on ONE notification, so any orphan this reminder picked up would
+  // otherwise stay armed and fire next to the snoozed copy.
+  await cancelScheduledForReminder(id);
   await cancelNotification(target.notificationId);
   const alarmOn = target.alarm !== false;
   const body = await resolveNotificationBody(target.description);

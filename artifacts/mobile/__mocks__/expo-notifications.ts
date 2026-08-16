@@ -33,6 +33,12 @@ export const setNotificationHandler = jest.fn();
 export const getLastNotificationResponseAsync = jest
   .fn()
   .mockResolvedValue(null);
+export const clearLastNotificationResponse = jest.fn();
+// Deprecated spelling, kept because the component falls back to it on SDKs
+// that predate the rename.
+export const clearLastNotificationResponseAsync = jest
+  .fn()
+  .mockResolvedValue(undefined);
 export const addNotificationResponseReceivedListener = jest
   .fn()
   .mockReturnValue({ remove: jest.fn() });

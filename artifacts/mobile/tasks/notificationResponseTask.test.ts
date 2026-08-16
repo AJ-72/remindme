@@ -31,12 +31,12 @@ function makeReminder(overrides: Partial<Reminder> = {}): Reminder {
   };
 }
 
-function makeResponse(actionIdentifier: string) {
+function makeResponse(actionIdentifier: string, identifier = "notif-1") {
   return {
     actionIdentifier,
     notification: {
       request: {
-        identifier: "notif-1",
+        identifier,
         content: { data: { reminderId: "r1" } },
       },
     },
@@ -153,12 +153,12 @@ describe("buildBackgroundResponseDeps", () => {
   });
 
   // The foreground component dedupes via a ref that lives as long as the app.
-  // A headless task gets a fresh one per wake, so each invocation must act.
+  // A headless task gets a fresh one per wake, so a *new* response must act.
   it("gives each headless invocation a fresh dedupe ref", async () => {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
 
     await handleNotificationResponse(
-      makeResponse(MARK_DONE_ACTION_ID),
+      makeResponse(MARK_DONE_ACTION_ID, "notif-1"),
       buildBackgroundResponseDeps()
     );
     await AsyncStorage.setItem(
@@ -166,11 +166,36 @@ describe("buildBackgroundResponseDeps", () => {
       JSON.stringify([makeReminder({ completed: false })])
     );
     await handleNotificationResponse(
-      makeResponse(MARK_DONE_ACTION_ID),
+      makeResponse(MARK_DONE_ACTION_ID, "notif-2"),
       buildBackgroundResponseDeps()
     );
 
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].completed).toBe(true);
+  });
+
+  // ...but the SAME response replayed into a fresh context must not act twice.
+  // That per-wake ref is blind to the foreground listener and to a later cold
+  // start, which is what let one Snooze press pile up notifications.
+  it("suppresses the same response replayed into a fresh headless context", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+
+    await handleNotificationResponse(
+      makeResponse(SNOOZE_ACTION_ID),
+      buildBackgroundResponseDeps()
+    );
+    const afterFirst = JSON.parse(
+      (await AsyncStorage.getItem(STORAGE_KEY)) as string
+    );
+
+    await handleNotificationResponse(
+      makeResponse(SNOOZE_ACTION_ID),
+      buildBackgroundResponseDeps()
+    );
+
+    const afterReplay = JSON.parse(
+      (await AsyncStorage.getItem(STORAGE_KEY)) as string
+    );
+    expect(afterReplay[0].datetime).toBe(afterFirst[0].datetime);
   });
 });
