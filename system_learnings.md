@@ -9,6 +9,24 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-16 — A manual Jest mock does NOT satisfy `tsc`; install the package before the module that imports it
+
+**WHAT:** building M4 Tier 1 (`docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md`). The plan deliberately sequenced T10 (`pnpm add expo-contacts`) **last**, "so it doesn't block T1–T9's testable work". That ordering is wrong: T7 (`services/ContactsService.ts`) does `import * as Contacts from "expo-contacts"`, and while `__mocks__/expo-contacts.ts` makes **Jest** pass, `pnpm run typecheck` still fails on the unresolved module. Had to install `expo-contacts ~15.0.11` before T7.
+
+**GENERAL RULE:** a manual mock in `__mocks__/` satisfies the *test runner* only. Any task that adds a module importing a not-yet-installed package must be sequenced **after** the install, no matter how pure and unit-testable its own logic is. When writing a plan, look at which tasks introduce a new `import` of a third-party package — that, not the task's testability, sets the ordering constraint.
+
+**Three product decisions worth keeping (all deliberate, all look wrong at a glance):**
+
+1. **Phone numbers are normalized at SEND time, never on save.** Contact strings vary wildly (`+91 98765 43210`, `098765 43210`, `9876543210`). Normalizing on save bakes the heuristic into stored data permanently; normalizing at send means fixing `utils/phoneNumber.ts` repairs every existing reminder with **no migration**.
+2. **An explicit `+` prefix must beat the device region**, and the calling code comes from `getLocales()[0].regionCode`, never a hardcoded `91`. An NRI on a US phone storing a `+91` contact is the exact case a hardcoded country code breaks — and this app's Malayalam support means that cohort is real, not hypothetical.
+3. **No automatic WhatsApp → SMS fallback chain.** `Linking.openURL` resolving means *an app opened*, not that a message was composed, so an automatic chain fires for cases that actually worked. Both buttons are shown instead, with emphasis swapping when normalization fails. Related: use the **`wa.me` universal link, not `whatsapp://`** — the scheme needs an iOS `LSApplicationQueriesSchemes` entry and hard-fails without one, while `wa.me` degrades to a browser install page.
+
+**FIFO-eviction trap:** capping the `@invite_nudge_count_v1` map by deleting the oldest keys evicts the entry you *just wrote* whenever it was already present (JS objects preserve insertion order, and re-assigning an existing key does **not** move it to the end). The write must `delete` then re-add its own key after trimming, or the counter silently resets for the most active contact.
+
+**WHERE:** `services/ReminderService.ts` (`ReminderRecipient`, `isSendReminder`, nudge-count persistence), `utils/phoneNumber.ts`, `utils/inviteNudges.ts`, `services/messageLinks.ts`, `services/ContactsService.ts`, `app.json`. Commits `7aadc29`..`6b7921a`.
+
+---
+
 ## 2026-08-15 — A hand-written timestamp in a state file that drives `git log --since` fails SILENTLY
 
 **WHAT:** the `/catchup` skill writes `.claude/catchup-state.md` with a `last_run`
