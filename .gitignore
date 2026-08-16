@@ -56,3 +56,6 @@ Thumbs.db
 
 # Local session state for the system_learnings.md Stop hook
 .claude/.last-learnings-commit
+# catchup skill — local session state, not committed
+.claude/catchup-state.md
+.claude/last-catchup.md
