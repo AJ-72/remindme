@@ -53,6 +53,20 @@ export const MARK_DONE_ACTION_ID = "MARK_DONE";
 // keeps the notification's actual arrival close to the time the user picked.
 export const ALARM_EARLY_OFFSET_MS = 60 * 1000;
 
+/**
+ * Who a "send" reminder is about. Deliberately an object, not a flat phone
+ * string, so Tier 2 can add appUserId/deliveryStatus/acknowledgedAt later as
+ * purely additive optional fields.
+ */
+export interface ReminderRecipient {
+  /** Snapshot taken when the contact was picked - never re-resolved. */
+  name: string;
+  /** Raw, exactly as the OS gave it. Normalized at send time, not on save. */
+  phone: string;
+  /** Advisory only; contact ids change across devices and contact merges. */
+  contactId?: string;
+}
+
 export interface Reminder {
   id: string;
   title: string;
@@ -61,6 +75,16 @@ export interface Reminder {
   completed: boolean;
   notificationId?: string;
   alarm?: boolean;
+  recipient?: ReminderRecipient;
+}
+
+/**
+ * Single definition of "is this a send reminder", used by every consumer.
+ * A recipient carrying no usable phone must behave as a normal reminder -
+ * otherwise the send screen renders with a dead Send button.
+ */
+export function isSendReminder(r: Reminder): boolean {
+  return !!r.recipient?.phone?.trim();
 }
 
 export interface NotificationData {

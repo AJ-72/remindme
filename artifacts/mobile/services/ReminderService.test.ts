@@ -40,7 +40,9 @@ import {
   snoozeReminder,
   toggleComplete,
   updateSnoozeById,
+  isSendReminder,
   type Reminder,
+  type ReminderRecipient,
   type NotificationData,
 } from "@/services/ReminderService";
 import {
@@ -968,5 +970,73 @@ describe("importRemindersFromJson", () => {
     await setDictationLanguage("ml-IN");
     await importRemindersFromJson(backup([]));
     expect(await getDictationLanguage()).toBe("ml-IN");
+  });
+});
+
+describe("isSendReminder", () => {
+  const base: Reminder = {
+    id: "1",
+    title: "t",
+    description: "",
+    datetime: "2026-09-01T10:00:00.000Z",
+    completed: false,
+  };
+
+  it("is false for a reminder with no recipient", () => {
+    expect(isSendReminder(base)).toBe(false);
+  });
+
+  it("is true when a recipient has a phone number", () => {
+    const r: Reminder = {
+      ...base,
+      recipient: { name: "Priya", phone: "+91 98765 43210" },
+    };
+    expect(isSendReminder(r)).toBe(true);
+  });
+
+  it("is false when the recipient object has an empty phone", () => {
+    // A recipient with no usable phone must behave as a normal reminder,
+    // otherwise the send screen renders with a dead Send button.
+    const r: Reminder = { ...base, recipient: { name: "Priya", phone: "" } };
+    expect(isSendReminder(r)).toBe(false);
+  });
+
+  it("is false when the recipient object is present but phone is whitespace", () => {
+    const r: Reminder = { ...base, recipient: { name: "Priya", phone: "   " } };
+    expect(isSendReminder(r)).toBe(false);
+  });
+
+  it("keeps contactId advisory and optional", () => {
+    const withId: ReminderRecipient = {
+      name: "Priya",
+      phone: "9876543210",
+      contactId: "abc",
+    };
+    const withoutId: ReminderRecipient = { name: "Priya", phone: "9876543210" };
+    expect(isSendReminder({ ...base, recipient: withId })).toBe(true);
+    expect(isSendReminder({ ...base, recipient: withoutId })).toBe(true);
+  });
+});
+
+describe("legacy reminders without a recipient field", () => {
+  it("parses stored JSON written before recipient existed", async () => {
+    // loadReminders does a bare JSON.parse with no migration mechanism, so a
+    // record written by an older build must still round-trip untouched.
+    const legacy = [
+      {
+        id: "old-1",
+        title: "Legacy",
+        description: "",
+        datetime: "2026-09-01T10:00:00.000Z",
+        completed: false,
+      },
+    ];
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify(legacy)
+    );
+    const loaded = await loadReminders();
+    expect(loaded).toHaveLength(1);
+    expect("recipient" in loaded[0]).toBe(false);
+    expect(isSendReminder(loaded[0])).toBe(false);
   });
 });
