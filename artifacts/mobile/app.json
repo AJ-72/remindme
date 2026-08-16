@@ -28,7 +28,8 @@
         "android.permission.USE_EXACT_ALARM",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_CONTACTS"
       ],
       "package": "com.curios.remindme",
       "adaptiveIcon": {
@@ -48,6 +49,12 @@
       ],
       "expo-font",
       "expo-web-browser",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Reminders uses your contacts so you can pick who a reminder is about. Contacts stay on your device and are never uploaded."
+        }
+      ],
       [
         "expo-notifications",
         {
