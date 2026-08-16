@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { Reminder, useReminders } from "@/contexts/RemindersContext";
+import { isSendReminder } from "@/services/ReminderService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
 
@@ -88,6 +89,23 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
       color: reminder.completed ? colors.mutedForeground : colors.foreground,
       textDecorationLine: reminder.completed ? "line-through" : "none",
     },
+    recipientChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      alignSelf: "flex-start",
+      gap: 4,
+      marginTop: 6,
+      paddingVertical: 3,
+      paddingHorizontal: 8,
+      borderRadius: 999,
+      backgroundColor: colors.primary + "1A",
+      maxWidth: "100%",
+    },
+    recipientChipText: {
+      fontSize: 11,
+      color: colors.primary,
+      flexShrink: 1,
+    },
     description: {
       fontSize: 13,
       color: colors.mutedForeground,
@@ -135,7 +153,12 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
               {reminder.title}
             </Text>
             {reminder.alarm === false && (
-              <Feather name="bell-off" size={13} color={colors.mutedForeground} />
+              <Feather
+                testID="alarm-off-icon"
+                name="bell-off"
+                size={13}
+                color={colors.mutedForeground}
+              />
             )}
           </View>
           {!!reminder.description && (
@@ -148,6 +171,26 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
             >
               {reminder.description}
             </Text>
+          )}
+
+          {isSendReminder(reminder) && reminder.recipient && (
+            <View style={styles.recipientChip} testID="recipient-chip">
+              <Feather name="send" size={11} color={colors.primary} />
+              <Text
+                style={[
+                  styles.recipientChipText,
+                  {
+                    fontFamily: getFontFamily(
+                      reminder.recipient.name,
+                      "600SemiBold"
+                    ),
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {reminder.recipient.name}
+              </Text>
+            </View>
           )}
           <View style={styles.timeRow}>
             <Feather

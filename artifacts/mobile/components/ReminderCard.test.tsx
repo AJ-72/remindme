@@ -54,3 +54,52 @@ describe("ReminderCard — font selection", () => {
     expect(flatStyle.fontFamily).toBe("NotoSansMalayalam_600SemiBold");
   });
 });
+
+describe("ReminderCard — send reminders", () => {
+  it("shows the recipient chip for a reminder with a recipient", () => {
+    const { getByTestId, getByText } = renderCard(
+      makeReminder({ recipient: { name: "Priya", phone: "9876543210" } })
+    );
+    expect(getByTestId("recipient-chip")).toBeTruthy();
+    expect(getByText("Priya")).toBeTruthy();
+  });
+
+  it("shows no chip for an ordinary reminder", () => {
+    const { queryByTestId } = renderCard(makeReminder());
+    expect(queryByTestId("recipient-chip")).toBeNull();
+  });
+
+  it("shows no chip when the recipient has an empty phone", () => {
+    // Must match isSendReminder, or the card advertises a send the send screen
+    // cannot perform.
+    const { queryByTestId } = renderCard(
+      makeReminder({ recipient: { name: "Priya", phone: "" } })
+    );
+    expect(queryByTestId("recipient-chip")).toBeNull();
+  });
+
+  it("lets the chip and the bell-off icon coexist", () => {
+    const { getByTestId } = renderCard(
+      makeReminder({
+        alarm: false,
+        recipient: { name: "Priya", phone: "9876543210" },
+      })
+    );
+    expect(getByTestId("recipient-chip")).toBeTruthy();
+    expect(getByTestId("alarm-off-icon")).toBeTruthy();
+  });
+
+  it("renders a Malayalam recipient name in the Malayalam font", () => {
+    const { getByText } = renderCard(
+      makeReminder({ recipient: { name: "പ്രിയ", phone: "9876543210" } })
+    );
+    const el = getByText("പ്രിയ");
+    expect(el.props.style).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fontFamily: expect.stringContaining("NotoSansMalayalam"),
+        }),
+      ])
+    );
+  });
+});
