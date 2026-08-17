@@ -9,6 +9,22 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-17 — Expo Router path types are GENERATED, and splitting a list section silently breaks its header count
+
+Two traps from building M4 Tier 1's UI. Both produce a *plausible* wrong result rather than an obvious failure.
+
+**1. A new route file fails typecheck until Expo regenerates its types.** Adding `app/send-reminder.tsx` and pushing to it gave `TS2820: Type '"/send-reminder"' is not assignable to ... Did you mean '"/add-reminder"'?` — which reads like a typo in the pathname. It is not. Expo Router's typed-routes union lives in the **generated** `artifacts/mobile/.expo/types/router.d.ts`, which does not know about a file the CLI has not seen. Fix: run any Expo CLI command that regenerates types (`npx expo customize tsconfig.json` was enough here) and re-run `tsc`. **Do not "fix" this by casting the pathname or widening the type** — that discards the typed-route guarantee for every route, to work around a stale cache. Same family as the prebuild-generated `android/` trap: the file is a build artefact, not source.
+
+**2. Partitioning a rendered list breaks any count derived from one half.** The home screen's subtitle read `${upcoming.length} upcoming`. Adding a "Sending" section split the incomplete reminders into `sending` + `upcoming`, so creating a send reminder made the visible count **go down**. Nothing errored; the number was simply wrong. **Rule: when splitting one collection into N rendered sections, grep for every consumer of the original variable — headers, counts, empty-state conditions — because each one silently keeps measuring a now-smaller set.** There is a regression test pinning that the subtitle counts both.
+
+**3. A plan's prose can hold tasks its task-table doesn't.** `docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md` specifies widening `scheduleNotification`'s `Pick` to carry `recipient` (so the lock screen reads "Message Priya", not "Reminder!") in its **Data model** section — there is no task for it in the table at the bottom. Working the table alone ships without it. Same shape as the 2026-08-09 header-date gap, where the behaviour was named in a task *title* and absent from its steps. **When executing a plan, read its design sections for requirements, not just its task list.**
+
+**Also worth keeping:** the send screen's invite-nudge toggle appends/removes only the **exact** stored line and **disables itself** when that line is no longer present verbatim. Attempting a fuzzy removal on text the user has edited themselves risks mangling their message — a disabled control is the better failure.
+
+**WHERE:** `app/send-reminder.tsx`, `app/(tabs)/index.tsx`, `components/{ContactPickerModal,ReminderCard}.tsx`, `services/{notificationResponseHandler,ReminderService}.ts`, `.expo/types/router.d.ts` (generated). Commits `32b198d`..`bc31e19`.
+
+---
+
 ## 2026-08-16 — A manual Jest mock does NOT satisfy `tsc`; install the package before the module that imports it
 
 **WHAT:** building M4 Tier 1 (`docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md`). The plan deliberately sequenced T10 (`pnpm add expo-contacts`) **last**, "so it doesn't block T1–T9's testable work". That ordering is wrong: T7 (`services/ContactsService.ts`) does `import * as Contacts from "expo-contacts"`, and while `__mocks__/expo-contacts.ts` makes **Jest** pass, `pnpm run typecheck` still fails on the unresolved module. Had to install `expo-contacts ~15.0.11` before T7.
