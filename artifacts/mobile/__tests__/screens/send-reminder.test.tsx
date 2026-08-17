@@ -1,9 +1,10 @@
 import React from "react";
-import { Linking } from "react-native";
+import { Linking, StyleSheet, useColorScheme } from "react-native";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getLocales } from "expo-localization";
+import lightColors from "@/constants/colors";
 import SendReminderScreen from "@/app/send-reminder";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
@@ -213,5 +214,47 @@ describe("SendReminderScreen", () => {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([]));
     const { findByTestId } = renderScreen();
     expect(await findByTestId("send-not-found")).toBeTruthy();
+  });
+});
+
+describe("dark mode", () => {
+  const mockScheme = useColorScheme as jest.MockedFunction<typeof useColorScheme>;
+
+  afterEach(() => {
+    mockScheme.mockReturnValue("light");
+  });
+
+  it("paints the recipient name with the dark foreground", async () => {
+    mockScheme.mockReturnValue("dark");
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeSendReminder()]));
+    const { findByText } = renderScreen();
+
+    const name = await findByText("Priya");
+    const flat = StyleSheet.flatten(name.props.style);
+    // Assert the LITERAL value, not `=== colors.dark.foreground`: comparing
+    // against the token follows it anywhere, so it would still pass if the
+    // dark palette held light-mode values.
+    expect(flat.color).toBe("#e8e8f0");
+    expect(flat.color).not.toBe(lightColors.light.foreground);
+  });
+
+  it("paints the message input with the dark card surface", async () => {
+    mockScheme.mockReturnValue("dark");
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeSendReminder()]));
+    const { findByTestId } = renderScreen();
+
+    const flat = StyleSheet.flatten((await findByTestId("message-input")).props.style);
+    expect(flat.backgroundColor).toBe("#1c1c25");
+    expect(flat.backgroundColor).not.toBe(lightColors.light.card);
+  });
+
+  it("uses the light palette when the device is in light mode", async () => {
+    mockScheme.mockReturnValue("light");
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeSendReminder()]));
+    const { findByText } = renderScreen();
+
+    const flat = StyleSheet.flatten((await findByText("Priya")).props.style);
+    expect(flat.color).toBe(lightColors.light.foreground);
+    expect(flat.color).not.toBe("#e8e8f0");
   });
 });

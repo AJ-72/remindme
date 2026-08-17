@@ -163,8 +163,8 @@ export default function SendReminderScreen() {
     toggleHint: { fontSize: 12, color: colors.mutedForeground, marginTop: 2 },
     notice: {
       fontSize: 13,
-      color: colors.warningSurfaceForeground ?? colors.mutedForeground,
-      backgroundColor: colors.warningSurface ?? colors.muted,
+      color: colors.warningSurfaceForeground,
+      backgroundColor: colors.warningSurface,
       borderRadius: 10,
       padding: 12,
       lineHeight: 18,
