@@ -35,6 +35,7 @@ function makeDeps() {
     scheduleSnoozeNotification: jest.fn().mockResolvedValue("new-notif"),
     updateSnoozeById: jest.fn().mockResolvedValue(undefined),
     navigateToDetail: jest.fn(),
+    navigateToSend: jest.fn(),
     getSnoozePreset: jest
       .fn()
       .mockResolvedValue({ kind: "minutes", minutes: 15 } as const),
@@ -195,5 +196,70 @@ describe("handleNotificationResponse", () => {
       deps
     );
     expect(deps.navigateToDetail).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("routing a body tap by reminder kind", () => {
+  it("opens the send screen when the stored reminder has a recipient", async () => {
+    const deps = makeDeps();
+    deps.loadReminderById.mockResolvedValue({
+      id: "r1",
+      title: "T",
+      description: "",
+      datetime: new Date().toISOString(),
+      completed: false,
+      recipient: { name: "Priya", phone: "9876543210" },
+    });
+    await handleNotificationResponse(makeResponse(DEFAULT_ACTION_IDENTIFIER), deps);
+    expect(deps.navigateToSend).toHaveBeenCalledWith("r1");
+    expect(deps.navigateToDetail).not.toHaveBeenCalled();
+  });
+
+  it("opens the detail screen for an ordinary reminder", async () => {
+    const deps = makeDeps();
+    await handleNotificationResponse(makeResponse(DEFAULT_ACTION_IDENTIFIER), deps);
+    expect(deps.navigateToDetail).toHaveBeenCalledWith("r1", { openSnoozeSheet: false });
+    expect(deps.navigateToSend).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the detail screen when the reminder is not found", async () => {
+    // Upgrade safety: a notification scheduled by an older build is still in
+    // the tray and its reminder may since have been deleted.
+    const deps = makeDeps();
+    deps.loadReminderById.mockResolvedValue(undefined);
+    await handleNotificationResponse(makeResponse(DEFAULT_ACTION_IDENTIFIER), deps);
+    expect(deps.navigateToDetail).toHaveBeenCalledWith("r1", { openSnoozeSheet: false });
+    expect(deps.navigateToSend).not.toHaveBeenCalled();
+  });
+
+  it("routes to detail when the recipient carries no usable phone", async () => {
+    const deps = makeDeps();
+    deps.loadReminderById.mockResolvedValue({
+      id: "r1",
+      title: "T",
+      description: "",
+      datetime: new Date().toISOString(),
+      completed: false,
+      recipient: { name: "Priya", phone: "" },
+    });
+    await handleNotificationResponse(makeResponse(DEFAULT_ACTION_IDENTIFIER), deps);
+    expect(deps.navigateToDetail).toHaveBeenCalled();
+    expect(deps.navigateToSend).not.toHaveBeenCalled();
+  });
+
+  it("still opens the snooze sheet on the detail screen for a send reminder", async () => {
+    // SNOOZE_MORE is about snoozing, not sending - it must not divert.
+    const deps = makeDeps();
+    deps.loadReminderById.mockResolvedValue({
+      id: "r1",
+      title: "T",
+      description: "",
+      datetime: new Date().toISOString(),
+      completed: false,
+      recipient: { name: "Priya", phone: "9876543210" },
+    });
+    await handleNotificationResponse(makeResponse(SNOOZE_MORE_ACTION_ID), deps);
+    expect(deps.navigateToDetail).toHaveBeenCalledWith("r1", { openSnoozeSheet: true });
+    expect(deps.navigateToSend).not.toHaveBeenCalled();
   });
 });

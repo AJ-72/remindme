@@ -73,6 +73,7 @@ export function buildBackgroundResponseDeps(): NotificationResponseHandlerDeps {
     // app is open; here this must stay an inert no-op rather than throwing and
     // taking down the task before the storage write.
     navigateToDetail: () => {},
+    navigateToSend: () => {},
   };
 }
 

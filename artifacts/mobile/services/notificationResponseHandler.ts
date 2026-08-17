@@ -2,6 +2,7 @@ import {
   MARK_DONE_ACTION_ID,
   SNOOZE_ACTION_ID,
   SNOOZE_MORE_ACTION_ID,
+  isSendReminder,
   type NotificationData,
   type Reminder,
 } from "@/services/ReminderService";
@@ -33,6 +34,7 @@ export interface NotificationResponseHandlerDeps {
     notificationId: string | undefined
   ) => Promise<void>;
   navigateToDetail: (id: string, options: { openSnoozeSheet: boolean }) => void;
+  navigateToSend: (id: string) => void;
   getSnoozePreset: () => Promise<SnoozePreset>;
   loadReminderById: (id: string) => Promise<Reminder | undefined>;
 }
@@ -57,7 +59,16 @@ export async function handleNotificationResponse(
   if (!isNotificationData(data)) return;
 
   if (response.actionIdentifier === deps.defaultActionIdentifier) {
-    deps.navigateToDetail(data.reminderId, { openSnoozeSheet: false });
+    // Read STORAGE, not the notification payload. Notifications already in the
+    // tray at upgrade time carry no send marker, and an unread payload field
+    // that looks authoritative is worse than no field at all. A missing
+    // reminder falls back to the detail screen, which handles not-found.
+    const stored = await deps.loadReminderById(data.reminderId);
+    if (stored && isSendReminder(stored)) {
+      deps.navigateToSend(data.reminderId);
+    } else {
+      deps.navigateToDetail(data.reminderId, { openSnoozeSheet: false });
+    }
     return;
   }
 

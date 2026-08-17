@@ -33,6 +33,9 @@ export default function NotificationResponseHandler() {
       updateSnoozeById,
       getSnoozePreset,
       loadReminderById,
+      navigateToSend: (id: string) => {
+        router.push({ pathname: "/send-reminder", params: { id } });
+      },
       navigateToDetail: (id: string, options: { openSnoozeSheet: boolean }) => {
         router.push({
           pathname: "/reminder-detail",
