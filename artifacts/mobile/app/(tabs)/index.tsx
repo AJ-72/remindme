@@ -15,7 +15,8 @@ import ConfirmSheet from "@/components/ConfirmSheet";
 import QuickAddInput from "@/components/QuickAddInput";
 import ReminderCard from "@/components/ReminderCard";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
-import { useReminders } from "@/contexts/RemindersContext";
+import { useReminders, type Reminder } from "@/contexts/RemindersContext";
+import { isSendReminder } from "@/services/ReminderService";
 import { useColors } from "@/hooks/useColors";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
 
@@ -26,14 +27,19 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
-  const { upcoming, completed } = useMemo(() => {
-    const upcoming = reminders
-      .filter((r) => !r.completed)
-      .sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
+  const { upcoming, sending, completed } = useMemo(() => {
+    const byDateAsc = (a: Reminder, b: Reminder) =>
+      new Date(a.datetime).getTime() - new Date(b.datetime).getTime();
+    // Sending and Upcoming partition the incomplete reminders, so nothing can
+    // appear in two sections. Completed keeps everything, send or not, so a
+    // sent reminder stays where the user expects to find it.
+    const incomplete = reminders.filter((r) => !r.completed);
+    const sending = incomplete.filter(isSendReminder).sort(byDateAsc);
+    const upcoming = incomplete.filter((r) => !isSendReminder(r)).sort(byDateAsc);
     const completed = reminders
       .filter((r) => r.completed)
       .sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
-    return { upcoming, completed };
+    return { upcoming, sending, completed };
   }, [reminders]);
 
   const handleDelete = (id: string) => {
@@ -200,7 +206,12 @@ export default function HomeScreen() {
               </Text>
             </View>
             <Text style={styles.headerSubtitle}>
-              {upcoming.length === 0 ? "All caught up!" : `${upcoming.length} upcoming`}
+              {/* Counts BOTH sections: they partition the incomplete
+                  reminders, so counting only `upcoming` would under-report
+                  the moment a send reminder exists. */}
+              {upcoming.length + sending.length === 0
+                ? "All caught up!"
+                : `${upcoming.length + sending.length} upcoming`}
             </Text>
           </View>
           <View style={styles.headerAvatar} />
@@ -245,9 +256,34 @@ export default function HomeScreen() {
               </>
             )}
 
+            {sending.length > 0 && (
+              <>
+                <View
+                  style={[
+                    styles.sectionHeaderRow,
+                    { marginTop: upcoming.length > 0 ? 12 : 6 },
+                  ]}
+                >
+                  <Text style={styles.sectionHeaderLabel}>Sending</Text>
+                  <Text style={styles.sectionCount}>{sending.length}</Text>
+                </View>
+                {sending.map((r) => (
+                  <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
+                ))}
+              </>
+            )}
+
             {completed.length > 0 && (
               <>
-                <View style={[styles.sectionHeaderRow, { marginTop: upcoming.length > 0 ? 12 : 6 }]}>
+                <View
+                  style={[
+                    styles.sectionHeaderRow,
+                    {
+                      marginTop:
+                        upcoming.length > 0 || sending.length > 0 ? 12 : 6,
+                    },
+                  ]}
+                >
                   <Text style={styles.sectionHeaderLabel}>Completed</Text>
                   <Text style={styles.sectionCount}>{completed.length}</Text>
                 </View>

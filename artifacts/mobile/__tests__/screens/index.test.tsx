@@ -178,3 +178,72 @@ describe("HomeScreen", () => {
     });
   });
 });
+
+describe("HomeScreen — Sending section", () => {
+  it("puts an incomplete send reminder in Sending, not Upcoming", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({ id: "s1", title: "Message Priya", recipient: { name: "Priya", phone: "9876543210" } }),
+        makeReminder({ id: "p1", title: "Buy milk" }),
+      ])
+    );
+    const { findByText, getAllByText } = renderScreen();
+    expect(await findByText("Sending")).toBeTruthy();
+    // Each reminder appears exactly once across all sections.
+    expect(getAllByText("Message Priya")).toHaveLength(1);
+    expect(getAllByText("Buy milk")).toHaveLength(1);
+  });
+
+  it("hides the Sending section when there are no send reminders", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ id: "p1", title: "Buy milk" })])
+    );
+    const { findByText, queryByText } = renderScreen();
+    await findByText("Buy milk");
+    expect(queryByText("Sending")).toBeNull();
+  });
+
+  it("keeps a completed send reminder in Completed, not Sending", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          id: "s1",
+          title: "Message Priya",
+          completed: true,
+          recipient: { name: "Priya", phone: "9876543210" },
+        }),
+      ])
+    );
+    const { findByText, queryByText, getAllByText } = renderScreen();
+    await findByText("Completed");
+    expect(queryByText("Sending")).toBeNull();
+    expect(getAllByText("Message Priya")).toHaveLength(1);
+  });
+
+  it("treats a recipient with no usable phone as an ordinary reminder", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({ id: "s1", title: "No phone", recipient: { name: "X", phone: "" } }),
+      ])
+    );
+    const { findByText, queryByText } = renderScreen();
+    await findByText("No phone");
+    expect(queryByText("Sending")).toBeNull();
+  });
+
+  it("counts send reminders in the header subtitle alongside upcoming ones", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({ id: "s1", title: "Message Priya", recipient: { name: "Priya", phone: "9876543210" } }),
+        makeReminder({ id: "p1", title: "Buy milk" }),
+      ])
+    );
+    const { findByText } = renderScreen();
+    expect(await findByText("2 upcoming")).toBeTruthy();
+  });
+});
