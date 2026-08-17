@@ -50,6 +50,10 @@ function RootLayoutNav() {
         options={{ headerShown: false, presentation: "modal" }}
       />
       <Stack.Screen
+        name="send-reminder"
+        options={{ headerShown: false, presentation: "modal" }}
+      />
+      <Stack.Screen
         name="reminder-detail"
         options={{ headerShown: false, presentation: "modal" }}
       />
