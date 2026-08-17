@@ -113,6 +113,26 @@ hand control back to the OS; the choice must survive an app restart; and
 force a crash (if there's a convenient way) to confirm the error screen
 honours the chosen theme rather than reverting.
 
+**D9. Remind-someone-else Tier 1, end to end** *(new 2026-08-17 — nothing below is reachable from Jest)*
+
+Needs a **native build** (`expo-contacts` has no OTA path). Walk through:
+create a reminder with a recipient a minute out -> lock the phone -> tap the
+notification when it fires (confirm the body reads "Message <name>", not
+"Reminder!") -> confirm the send screen opens with the message and the invite
+line -> toggle the invite off and watch the preview update -> send on WhatsApp
+-> return -> confirm the reminder is still under "Sending" -> mark done ->
+confirm it moves to Completed.
+
+Specifically unproven: `wa.me` opening WhatsApp rather than a browser (test on
+a device where WhatsApp was installed *after* this app — Android App Links
+verification is a real failure mode); WhatsApp actually pre-filling the text;
+the "number not on WhatsApp" path; `sms:` pre-fill across Samsung Messages,
+Google Messages and iOS Messages; the contacts permission dialog and the
+denied-then-re-granted path; contacts list scrolling at 1000+ contacts; and the
+notification tap from a **cold start** (Jest covers only the foreground
+listener). Also confirm READ_CONTACTS does not trip Play Store review — the
+in-app rationale doubles as the justification.
+
 **D7. OEM battery-killer survival** — do scheduled alarms fire at all on
 Xiaomi/Oppo/Vivo with battery optimization at its default aggressive setting?
 This is the cross-cutting risk behind D1 and D4 and is currently a blind spot;
@@ -141,7 +161,7 @@ M3. **Location-based reminders** - "remind me when I reach home / leave office /
 
 M4. **Remind someone else** - remind another person/contact, or a group ("remind my husband/kids/parents"). Split into two tiers after a design interview on 2026-08-09:
 
-- **Tier 1 — PLANNED, not started.** Plan: [`docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md`](docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md). At reminder time the *sender's* phone rings; they tap and send a pre-filled WhatsApp/SMS message. Entirely on-device — no backend, no accounts, no push tokens. Recipient picked from phone contacts; outgoing messages carry a witty app invite (capped at 3 per person) which is what makes Tier 2 viable later. **Honest framing that constrains all copy: this is "remind me to message someone", not "remind someone else" — the recipient's phone never rings.** 14 TDD tasks; adding `expo-contacts` needs a new native build (no OTA).
+- **Tier 1 — BUILT 2026-08-17, NOT YET DEVICE-VERIFIED (see D9).** All 14 tasks done; 567 tests green, typecheck clean. Ships a `recipient?` on `Reminder` (+ `isSendReminder`), send-time phone normalization (`utils/phoneNumber.ts`, region-derived country code), three-stage capped invite nudges (`utils/inviteNudges.ts`), `services/messageLinks.ts` (wa.me + `sms:`), a contact picker, a "Sending" home section, a recipient chip, `app/send-reminder.tsx`, and notification routing that reads storage rather than the payload. **Needs a native build — `expo-contacts` is not OTA-able.** Plan: [`docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md`](docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md). At reminder time the *sender's* phone rings; they tap and send a pre-filled WhatsApp/SMS message. Entirely on-device — no backend, no accounts, no push tokens. Recipient picked from phone contacts; outgoing messages carry a witty app invite (capped at 3 per person) which is what makes Tier 2 viable later. **Honest framing that constrains all copy: this is "remind me to message someone", not "remind someone else" — the recipient's phone never rings.** 14 TDD tasks; adding `expo-contacts` needs a new native build (no OTA).
 - **Tier 2 — deferred, needs its own design.** True app-to-app delivery with acknowledgement flowing back, for recipients who install the app. This is the part that cannot be built on-device: it needs push tokens, an account/identity model, auth, and a deployed server. None exist today — verified 2026-08-09 that the API server has exactly one endpoint (`GET /api/healthz`) and `lib/db/src/schema/index.ts` defines zero tables. So this is also the feature that would finally wire up the API server and `lib/db` (see CLAUDE.md). Tier 1's data model deliberately keeps `recipient` an *object* so `appUserId`/`deliveryStatus`/`acknowledgedAt` can be added as purely additive optional fields.
 
 M5. **Integrate with other apps / forward-to-remind** - create a reminder by forwarding or sharing from WhatsApp, Google Calendar, email, etc. Partially built: `expo-share-intent` already handles shared text, URLs, and audio (WhatsApp voice notes → transcription), see `contexts/SharedTextContext.tsx` and backlog item 2. Still open: images (item 2), calendar integration (item 3 — "Integrate with calendars?", which should be folded in here or explicitly split into read-events vs. create-reminder-from-event), and a general review of which apps' share payloads are worth first-class handling. Consolidates items 2 and 3 rather than replacing them.
