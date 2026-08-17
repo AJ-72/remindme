@@ -13,6 +13,12 @@ export const getAllScheduledNotificationsAsync = jest
 export const dismissNotificationAsync = jest
   .fn()
   .mockResolvedValue(undefined);
+// Defaults to empty, like getAllScheduledNotificationsAsync above; a test that
+// needs the delivered-copy sweep in dismissDeliveredForReminder mocks a
+// resolved value with real notification shapes.
+export const getPresentedNotificationsAsync = jest
+  .fn()
+  .mockResolvedValue([] as unknown[]);
 export const requestPermissionsAsync = jest
   .fn()
   .mockResolvedValue({ status: "granted" });

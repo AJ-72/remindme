@@ -9,6 +9,28 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-17 — Completing a reminder was the one path that never swept its orphans, and completion is the last chance to
+
+**Symptom (latent, not yet device-reported):** a reminder marked done — from the notification's Mark Done button or the in-app checkbox — can still fire afterwards, and a second copy can stay sitting in the tray after completion.
+
+**ROOT CAUSE:** the three paths that *retire* a reminder's alarm (`markDoneById`, `toggleComplete`, `deleteReminder`) cancelled only `target.notificationId`. The three that *replace* one (`snoozeReminder`, `rescheduleAllFutureReminders`, and the snooze branch of `handleNotificationResponse`) all sweep by payload via `cancelScheduledForReminder`. That asymmetry was the bug: the stored id is a handle on exactly ONE notification, so any orphan the reminder picked up (both earlier orphan-producing paths — 2026-08-09 and 2026-08-15 — are fixed going forward, but devices in the field still carry their output) survived completion untouched.
+
+**Why completion specifically:** `rescheduleAllFutureReminders` is the sweep that heals orphans on the 15-minute background cycle, and its first guard is `if (reminder.completed || deliveryTime <= now) return reminder;`. So the moment a reminder is completed, **every orphan still armed for it becomes permanently unreachable** — no later pass will ever look at it again — and it fires on schedule for a reminder the user has already ticked off. Marking done is the last moment the sweep can run, not just another place it would be nice to have.
+
+**FIX:** `clearNotificationsForReminder(reminderId, notificationId)` in `ReminderService.ts`, called by all three retiring paths. It runs `cancelScheduledForReminder` (pending triggers, by payload), the new `dismissDeliveredForReminder` (tray copies, by payload) and `cancelNotification` (the stored id) in that order. Replacing paths deliberately still do their own sweeping — they need to control ordering around the new schedule, and sweeping after it would cancel the notification they just created.
+
+**`dismissDeliveredForReminder` is the tray-side counterpart nothing had:** `cancelScheduledNotificationAsync` only stops a *pending* trigger and cannot un-deliver a notification, so a delivered duplicate needed `getPresentedNotificationsAsync()` + `dismissNotificationAsync` to reach it. Sweeping delivered notifications by payload had no equivalent anywhere in the service before this.
+
+**Deliberately not changed:** `toggleComplete` still sweeps only in its `!target.completed` branch — un-completing re-opens a reminder without rescheduling, so sweeping there would cancel notifications it is about to want back. There is a test pinning that.
+
+**Testing note, second occurrence of the same trap:** `getPresentedNotificationsAsync` was not in `__mocks__/expo-notifications.ts`, so the new sweep would have silently no-opped in tests while reading as correct — exactly the note left on `getAllScheduledNotificationsAsync` in the 2026-08-09 entry. **Adding a notification API call means adding its mock export in the same change.**
+
+**Still needs a device (extends D3):** all of this is Jest-level. Unproven on hardware: that Mark Done from the tray with the app fully closed reaches the sweep through the headless TaskManager path, and that a completed reminder carrying an orphan genuinely goes quiet.
+
+**WHERE:** `services/ReminderService.ts`, `__mocks__/expo-notifications.ts`, `services/ReminderService.test.ts`.
+
+---
+
 ## 2026-08-17 — Expo Router path types are GENERATED, and splitting a list section silently breaks its header count
 
 Two traps from building M4 Tier 1's UI. Both produce a *plausible* wrong result rather than an obvious failure.

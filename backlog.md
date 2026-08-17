@@ -86,7 +86,13 @@ fix will look like it failed. See the 2026-08-09 ledger entry.
 
 **D3. Mark Done / Snooze from a notification with the app fully closed** —
 the TaskManager path (`tasks/notificationResponseTask.ts`). Jest covers the
-listener only.
+listener only. *(extended 2026-08-17)* Also confirm a completed reminder then
+stays quiet: `markDoneById`/`toggleComplete`/`deleteReminder` previously
+cancelled only the stored `notificationId` and left any orphan armed, which
+completion makes permanently unreachable — see the 2026-08-17 ledger entry.
+Best test is a reminder that already carries a duplicate; barring that, mark one
+done from the tray with the app killed and confirm nothing fires at its original
+time.
 
 **D4. Duplicate notifications** — the `ALARM_EARLY_OFFSET_MS` fix. Needs a
 reminder left to fire naturally, ideally across a background-fetch cycle.

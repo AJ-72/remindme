@@ -14,6 +14,7 @@ import {
   buildBackupJson,
   importRemindersFromJson,
   cancelScheduledForReminder,
+  dismissDeliveredForReminder,
   channelIdForAlarm,
   getVibrationEnabled,
   setVibrationEnabled,
@@ -59,6 +60,7 @@ import {
   requestPermissionsAsync,
   setNotificationCategoryAsync,
   getAllScheduledNotificationsAsync,
+  getPresentedNotificationsAsync,
 } from "expo-notifications";
 
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
@@ -473,6 +475,139 @@ describe("cancelScheduledForReminder", () => {
 
     await expect(cancelScheduledForReminder("r1")).resolves.toBeUndefined();
     expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("good");
+  });
+});
+
+describe("dismissDeliveredForReminder", () => {
+  const makeDelivered = (identifier: string, reminderId: string) => ({
+    request: { identifier, content: { data: { reminderId } } },
+  });
+
+  it("dismisses every delivered notification carrying the reminder id", async () => {
+    (getPresentedNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      makeDelivered("orphan-1", "r1"),
+      makeDelivered("current", "r1"),
+      makeDelivered("other-reminder", "r2"),
+    ]);
+
+    await dismissDeliveredForReminder("r1");
+
+    expect(dismissNotificationAsync).toHaveBeenCalledWith("orphan-1");
+    expect(dismissNotificationAsync).toHaveBeenCalledWith("current");
+    expect(dismissNotificationAsync).not.toHaveBeenCalledWith("other-reminder");
+  });
+
+  it("does nothing when no delivered notification matches", async () => {
+    (getPresentedNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      makeDelivered("other", "r2"),
+    ]);
+
+    await dismissDeliveredForReminder("r1");
+
+    expect(dismissNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it("tolerates malformed entries without throwing", async () => {
+    (getPresentedNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      null,
+      { request: { identifier: "no-data" } },
+      { request: { content: { data: { reminderId: "r1" } } } }, // no identifier
+      makeDelivered("good", "r1"),
+    ]);
+
+    await expect(dismissDeliveredForReminder("r1")).resolves.toBeUndefined();
+    expect(dismissNotificationAsync).toHaveBeenCalledWith("good");
+  });
+});
+
+// The stored notificationId is a handle on ONE notification. A reminder that
+// ever picked up a duplicate (see the 2026-08-09 and 2026-08-15 ledger entries)
+// has copies that handle cannot reach, and rescheduleAllFutureReminders' sweep
+// skips completed reminders — so anything left armed at completion time is
+// permanently unreachable and still fires. Every path that retires a reminder's
+// alarm for good must therefore sweep by payload, not by the stored id.
+describe("retiring a reminder sweeps its orphans", () => {
+  const scheduled = (identifier: string, reminderId: string) => ({
+    identifier,
+    content: { data: { reminderId } },
+  });
+  const delivered = (identifier: string, reminderId: string) => ({
+    request: { identifier, content: { data: { reminderId } } },
+  });
+
+  it("markDoneById cancels an orphan the stored id cannot reach", async () => {
+    const r = makeReminder({ id: "r1", notificationId: "notif-r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    (getAllScheduledNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      scheduled("orphan-1", "r1"),
+      scheduled("notif-r1", "r1"),
+    ]);
+
+    await markDoneById("r1");
+
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("orphan-1");
+  });
+
+  it("markDoneById dismisses a delivered duplicate left in the tray", async () => {
+    const r = makeReminder({ id: "r1", notificationId: "notif-r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    (getPresentedNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      delivered("orphan-1", "r1"),
+    ]);
+
+    await markDoneById("r1");
+
+    expect(dismissNotificationAsync).toHaveBeenCalledWith("orphan-1");
+  });
+
+  it("toggleComplete marking done cancels an orphan the stored id cannot reach", async () => {
+    const r = makeReminder({ id: "r1", completed: false, notificationId: "notif-r1" });
+    (getAllScheduledNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      scheduled("orphan-1", "r1"),
+    ]);
+
+    await toggleComplete([r], "r1");
+
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("orphan-1");
+  });
+
+  // Un-completing re-opens the reminder without rescheduling, so there is
+  // nothing to retire — sweeping here would be cancelling notifications the
+  // reminder is about to want back.
+  it("toggleComplete does not sweep when re-opening a completed reminder", async () => {
+    const r = makeReminder({ id: "r1", completed: true, notificationId: "notif-r1" });
+
+    await toggleComplete([r], "r1");
+
+    expect(getAllScheduledNotificationsAsync).not.toHaveBeenCalled();
+    expect(getPresentedNotificationsAsync).not.toHaveBeenCalled();
+  });
+
+  it("deleteReminder cancels an orphan the stored id cannot reach", async () => {
+    const r = makeReminder({ id: "r1", notificationId: "notif-r1" });
+    (getAllScheduledNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      scheduled("orphan-1", "r1"),
+    ]);
+
+    await deleteReminder([r], "r1");
+
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("orphan-1");
+  });
+
+  it("leaves another reminder's notifications alone", async () => {
+    const r = makeReminder({ id: "r1", notificationId: "notif-r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    (getAllScheduledNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      scheduled("notif-r2", "r2"),
+    ]);
+    (getPresentedNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      delivered("delivered-r2", "r2"),
+    ]);
+
+    await markDoneById("r1");
+
+    expect(cancelScheduledNotificationAsync).not.toHaveBeenCalledWith("notif-r2");
+    expect(dismissNotificationAsync).not.toHaveBeenCalledWith("delivered-r2");
   });
 });
 

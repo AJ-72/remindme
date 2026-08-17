@@ -495,6 +495,56 @@ export async function cancelScheduledForReminder(reminderId: string): Promise<vo
   } catch {}
 }
 
+/**
+ * Dismisses every DELIVERED notification carrying this reminderId.
+ *
+ * The tray-side counterpart to cancelScheduledForReminder: that one sweeps
+ * pending triggers, this one sweeps copies already sitting in the tray, which
+ * cancelling can no longer touch. Same reason for existing — a reminder that
+ * picked up a duplicate has a copy the stored notificationId cannot reach.
+ */
+export async function dismissDeliveredForReminder(
+  reminderId: string
+): Promise<void> {
+  if (Platform.OS === "web" || !Notifications) return;
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    if (!Array.isArray(presented)) return;
+    for (const notification of presented) {
+      const data = notification?.request?.content?.data as
+        | NotificationData
+        | undefined;
+      if (data?.reminderId !== reminderId) continue;
+      const identifier = notification?.request?.identifier;
+      if (!identifier) continue;
+      try {
+        await Notifications.dismissNotificationAsync(identifier);
+      } catch {}
+    }
+  } catch {}
+}
+
+/**
+ * Retires every notification a reminder still owns — pending triggers and
+ * delivered copies alike, orphans included.
+ *
+ * Use on any path that ends a reminder's alarm for good (mark done, complete,
+ * delete). Sweeping by payload rather than by the stored id is what makes an
+ * orphan recoverable, and completion is the last chance to catch one:
+ * rescheduleAllFutureReminders skips completed reminders, so anything still
+ * armed when a reminder is completed is unreachable from then on and fires
+ * anyway. Paths that REPLACE an alarm (snooze, reschedule) sweep too, but keep
+ * their own ordering around the new schedule and so don't use this.
+ */
+export async function clearNotificationsForReminder(
+  reminderId: string,
+  notificationId?: string
+): Promise<void> {
+  await cancelScheduledForReminder(reminderId);
+  await dismissDeliveredForReminder(reminderId);
+  await cancelNotification(notificationId);
+}
+
 export async function cancelNotification(
   notificationId?: string
 ): Promise<void> {
@@ -646,7 +696,7 @@ export async function deleteReminder(
   id: string
 ): Promise<Reminder[]> {
   const target = current.find((r) => r.id === id);
-  await cancelNotification(target?.notificationId);
+  await clearNotificationsForReminder(id, target?.notificationId);
   const reminders = current.filter((r) => r.id !== id);
   await saveReminders(reminders);
   return reminders;
@@ -659,7 +709,7 @@ export async function toggleComplete(
   const target = current.find((r) => r.id === id);
   if (!target) return current;
   if (!target.completed) {
-    await cancelNotification(target.notificationId);
+    await clearNotificationsForReminder(id, target.notificationId);
   }
   const reminders = current.map((r) =>
     r.id === id
@@ -751,7 +801,7 @@ export async function markDoneById(id: string): Promise<void> {
   const reminders = await loadReminders();
   const target = reminders.find((r) => r.id === id);
   if (!target) return;
-  await cancelNotification(target.notificationId);
+  await clearNotificationsForReminder(id, target.notificationId);
   const updated = reminders.map((r) =>
     r.id === id ? { ...r, completed: true, notificationId: undefined } : r
   );
