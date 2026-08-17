@@ -416,7 +416,10 @@ export function channelIdForAlarm(alarm: boolean, vibrate: boolean = true): stri
 }
 
 export async function scheduleNotification(
-  reminder: Pick<Reminder, "title" | "description" | "datetime" | "alarm">,
+  reminder: Pick<
+    Reminder,
+    "title" | "description" | "datetime" | "alarm" | "recipient"
+  >,
   reminderId: string
 ): Promise<string | undefined> {
   if (!Notifications) return undefined;
@@ -431,7 +434,12 @@ export async function scheduleNotification(
     );
     const alarmOn = reminder.alarm !== false;
     const channelId = channelIdForAlarm(alarmOn, await getVibrationEnabled());
-    const body = await resolveNotificationBody(reminder.description);
+    // A send reminder says who to message. This wins over the description,
+    // which is consent-gated and would otherwise bury the one fact that makes
+    // the notification actionable from the lock screen.
+    const body = isSendReminder(reminder as Reminder)
+      ? `Message ${reminder.recipient!.name}`
+      : await resolveNotificationBody(reminder.description);
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: reminder.title,

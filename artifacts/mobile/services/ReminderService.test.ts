@@ -1114,3 +1114,53 @@ describe("global invite nudge setting", () => {
     expect(await getInviteNudgeEnabled()).toBe(true);
   });
 });
+
+describe("send reminder notification body", () => {
+  it("says who to message instead of the generic Reminder! body", async () => {
+    await addReminder([], {
+      title: "Pick up milk",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+      recipient: { name: "Priya", phone: "9876543210" },
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.body).toBe("Message Priya");
+  });
+
+  it("leaves an ordinary reminder's body alone", async () => {
+    await addReminder([], {
+      title: "Pick up milk",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.body).toBe("Reminder!");
+  });
+
+  it("prefers the recipient body over a description, which is consent-gated", async () => {
+    await setShowDescriptionEnabled(true);
+    await addReminder([], {
+      title: "Pick up milk",
+      description: "Two litres",
+      datetime: FUTURE,
+      alarm: true,
+      recipient: { name: "Priya", phone: "9876543210" },
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.body).toBe("Message Priya");
+  });
+
+  it("ignores a recipient with no usable phone", async () => {
+    await addReminder([], {
+      title: "Pick up milk",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+      recipient: { name: "Priya", phone: "  " },
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.body).toBe("Reminder!");
+  });
+});
