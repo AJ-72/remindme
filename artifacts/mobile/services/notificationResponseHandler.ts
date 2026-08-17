@@ -23,7 +23,17 @@ export interface NotificationResponseLike {
 export interface NotificationResponseHandlerDeps {
   defaultActionIdentifier: string;
   lastHandledId: { current: string | null };
+  /**
+   * Cross-process dedupe. `lastHandledId` only covers repeat calls inside one
+   * JS context; these two cover the headless task and the foreground listener
+   * seeing the same response, and the cold-start replay of it.
+   */
+  hasHandledResponse: (identifier: string) => Promise<boolean>;
+  markResponseHandled: (identifier: string) => Promise<void>;
   markDoneById: (id: string) => Promise<void>;
+  /** Sweeps every pending notification carrying this reminderId. */
+  cancelScheduledForReminder: (reminderId: string) => Promise<void>;
+  cancelNotification: (notificationId?: string) => Promise<void>;
   scheduleSnoozeNotification: (
     data: NotificationData,
     target: Date
@@ -54,9 +64,15 @@ export async function handleNotificationResponse(
   const notificationIdentifier = response.notification.request.identifier;
   if (deps.lastHandledId.current === notificationIdentifier) return;
   deps.lastHandledId.current = notificationIdentifier;
+  // A response can reach us from the headless task, from the live listener, and
+  // again from getLastNotificationResponseAsync() on every later cold start.
+  // Only the first one may act.
+  if (await deps.hasHandledResponse(notificationIdentifier)) return;
 
   const data = response.notification.request.content.data;
   if (!isNotificationData(data)) return;
+
+  await deps.markResponseHandled(notificationIdentifier);
 
   if (response.actionIdentifier === deps.defaultActionIdentifier) {
     // Read STORAGE, not the notification payload. Notifications already in the
@@ -87,6 +103,13 @@ export async function handleNotificationResponse(
     const reminder = await deps.loadReminderById(data.reminderId);
     const base = reminder?.datetime ?? new Date().toISOString();
     const target = resolveSnoozeTarget(preset, base, new Date());
+    // Snoozing REPLACES this reminder's alarm, so everything still pending for
+    // it has to go first. Without this, the reminder's original notification
+    // (and any orphan left by an earlier double-handled response) stays armed
+    // and fires alongside the snoozed copy — updateSnoozeById overwrites the
+    // one stored id, so nothing else would ever reach them.
+    await deps.cancelScheduledForReminder(data.reminderId);
+    await deps.cancelNotification(reminder?.notificationId);
     const notificationId = await deps.scheduleSnoozeNotification(data, target);
     await deps.updateSnoozeById(data.reminderId, target.toISOString(), notificationId);
     return;

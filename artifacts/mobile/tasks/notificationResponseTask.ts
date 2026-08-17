@@ -29,12 +29,18 @@ import { Platform } from "react-native";
 import * as TaskManager from "expo-task-manager";
 
 import {
+  cancelNotification,
+  cancelScheduledForReminder,
   getSnoozePreset,
   loadReminderById,
   markDoneById,
   scheduleSnoozeNotification,
   updateSnoozeById,
 } from "@/services/ReminderService";
+import {
+  hasHandledResponse,
+  markResponseHandled,
+} from "@/services/handledResponses";
 import {
   handleNotificationResponse,
   type NotificationResponseHandlerDeps,
@@ -56,6 +62,10 @@ export const NOTIFICATION_RESPONSE_TASK_NAME = "HANDLE_NOTIFICATION_RESPONSE";
  * Deps for the headless path. Deliberately separate from the component's:
  * there is no navigator here, and the dedupe ref is per-invocation rather
  * than per-app-lifetime because each headless wake gets a fresh JS context.
+ * That in-memory ref is exactly why the persisted hasHandledResponse /
+ * markResponseHandled pair matters here — this context and the foreground
+ * listener are handed the same response and can only see each other through
+ * storage.
  */
 export function buildBackgroundResponseDeps(): NotificationResponseHandlerDeps {
   return {
@@ -63,7 +73,11 @@ export function buildBackgroundResponseDeps(): NotificationResponseHandlerDeps {
       Notifications?.DEFAULT_ACTION_IDENTIFIER ??
       "expo.modules.notifications.actions.DEFAULT",
     lastHandledId: { current: null },
+    hasHandledResponse,
+    markResponseHandled,
     markDoneById,
+    cancelScheduledForReminder,
+    cancelNotification,
     scheduleSnoozeNotification,
     updateSnoozeById,
     getSnoozePreset,

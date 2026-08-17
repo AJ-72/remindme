@@ -40,6 +40,29 @@ Two traps from building M4 Tier 1's UI. Both produce a *plausible* wrong result 
 **FIFO-eviction trap:** capping the `@invite_nudge_count_v1` map by deleting the oldest keys evicts the entry you *just wrote* whenever it was already present (JS objects preserve insertion order, and re-assigning an existing key does **not** move it to the end). The write must `delete` then re-add its own key after trimming, or the counter silently resets for the most active contact.
 
 **WHERE:** `services/ReminderService.ts` (`ReminderRecipient`, `isSendReminder`, nudge-count persistence), `utils/phoneNumber.ts`, `utils/inviteNudges.ts`, `services/messageLinks.ts`, `services/ContactsService.ts`, `app.json`. Commits `7aadc29`..`6b7921a`.
+## 2026-08-15 — Notification spam after a snooze: `getLastNotificationResponseAsync()` is not a queue drain
+
+**Symptom:** one Snooze press on a reminder that had already fired produced six identical notifications, all showing "Now".
+
+**ROOT CAUSE — three faults that only spam when combined:**
+
+1. **The snooze branch of `handleNotificationResponse` never cancelled anything.** It scheduled a new notification and called `updateSnoozeById`, which *overwrites* the stored `notificationId`. Whatever that field pointed at before became an orphan — the same orphan class as the 2026-08-09 entry, created on a different path.
+2. **Two handlers, two independent dedupe refs.** The headless TaskManager task (`tasks/notificationResponseTask.ts`, which Android runs whenever the app is not foregrounded) and the React listener (`components/NotificationResponseHandler.tsx`) both receive the same response. Each had its own in-memory `lastHandledId`, so neither could see the other's work — one press, two snoozes.
+3. **`getLastNotificationResponseAsync()` replays.** It is not a drain: it keeps resolving with the *same* response on every launch until a newer response replaces it (expo's own docs describe `clearLastNotificationResponse` as the fix for "it is undesirable to continue selecting the route after the response has already been handled"). The guarding ref is `useRef(null)` recreated on every mount, so each cold start snoozed again. Nothing capped this.
+
+Fault 3 is the multiplier, faults 1+2 turn each replay into a permanently armed extra alarm. `rescheduleAllFutureReminders`' orphan sweep cannot clean these up: it skips any reminder whose delivery time has passed, which is every reminder that has already fired — i.e. exactly the ones being snoozed.
+
+**Why they landed in the same minute:** the copies were staggered across the replays, but expo falls back to inexact `setAndAllowWhileIdle` without the exact-alarm permission (the reason `ExactAlarmBanner` exists), and Android batches deferred inexact alarms into one wake.
+
+**FIX (four parts):**
+1. `services/handledResponses.ts` — AsyncStorage-backed capped ring of handled response identifiers, checked and written inside `handleNotificationResponse`. This is the only dedupe that crosses both the process boundary and app restarts. **Marked before the action runs, deliberately at-most-once**: a crash between the two loses one snooze, which beats unbounded spam.
+2. The snooze branch now calls `cancelScheduledForReminder(reminderId)` **and** `cancelNotification(reminder.notificationId)` before scheduling. Order matters — sweeping after scheduling would cancel the new notification.
+3. The component clears the cold-start response after handling it, so the native side stops re-offering it.
+4. `scheduleSnoozeNotification` clamps its trigger to `max(now, target - offset)`, matching `scheduleNotification`. A DATE trigger in the past is delivered *immediately*, so an unclamped target inside the 60s offset window turned a snooze into an instant re-alert.
+
+**Generalizable rule:** an in-memory dedupe ref is worthless against a replayed OS callback. If the OS can hand you the same event in a fresh JS context — headless task, cold start, process restart — the dedupe has to live in storage, and any handler that *replaces* a scheduled resource must cancel by payload before it creates the replacement.
+
+**Related:** `SUPERSEDES` nothing; the 2026-08-09 duplicate-notification fix was correct but only covered the `rescheduleAllFutureReminders` path.
 
 ---
 

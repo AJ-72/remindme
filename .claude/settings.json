@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .claude/check-learnings-updated.sh 2>/dev/null || true",
+            "statusMessage": "Checking system_learnings.md is up to date..."
+          }
+        ]
+      }
+    ]
+  }
+}
