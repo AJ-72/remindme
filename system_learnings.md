@@ -23,6 +23,7 @@ Established while designing Smart Alerts (`docs/superpowers/specs/2026-08-23-sma
 
 **WHERE:** `utils/reminderBackup.ts` (`parseBackup`, `mergeReminders`, `BackupSettings`, `BACKUP_VERSION`, `isSameReminder`). Commit `a229302`.
 
+---
 
 ## 2026-08-23 — A notification-response dedupe key must include the ACTION, and a screen with no in-app route is a dead screen
 
