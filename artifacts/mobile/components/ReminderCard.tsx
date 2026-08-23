@@ -37,6 +37,14 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
       Animated.timing(scaleAnim, { toValue: 0.97, duration: 80, useNativeDriver: true }),
       Animated.timing(scaleAnim, { toValue: 1, duration: 80, useNativeDriver: true }),
     ]).start(() => {
+      // A send reminder opens the send screen, not the editor. That screen is
+      // where its actions live - WhatsApp/SMS handoff and an explicit "Mark as
+      // done" - and tapping the card was previously the one route that never
+      // reached them, leaving the tray notification as the only way in.
+      if (isSendReminder(reminder)) {
+        router.push({ pathname: "/send-reminder", params: { id: reminder.id } });
+        return;
+      }
       router.push({ pathname: "/add-reminder", params: { id: reminder.id } });
     });
   };
@@ -135,6 +143,7 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
         android_ripple={{ color: colors.muted }}
       >
         <Pressable
+          testID="complete-toggle"
           style={styles.checkButton}
           onPress={handleToggle}
           hitSlop={8}

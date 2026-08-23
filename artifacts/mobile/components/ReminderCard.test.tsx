@@ -1,5 +1,5 @@
 import React from "react";
-import { render } from "@testing-library/react-native";
+import { render, fireEvent, waitFor } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import ReminderCard from "./ReminderCard";
 import { RemindersProvider } from "@/contexts/RemindersContext";
@@ -100,6 +100,40 @@ describe("ReminderCard — send reminders", () => {
           fontFamily: expect.stringContaining("NotoSansMalayalam"),
         }),
       ])
+    );
+  });
+});
+
+describe("ReminderCard — tap routing", () => {
+  const { router } = require("expo-router");
+
+  it("opens the editor for a plain reminder", async () => {
+    const { getByText } = renderCard(makeReminder({ title: "Plain task" }));
+    fireEvent.press(getByText("Plain task"));
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith({
+        pathname: "/add-reminder",
+        params: { id: "r1" },
+      })
+    );
+  });
+
+  // The send screen holds this reminder's only actions - the WhatsApp/SMS
+  // handoff and the explicit "Mark as done". Routing the card to the editor
+  // left a tray notification as the sole way to reach them.
+  it("opens the send screen for a send reminder", async () => {
+    const { getByText } = renderCard(
+      makeReminder({
+        title: "Send task",
+        recipient: { name: "Priya", phone: "9876543210" },
+      })
+    );
+    fireEvent.press(getByText("Send task"));
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith({
+        pathname: "/send-reminder",
+        params: { id: "r1" },
+      })
     );
   });
 });
