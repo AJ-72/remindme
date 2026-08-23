@@ -31,7 +31,7 @@ The obvious build — a completion-rate dashboard with streaks — is the wrong 
 
 ## Non-goals
 
-- **No insights/statistics screen.** Explicitly deferred. Instrumentation lands now so it becomes possible later; the screen itself is out of scope.
+- **No insights/statistics screen.** Explicitly deferred. Instrumentation lands now so it becomes possible later; the screen itself is out of scope. Component 5 ("Why tasks slip") is **not** this — it is fixed editorial content about how procrastination works in general, containing no data about the individual user and no numbers derived from their history.
 - **No completion rate, score, streak, or any aggregate the user could read as a grade.** This is a hard constraint on every surface, not a matter of visual treatment.
 - **No location or activity triggers.** Fixing cause #3 properly means situation-anchored reminders, which is a separate feature requiring new permissions.
 - **No Malayalam vague-task detection.** See "Input fix" below — the English heuristic does not transfer, and machine translation of the prompt copy produces exactly the tone this design exists to avoid. Follows the `INVITE_NUDGES_ML` precedent in `utils/inviteNudges.ts`.
@@ -41,13 +41,15 @@ The obvious build — a completion-rate dashboard with streaks — is the wrong 
 
 ## Build order
 
-The three components deliberately ship in this order:
+The components deliberately ship in this order:
 
 1. **Input fix** — needs no history, so it delivers value immediately.
 2. **Instrumentation** — lands alongside, and quietly accumulates the data the re-nudge needs.
-3. **Smart re-nudge** — built last, on real data.
+3. **Quiet hours** — the setting plus its input-time confirmation. Independently useful, and a hard prerequisite for anything that schedules a second notification.
+4. **"Why tasks slip"** — pure content, no dependencies. Can land any time from here.
+5. **Smart re-nudge, shrink prompt, and check-in** — built last, on real data, and depending on all of the above.
 
-Reversing this means a long release with nothing visible to the user. The input fix is also the only one that addresses a cause at its source rather than after the failure.
+Reversing this means a long release with nothing visible to the user. The input fix is also the only component addressing a cause at its source rather than after the failure.
 
 ---
 
@@ -72,6 +74,7 @@ Added to `Reminder`, all optional so existing records stay valid:
 | `snoozeCount` | number | `snoozeReminder`, incremented; never reset |
 | `originalDatetime` | ISO string | `snoozeReminder`, set once on first snooze only |
 | `nudgesSent` | number | the re-nudge scheduler |
+| `checkInSent` | boolean | the check-in scheduler — guarantees at most one check-in per reminder, ever |
 
 `originalDatetime` is set **once** and never overwritten, so the distance a task has slid from its first intended time stays measurable across many snoozes.
 
@@ -110,7 +113,7 @@ Configurable, defaulting to Gentle.
 
 ### Rules applying at every level
 
-**Quiet hours.** No re-nudge fires between 22:00 and 08:00. One scheduled inside that window is deferred to 08:00, not dropped. If several reminders have rungs deferred across the same night, they collapse into **one** 08:00 notification naming the count ("3 reminders still open") rather than a burst of separate alerts — waking to a stack of overnight notifications is the same fatigue failure quiet hours exist to prevent. Without any of this, the 4-hour rung on an evening reminder fires at 2am.
+**Quiet hours.** No re-nudge fires inside the user's quiet window (see Component 3). One scheduled inside that window is deferred to the window's end, not dropped. If several reminders have rungs deferred across the same night, they collapse into **one** notification at the window's end naming the count ("3 reminders still open") rather than a burst of separate alerts — waking to a stack of overnight notifications is the same fatigue failure quiet hours exist to prevent. Without any of this, the 4-hour rung on an evening reminder fires at 2am.
 
 **The dread override.** A reminder with `snoozeCount >= 3` gets **no further re-nudge notifications at any level, Persistent included.** It has demonstrated that more pings do not work on it. Instead it surfaces the shrink prompt in-app. The setting must not be able to override the evidence; this is the psychological thesis of the feature, not a tunable.
 
@@ -142,9 +145,40 @@ Offers, in this order:
 
 Copy discipline: it names the observation ("This one keeps sliding") and never the user's character. No "you", no counts, no "you've snoozed this 4 times".
 
+It also carries a **"Why does this keep happening?"** link, opening the explainer in Component 5. This is the primary entry point to that content, and the reason it exists: someone reading about avoidance *while looking at a task they have avoided four times* is in a completely different learning state from someone browsing an About page.
+
+### The check-in notification
+
+**This corrects an error in the first draft of this design.** That draft made the shrink prompt in-app only, reasoning that it therefore did not violate Off's promise. That reasoning quietly conceded the prompt is nearly invisible: the person who most needs it is, by definition, the person avoiding the app. A help offer that reaches only the already-engaged reaches nobody who needs it.
+
+The underlying thesis needed sharpening, not abandoning. What backfires is **repeating the demand** — "Call the dentist" for the fifth time re-activates precisely the aversion driving the avoidance. An offer that **lowers the cost** is the opposite act: it shrinks the perceived task instead of raising the pressure. Same channel, opposite psychological direction.
+
+So: **one check-in notification per reminder, ever**, guarded by `checkInSent`. Not a ladder and not repeatable, because a repeated offer of help degrades into nagging.
+
+- **Sent at a neutral moment** — the next morning inside the user's good window, never at the reminder's own scheduled time. That slot is already loaded with dread, and an offer delivered into it inherits the dread.
+- **Its own Android notification channel** ("Check-ins"), separate from the reminder channels, so a user can silence check-ins without losing actual reminders. Silent and low-importance: this is an offer, never an alarm.
+- **Names the task but frames the offer**, never restating the demand. Tapping it opens the shrink prompt.
+- **Counts against the daily ceiling.**
+- **Suppressed entirely at Off.** Off must mean *no notifications*, without exception. A level that still pings you is a lie, and one dishonest exception poisons trust in the whole setting. Off users keep the in-app shrink prompt only — which is a real reduction in the feature's reach for them, and the correct price of an honest setting.
+
 ---
 
-## Component 3 — Input fix
+## Component 3 — Quiet hours
+
+Currently implicit and hardcoded in the rules above; this makes it a real, user-owned setting.
+
+- **User-configurable start and end**, suggested default 22:00–08:00. Suggest, never impose — sleep schedules vary enormously, and a night-shift user's quiet hours may be 09:00–17:00.
+- **Applies automatically to re-nudges and check-ins** (deferred silently — the *app* chose those times, so it needs no permission to move them).
+- **Applies as a confirmation, never a block, to primary reminders.** A reminder the user deliberately set for 23:40 gets: *"That's 23:40, inside your quiet hours. Keep it, or move to 08:00?"* — with **Keep it** as the un-penalised default path. 2am medication and night-shift work are real; an app that refuses to set them is simply broken. This asymmetry is the whole point: the user's explicit choice is confirmed, the app's own choice is silently deferred.
+
+Two implementation traps, both belonging in the pure util:
+
+- **The window wraps midnight.** 22:00–08:00 is not a simple `start <= t && t <= end` comparison, and this is the classic off-by-one in every quiet-hours implementation ever written.
+- **start == end must mean "no quiet hours"**, not "always quiet" — the degenerate case that silently disables every notification the app sends.
+
+---
+
+## Component 4 — Input fix
 
 Detects a vague task at creation and offers a concrete first action before saving. Targets cause #2 at its source.
 
@@ -157,18 +191,46 @@ Lives in `QuickAddInput` and the add/edit screen, as a hint below the input rath
 
 ---
 
+## Component 5 — "Why tasks slip"
+
+The research behind this design, in the app.
+
+The argument for including it at all is not documentation: **the content is itself an intervention.** Learning that procrastination is mood-regulation rather than laziness measurably reduces it, because shame sustains the cycle and self-compassion interrupts it. It runs on the same mechanism as the rest of this feature.
+
+**Structure — progressive disclosure, two layers:**
+
+*Layer 1: four short cards*, each naming one mechanism and one concrete response. Skimmable in about a minute.
+
+1. **It's about mood, not laziness.** Putting it off gives real relief. → Shrink it: do just two minutes.
+2. **"Sort out insurance" isn't a task.** There's no first move to make. → Name the first phone call.
+3. **The clock isn't the problem.** 2pm found you in a meeting. → Move it to when you're actually free.
+4. **Eleven things on a Tuesday.** So none of them happen. → Pick the three that matter.
+
+*Layer 2: the full article with citations*, behind a "Read more" from the cards. The evidence stated properly and attributed, for anyone who wants to check the claims rather than take them on faith.
+
+**Entry points:** primarily the "Why does this keep happening?" link in the shrink prompt (the moment of felt relevance); secondarily a row in Smart Alerts settings for deliberate reading.
+
+**Copy discipline, inherited from the shrink prompt and non-negotiable here:** normalising, never diagnosing. It describes how this works *for everyone*, not what is wrong with the reader. A sentence that could be read as an accusation fails, however accurate.
+
+> **Task for implementation:** every citation must be **verified against the actual paper before shipping** — author, year, title, venue, and that the paper genuinely supports the claim attributed to it. The relevant literature includes Sirois & Pychyl on mood regulation, Steel's meta-analysis on procrastination, Gollwitzer on implementation intentions, and Sirois on self-compassion. These are recalled, not verified, and **shipping a misattributed citation inside a screen whose entire purpose is credibility would be self-defeating.** Do not copy this list into the app unchecked.
+
+---
+
 ## Settings — "Smart Alerts"
 
 A dedicated screen, reached from a prominent row at the **top** of Settings rather than buried among the existing toggles.
 
 > **Open decision:** the request was for a "top level feature". This design puts it at the top of Settings with its own screen, not as a fourth tab — the tab bar is Home/Settings/About, and a settings screen does not earn permanent bottom-bar real estate. Flagging in case a tab was intended.
 
-The screen shows three choices as full-width cards, each with a one-line plain-language description and a concrete example of what it does. No sliders, no minute-pickers, no per-reminder overrides — the whole point is that one choice covers it.
+The screen shows three choices as full-width cards, each with a one-line plain-language description and a concrete example of what it does. No per-reminder overrides — the whole point is that one choice covers it.
 
-Below the choice, a short static footer states the two automatic behaviors, so neither feels like a bug when observed:
+Below the choice, exactly three further rows:
 
-- that nothing arrives overnight;
-- that the app stops sending alerts for tasks you keep postponing, and offers to help instead.
+- **Quiet hours** — start and end pickers, defaulting to 22:00–08:00.
+- **Why tasks slip** — opens the explainer (Component 5).
+- A short static footer stating the one remaining automatic behavior, so it never reads as a bug: that the app stops sending alerts for tasks you keep postponing, and offers to help instead.
+
+Quiet hours is the only control here with any configuration surface, and it earns it because the default is wrong for a meaningful minority of users (night shifts, different sleep schedules) in a way the intensity levels are not.
 
 Name: **Smart Alerts**. "Intelligent alerting" reads as infrastructure; "Smart Alerts" is shorter, is what the user will call it, and fits a settings row without wrapping.
 
@@ -183,9 +245,12 @@ Name: **Smart Alerts**. "Intelligent alerting" reads as infrastructure; "Smart A
 ## Testing
 
 - **Pure logic first.** Ladder computation, quiet-hours deferral, dread override, and daily-ceiling arithmetic all belong in a pure, fully-unit-tested util taking an injected `now` — mirroring `utils/snoozePresets.ts`. No timing-dependent tests.
+- **Quiet-hours edge cases get explicit tests**, because both failure modes are silent: a window **wrapping midnight** (22:00–08:00 — times before start *and* after end are both inside it), and **start == end meaning "never quiet"** rather than "always quiet". A bug in the second disables every notification the app sends, with no error anywhere.
 - **Service tests** for each instrumentation field, including that `originalDatetime` is written once and only once across repeated snoozes, and that un-completing clears `completedAt`.
-- **Backup round-trip tests** proving the new fields survive `serializeBackup` → `parseBackup` → `mergeReminders`.
-- **Screen tests** for the Smart Alerts screen, the shrink prompt at each level (including that it appears on Gentle), and the input hint's advisory/dismissible behavior.
+- **A test that the check-in fires at most once per reminder**, across repeated qualifying conditions. `checkInSent` is the only thing standing between "an offer of help" and "nagging".
+- **A test that Off suppresses the check-in**, since that is the exception most likely to be lost in a later refactor and the one that breaks the setting's promise.
+- **Backup round-trip tests** proving the new fields survive `serializeBackup` → `parseBackup` → `mergeReminders`, and that the new *settings* survive — the `BackupSettings` allow-list is the half that actually drops things.
+- **Screen tests** for the Smart Alerts screen, the shrink prompt at each level (including that it appears on Gentle), the quiet-hours input confirmation offering **Keep it** as a real path, and the input hint's advisory/dismissible behavior.
 - **A regression test that no surface renders a completion rate.** The hardest constraint to keep is the one no test enforces.
 
 ## Risks
@@ -193,3 +258,5 @@ Name: **Smart Alerts**. "Intelligent alerting" reads as infrastructure; "Smart A
 - **Notification fatigue is the failure mode that kills the feature**, and it is invisible in tests. The daily ceiling, the hard stop, and quiet hours are all load-bearing; none should be relaxed without evidence.
 - **The re-nudge cannot be validated locally.** It depends on real scheduling over hours across a device sleep cycle. It needs the same device-verification treatment as backlog item D3, which is still unverified.
 - **`snoozeCount >= 3` as the dread threshold is a guess.** It is a constant, deliberately, so it can be tuned once real data exists.
+- **The check-in is the riskiest notification in the app.** It is unsolicited, it arrives about a task the user is actively avoiding, and its whole value rests on landing as help rather than as nagging — a distinction carried entirely by copy and by firing exactly once. If any single piece of this design warrants real user testing before wide release, it is this one. The `checkInSent` guard and the separate channel are its safety rails; treat both as load-bearing.
+- **The explainer's credibility is all-or-nothing.** A screen that cites research to persuade someone their procrastination is normal fails completely if a citation is wrong, because the reader's reasonable response to one error is to discount the whole thing — including the parts that would have helped.
