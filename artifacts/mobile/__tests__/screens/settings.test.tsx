@@ -1,5 +1,6 @@
 import React from "react";
 import { Share, StyleSheet, useColorScheme } from "react-native";
+import { APP_SHARE_BLURB, buildAppShareMessage } from "@/utils/appShare";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -432,5 +433,19 @@ describe("invite nudge setting", () => {
     // otherwise - this is the top risk on the feature and it is a copy risk.
     const { findByText } = renderScreen();
     expect(await findByText("Mention this app when messaging")).toBeTruthy();
+  });
+});
+
+describe("SettingsScreen — share this app", () => {
+  it("shares the app blurb, with no dead link while the store URL is unset", async () => {
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("share-app-row"));
+
+    await waitFor(() => expect(Share.share).toHaveBeenCalled());
+    const shared = (Share.share as jest.Mock).mock.calls[0][0].message;
+    expect(shared).toBe(buildAppShareMessage());
+    expect(shared).toContain(APP_SHARE_BLURB);
+    // APP_STORE_URL is a documented placeholder until first publish.
+    expect(shared).not.toMatch(/https?:\/\//);
   });
 });

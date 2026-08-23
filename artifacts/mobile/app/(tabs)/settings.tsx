@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { buildAppShareMessage } from "@/utils/appShare";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -73,6 +74,14 @@ export default function SettingsScreen() {
       await Share.share({ message: logsText });
     } catch {
       // user cancelled or sharing isn't available — nothing to do
+    }
+  };
+
+  const shareApp = async () => {
+    try {
+      await Share.share({ message: buildAppShareMessage() });
+    } catch {
+      // User dismissed the sheet, or no share target exists — nothing to say.
     }
   };
 
@@ -495,6 +504,26 @@ export default function SettingsScreen() {
             )}
           </View>
         </View>
+
+        <Pressable
+          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
+          onPress={shareApp}
+          testID="share-app-row"
+        >
+          <Feather name="share-2" size={18} color={colors.mutedForeground} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alarmLabel}>Share this app</Text>
+            <Text style={styles.alarmSubLabel}>
+              Send someone a short note about Reminders and where to get it
+            </Text>
+          </View>
+          <Feather
+            name="chevron-right"
+            size={18}
+            color={colors.mutedForeground}
+            style={styles.chevron}
+          />
+        </Pressable>
 
         <Pressable
           style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
