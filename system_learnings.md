@@ -9,6 +9,20 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-23 — loadReminders launders a corrupt store into data loss, and headless writers race the foreground
+
+Both found while answering "does Smart Alerts need SQLite?" (answer: no — reasoning in `docs/superpowers/specs/2026-08-23-smart-alerts-design.md`, "Persistence"). These two are code facts rather than design opinions, and both would be expensive to re-derive from a bug report.
+
+**1. A JSON parse failure becomes permanent data loss on the next write.** `loadReminders` catches the parse error and returns `[]`. The app then renders an empty list, and the first subsequent `saveReminders` persists that empty array over the user's real reminders. AsyncStorage is the **only** copy — no backend, manual backup — so there is no recovery. Symptom would be "all my reminders vanished" with nothing in any log. Fix planned as Task 1 of `docs/superpowers/plans/2026-08-23-smart-alerts-foundations.md`: quarantine the unreadable payload under a timestamped key before returning `[]`. **Until that lands, treat any report of mass reminder loss as this first.**
+
+**2. Whole-array read-modify-write races between the headless task and the foreground, and a JS mutex CANNOT fix it.** `markDoneById` and `updateSnoozeById` run in the headless notification task (`tasks/notificationResponseTask.ts`) and do load-entire-array → modify → save-entire-array; `markDoneById` even `await`s `cancelNotification()` between the load and the save, widening the window with a native call. `RemindersContext` separately writes the whole array from a long-lived React state snapshot. **A module-level mutex does not help: the headless task runs in a separate JS runtime and would not share the lock.** Today this is mitigated — not eliminated — by the AppState-`active` reload in `RemindersContext`.
+
+**Consequence for future work:** anything that adds a background writer must either write to its **own storage key** (not the reminders blob), or be **idempotent enough that a lost update is harmless**. Never add a background read-modify-write whose loss would corrupt state. Genuine atomicity here needs SQLite (`UPDATE ... WHERE id = ?`), which is the one real argument for migrating and is currently outweighed by the migration's data-loss risk.
+
+**WHERE:** `services/ReminderService.ts` (`loadReminders`, `saveReminders`, `markDoneById`, `updateSnoozeById`), `contexts/RemindersContext.tsx`, `tasks/notificationResponseTask.ts`. Commit `da94e67`.
+
+---
+
 ## 2026-08-23 — Backup round-trips reminder fields by spread, but settings by allow-list
 
 Established while designing Smart Alerts (`docs/superpowers/specs/2026-08-23-smart-alerts-design.md`), by reading `utils/reminderBackup.ts` rather than assuming. All four points are counter-intuitive in the same direction — the thing you expect to break doesn't, and the thing you don't check does.
