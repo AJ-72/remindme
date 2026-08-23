@@ -1250,3 +1250,69 @@ describe("corrupt store quarantine", () => {
     expect(keys.filter((k) => k.startsWith(QUARANTINE_KEY_PREFIX))).toHaveLength(1);
   });
 });
+
+
+describe("reminder instrumentation", () => {
+  it("stamps createdAt when a reminder is added", async () => {
+    const { reminders } = await addReminder([], {
+      title: "Call the plumber",
+      description: "",
+      datetime: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    expect(typeof reminders[0].createdAt).toBe("string");
+    expect(Number.isNaN(Date.parse(reminders[0].createdAt!))).toBe(false);
+  });
+
+  it("stamps completedAt on completion and clears it on un-completion", async () => {
+    const r: Reminder = {
+      id: "r1",
+      title: "T",
+      description: "",
+      datetime: new Date(Date.now() + 3600_000).toISOString(),
+      completed: false,
+    };
+    const done = await toggleComplete([r], "r1");
+    expect(typeof done[0].completedAt).toBe("string");
+
+    // Un-completing must clear it, or the record claims a completion time for
+    // a task that is not complete.
+    const undone = await toggleComplete(done, "r1");
+    expect(undone[0].completed).toBe(false);
+    expect(undone[0].completedAt).toBeUndefined();
+  });
+
+  it("stamps completedAt from the notification Mark Done path too", async () => {
+    const r: Reminder = {
+      id: "r1",
+      title: "T",
+      description: "",
+      datetime: new Date(Date.now() + 3600_000).toISOString(),
+      completed: false,
+    };
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    await markDoneById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY))!);
+    expect(typeof stored[0].completedAt).toBe("string");
+  });
+
+  it("counts snoozes and records the ORIGINAL datetime only once", async () => {
+    const first = new Date(Date.now() + 3600_000).toISOString();
+    const r: Reminder = {
+      id: "r1",
+      title: "T",
+      description: "",
+      datetime: first,
+      completed: false,
+    };
+
+    const once = await snoozeReminder([r], "r1", { kind: "minutes", minutes: 15 });
+    expect(once[0].snoozeCount).toBe(1);
+    expect(once[0].originalDatetime).toBe(first);
+
+    const twice = await snoozeReminder(once, "r1", { kind: "minutes", minutes: 15 });
+    expect(twice[0].snoozeCount).toBe(2);
+    // Still the FIRST intended time - this is how far the task has slid.
+    expect(twice[0].originalDatetime).toBe(first);
+  });
+});

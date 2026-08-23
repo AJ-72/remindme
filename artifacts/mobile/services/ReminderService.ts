@@ -90,6 +90,18 @@ export interface Reminder {
   notificationId?: string;
   alarm?: boolean;
   recipient?: ReminderRecipient;
+  /** When the reminder was created. Absent on records predating instrumentation. */
+  createdAt?: string;
+  /** When it was marked done. Cleared when un-completed. */
+  completedAt?: string;
+  /** Deliberate postponements. Never reset - this is the avoidance signal. */
+  snoozeCount?: number;
+  /**
+   * The FIRST datetime this reminder ever had, set once on first snooze.
+   * `datetime` is overwritten by each snooze, so without this the distance a
+   * task has slid from its original intent is unrecoverable.
+   */
+  originalDatetime?: string;
 }
 
 /**
@@ -700,6 +712,7 @@ export async function addReminder(
     ...data,
     completed: false,
     notificationId,
+    createdAt: new Date().toISOString(),
   };
   const reminders = [added, ...current];
   await saveReminders(reminders);
@@ -747,6 +760,9 @@ export async function toggleComplete(
           ...r,
           completed: !r.completed,
           notificationId: !r.completed ? undefined : r.notificationId,
+          // Set on completion, cleared on un-completion: a record must never
+          // claim a completion time for a task that is not complete.
+          completedAt: !r.completed ? new Date().toISOString() : undefined,
         }
       : r
   );
@@ -781,7 +797,18 @@ export async function snoozeReminder(
   );
   const datetime = snoozeTarget.toISOString();
   const reminders = current.map((r) =>
-    r.id === id ? { ...r, datetime, notificationId } : r
+    r.id === id
+      ? {
+          ...r,
+          datetime,
+          notificationId,
+          snoozeCount: (r.snoozeCount ?? 0) + 1,
+          // `??` not `||`: written once, on the first snooze only. An existing
+          // value must survive every later snooze, since it is what makes the
+          // distance a task has slid measurable.
+          originalDatetime: r.originalDatetime ?? r.datetime,
+        }
+      : r
   );
   await saveReminders(reminders);
   return reminders;
@@ -833,7 +860,14 @@ export async function markDoneById(id: string): Promise<void> {
   if (!target) return;
   await cancelNotification(target.notificationId);
   const updated = reminders.map((r) =>
-    r.id === id ? { ...r, completed: true, notificationId: undefined } : r
+    r.id === id
+      ? {
+          ...r,
+          completed: true,
+          notificationId: undefined,
+          completedAt: new Date().toISOString(),
+        }
+      : r
   );
   await saveReminders(updated);
 }
