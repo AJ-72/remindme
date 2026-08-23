@@ -23,19 +23,19 @@ Both found while answering "does Smart Alerts need SQLite?" (answer: no — reas
 
 ---
 
-## 2026-08-23 — Backup round-trips reminder fields by spread, but settings by allow-list
+## 2026-08-23 — Backup round-trips reminder fields by spread; settings are dropped by two lists in ReminderService
 
 Established while designing Smart Alerts (`docs/superpowers/specs/2026-08-23-smart-alerts-design.md`), by reading `utils/reminderBackup.ts` rather than assuming. All four points are counter-intuitive in the same direction — the thing you expect to break doesn't, and the thing you don't check does.
 
 **1. New REMINDER fields survive backup/restore for free.** `parseBackup` builds each entry as `{...entry, description, completed}` and `mergeReminders` pushes `{...clean}`, so unrecognised fields pass straight through. Adding an optional field to `Reminder` needs no backup work. **Do not add per-field copying to "make sure it round-trips"** — it already does, and an explicit list is the thing that rots.
 
-**2. New SETTINGS are silently dropped.** `BackupSettings` is an explicit interface-shaped allow-list, not a spread. Any new persisted setting must be added there or it vanishes from every backup, with no error. This is the opposite of point 1 and is the gap that actually bites.
+**2. New SETTINGS are silently dropped — by TWO lists in `ReminderService`, not by the type.** *(Corrected 2026-08-23 during implementation; the original wording of this point named the wrong file.)* `parseBackup` **casts** (`candidate.settings as BackupSettings`) rather than rebuilding, so unknown setting keys survive a round-trip on their own — extending the `BackupSettings` interface only satisfies `tsc`. The real drop points are two explicit per-setting lists in `services/ReminderService.ts`: **`buildBackupJson`** constructs the settings object (write side) and **`importRemindersFromJson`** applies settings one `if` at a time (restore side). A new setting must be added to **both**; missing either is silent, and a test that only round-trips through `serializeBackup`/`parseBackup` **passes without any implementation at all** — which is exactly how this was caught. Test the restore side explicitly, and validate there, since a backup file is user-editable text.
 
 **3. Do NOT bump `BACKUP_VERSION` for additive fields.** `parseBackup` refuses any backup whose `version` exceeds its own (`unsupported-version`) — deliberately, to avoid importing a subset of a newer file. So bumping makes new backups unreadable by older installs while buying nothing, since optional additive fields are already compatible in both directions.
 
 **4. `mergeReminders` is "local always wins", which loses history by design.** When a backup copy and a local copy are `isSameReminder` (content-equal: title case/whitespace-insensitive + same instant), the incoming one is discarded whole. A locally re-typed reminder therefore beats a backup copy carrying accumulated counters. **This is the correct trade and should not be "fixed"** — inverting it to preserve richer history would risk un-completing a reminder the user has since marked done, which is far worse than losing a counter. Document the loss; leave the rule alone.
 
-**WHERE:** `utils/reminderBackup.ts` (`parseBackup`, `mergeReminders`, `BackupSettings`, `BACKUP_VERSION`, `isSameReminder`). Commit `a229302`.
+**WHERE:** `utils/reminderBackup.ts` (`parseBackup`, `mergeReminders`, `BackupSettings`, `BACKUP_VERSION`, `isSameReminder`) and `services/ReminderService.ts` (`buildBackupJson`, `importRemindersFromJson`). Commits `a229302`, `43ec9dc`.
 
 ---
 
