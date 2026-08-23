@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { router } from "expo-router";
 import React, { useState } from "react";
 import {
   Alert,
@@ -509,6 +510,26 @@ export default function SettingsScreen() {
             )}
           </View>
         </View>
+
+        <Pressable
+          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
+          onPress={() => router.push("/smart-alerts")}
+          testID="smart-alerts-row"
+        >
+          <Feather name="bell" size={18} color={colors.mutedForeground} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alarmLabel}>Smart Alerts</Text>
+            <Text style={styles.alarmSubLabel}>
+              Quiet hours, and how the app follows up on what slips
+            </Text>
+          </View>
+          <Feather
+            name="chevron-right"
+            size={18}
+            color={colors.mutedForeground}
+            style={styles.chevron}
+          />
+        </Pressable>
 
         <Pressable
           style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}

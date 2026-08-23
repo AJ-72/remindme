@@ -1,5 +1,6 @@
 import React from "react";
 import { Share, StyleSheet, useColorScheme } from "react-native";
+import { router } from "expo-router";
 import { APP_SHARE_BLURB, buildAppShareMessage } from "@/utils/appShare";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -19,6 +20,7 @@ import { logDebug } from "@/services/DebugLogService";
 import darkColors from "@/constants/colors";
 import { ThemeProvider, THEME_PREFERENCE_KEY } from "@/contexts/ThemeContext";
 
+jest.mock("expo-router", () => ({ router: { push: jest.fn(), back: jest.fn() } }));
 jest.mock("expo-haptics");
 jest.mock("react-native/Libraries/Utilities/useColorScheme");
 
@@ -486,5 +488,14 @@ describe("SettingsScreen — your name", () => {
 
     expect(await AsyncStorage.getItem(USER_NAME_KEY)).toBe("Anand");
     expect((await findByTestId("user-name-value")).props.children).toBe("Anand");
+  });
+});
+
+
+describe("SettingsScreen — Smart Alerts entry", () => {
+  it("offers a row into the Smart Alerts screen", async () => {
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("smart-alerts-row"));
+    expect(router.push).toHaveBeenCalledWith("/smart-alerts");
   });
 });
