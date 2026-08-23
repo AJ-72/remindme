@@ -29,6 +29,7 @@ import type { PickableContact } from "@/services/ContactsService";
 import type { ReminderRecipient } from "@/services/ReminderService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
+import { detectVagueOpener } from "@/utils/vagueTask";
 import { getFontFamily } from "@/utils/getFontFamily";
 
 type DateTimePickerEvent = { type: string; nativeEvent: object };
@@ -121,6 +122,7 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [recipient, setRecipient] = useState<ReminderRecipient | undefined>(undefined);
   const [contactPickerVisible, setContactPickerVisible] = useState(false);
   const [quietPrompt, setQuietPrompt] = useState<Date | null>(null);
+  const [dismissedVagueText, setDismissedVagueText] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [listening, setListening] = useState(false);
   const [micNotice, setMicNotice] = useState<string | null>(null);
@@ -248,6 +250,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       setDescription("");
       setNotesVisible(false);
       setRecipient(undefined);
+      setDismissedVagueText(null);
       onSaved?.();
     } catch {
       // silent — the list will just not update
@@ -395,6 +398,12 @@ export default function QuickAddInput({ onSaved }: Props) {
       stopSpeakMode();
     }
   };
+
+  // Derived from the PARSED title where one exists, so the hint tracks what
+  // will actually be saved rather than the raw text including the date phrase.
+  const vagueCandidate = (parsedTitle || input).trim();
+  const showVagueHint =
+    !!detectVagueOpener(vagueCandidate) && vagueCandidate !== dismissedVagueText;
 
   const canSave = !saving && !!(parsedTitle || input.trim());
 
@@ -638,6 +647,26 @@ export default function QuickAddInput({ onSaved }: Props) {
       fontFamily: "Inter_600SemiBold",
       color: colors.primaryForeground,
     },
+    vagueHint: {
+      marginTop: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: 12,
+      backgroundColor: colors.muted,
+      gap: 6,
+    },
+    vagueHintText: {
+      fontSize: 12,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      lineHeight: 17,
+    },
+    vagueHintDismiss: {
+      fontSize: 12,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
+      alignSelf: "flex-start",
+    },
     webPickerWrap: {
       marginBottom: 16,
     },
@@ -738,6 +767,22 @@ export default function QuickAddInput({ onSaved }: Props) {
         </Pressable>
         </View>
       </View>
+
+      {showVagueHint && (
+        <View style={styles.vagueHint} testID="vague-task-hint">
+          <Text style={styles.vagueHintText}>
+            What&apos;s the first step? A reminder is easier to start when it
+            names one action — e.g. &quot;Call HDFC about the renewal&quot;.
+          </Text>
+          <Pressable
+            onPress={() => setDismissedVagueText(vagueCandidate)}
+            hitSlop={8}
+            testID="vague-task-hint-dismiss"
+          >
+            <Text style={styles.vagueHintDismiss}>Use as is</Text>
+          </Pressable>
+        </View>
+      )}
 
       {micNotice && (
         micNoticeDebugInfo ? (

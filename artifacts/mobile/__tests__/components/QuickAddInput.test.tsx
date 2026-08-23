@@ -595,3 +595,52 @@ describe("QuickAddInput — quiet hours confirmation", () => {
     expect(await AsyncStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 });
+
+
+describe("QuickAddInput — vague task hint", () => {
+  it("suggests a first action for a vague opener", async () => {
+    const { findByTestId } = renderComponent();
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Sort out the insurance"
+    );
+    expect(await findByTestId("vague-task-hint")).toBeTruthy();
+  });
+
+  it("shows no hint for a concrete task", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Call the dentist at 3pm"
+    );
+    await waitFor(() => expect(queryByTestId("vague-task-hint")).toBeNull());
+  });
+
+  // Advisory means advisory: dismissing must not bring it back for the same text.
+  it("stays dismissed for the same text", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    const input = await findByTestId("quick-add-input");
+
+    fireEvent.changeText(input, "Sort out the insurance");
+    fireEvent.press(await findByTestId("vague-task-hint-dismiss"));
+    await waitFor(() => expect(queryByTestId("vague-task-hint")).toBeNull());
+
+    fireEvent.changeText(input, "Sort out the insurance");
+    await waitFor(() => expect(queryByTestId("vague-task-hint")).toBeNull());
+  });
+
+  it("never blocks saving", async () => {
+    const { findByTestId } = renderComponent();
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Sort out the insurance tomorrow at 2pm"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+      expect(stored[0].title).toContain("Sort out the insurance");
+    });
+  });
+});
