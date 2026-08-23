@@ -9,6 +9,21 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-23 — Backup round-trips reminder fields by spread, but settings by allow-list
+
+Established while designing Smart Alerts (`docs/superpowers/specs/2026-08-23-smart-alerts-design.md`), by reading `utils/reminderBackup.ts` rather than assuming. All four points are counter-intuitive in the same direction — the thing you expect to break doesn't, and the thing you don't check does.
+
+**1. New REMINDER fields survive backup/restore for free.** `parseBackup` builds each entry as `{...entry, description, completed}` and `mergeReminders` pushes `{...clean}`, so unrecognised fields pass straight through. Adding an optional field to `Reminder` needs no backup work. **Do not add per-field copying to "make sure it round-trips"** — it already does, and an explicit list is the thing that rots.
+
+**2. New SETTINGS are silently dropped.** `BackupSettings` is an explicit interface-shaped allow-list, not a spread. Any new persisted setting must be added there or it vanishes from every backup, with no error. This is the opposite of point 1 and is the gap that actually bites.
+
+**3. Do NOT bump `BACKUP_VERSION` for additive fields.** `parseBackup` refuses any backup whose `version` exceeds its own (`unsupported-version`) — deliberately, to avoid importing a subset of a newer file. So bumping makes new backups unreadable by older installs while buying nothing, since optional additive fields are already compatible in both directions.
+
+**4. `mergeReminders` is "local always wins", which loses history by design.** When a backup copy and a local copy are `isSameReminder` (content-equal: title case/whitespace-insensitive + same instant), the incoming one is discarded whole. A locally re-typed reminder therefore beats a backup copy carrying accumulated counters. **This is the correct trade and should not be "fixed"** — inverting it to preserve richer history would risk un-completing a reminder the user has since marked done, which is far worse than losing a counter. Document the loss; leave the rule alone.
+
+**WHERE:** `utils/reminderBackup.ts` (`parseBackup`, `mergeReminders`, `BackupSettings`, `BACKUP_VERSION`, `isSameReminder`). Commit `a229302`.
+
+
 ## 2026-08-23 — A notification-response dedupe key must include the ACTION, and a screen with no in-app route is a dead screen
 
 **1. Keying response dedupe on the notification id alone silently disables every action button.** `services/handledResponses.ts` marks a response handled by `response.notification.request.identifier`, and `handleNotificationResponse` returns early on a hit. That identifier names the NOTIFICATION, not the response — so one tray notification could be acted on exactly once, ever. Tapping the body (which navigates) burned the key, and pressing **Mark Done** on that same notification afterwards was dropped before reaching `markDoneById`. Send reminders could never be completed from the tray at all, because their flow *always* opens with a body tap. Fixed by keying on `` `${notificationId}::${actionIdentifier}` `` in `services/notificationResponseHandler.ts`. **The dedupe still collapses replays of a single action, which is all it was ever for** — the cross-process (headless task vs. foreground listener) and cold-start-replay protections are unaffected, and their four existing tests passed unchanged. Reported as "mark as done doesn't work"; the in-app checkbox was never involved.
