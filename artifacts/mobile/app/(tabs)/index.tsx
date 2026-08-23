@@ -264,7 +264,7 @@ export default function HomeScreen() {
                     { marginTop: upcoming.length > 0 ? 12 : 6 },
                   ]}
                 >
-                  <Text style={styles.sectionHeaderLabel}>Sending</Text>
+                  <Text style={styles.sectionHeaderLabel}>Remind Someone</Text>
                   <Text style={styles.sectionCount}>{sending.length}</Text>
                 </View>
                 {sending.map((r) => (

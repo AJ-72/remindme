@@ -500,7 +500,7 @@ export default function AddReminderScreen() {
               "remind someone else": Tier 1 rings the SENDER's phone and the
               recipient is never contacted unless the sender acts. */}
           <View>
-            <Text style={styles.sectionLabel}>Sending</Text>
+            <Text style={styles.sectionLabel}>Remind Someone</Text>
             <Pressable
               testID="recipient-row"
               style={styles.recipientRow}

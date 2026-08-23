@@ -179,8 +179,8 @@ describe("HomeScreen", () => {
   });
 });
 
-describe("HomeScreen — Sending section", () => {
-  it("puts an incomplete send reminder in Sending, not Upcoming", async () => {
+describe("HomeScreen — Remind Someone section", () => {
+  it("puts an incomplete send reminder in Remind Someone, not Upcoming", async () => {
     await AsyncStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([
@@ -189,23 +189,23 @@ describe("HomeScreen — Sending section", () => {
       ])
     );
     const { findByText, getAllByText } = renderScreen();
-    expect(await findByText("Sending")).toBeTruthy();
+    expect(await findByText("Remind Someone")).toBeTruthy();
     // Each reminder appears exactly once across all sections.
     expect(getAllByText("Message Priya")).toHaveLength(1);
     expect(getAllByText("Buy milk")).toHaveLength(1);
   });
 
-  it("hides the Sending section when there are no send reminders", async () => {
+  it("hides the Remind Someone section when there are no send reminders", async () => {
     await AsyncStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([makeReminder({ id: "p1", title: "Buy milk" })])
     );
     const { findByText, queryByText } = renderScreen();
     await findByText("Buy milk");
-    expect(queryByText("Sending")).toBeNull();
+    expect(queryByText("Remind Someone")).toBeNull();
   });
 
-  it("keeps a completed send reminder in Completed, not Sending", async () => {
+  it("keeps a completed send reminder in Completed, not Remind Someone", async () => {
     await AsyncStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([
@@ -219,7 +219,7 @@ describe("HomeScreen — Sending section", () => {
     );
     const { findByText, queryByText, getAllByText } = renderScreen();
     await findByText("Completed");
-    expect(queryByText("Sending")).toBeNull();
+    expect(queryByText("Remind Someone")).toBeNull();
     expect(getAllByText("Message Priya")).toHaveLength(1);
   });
 
@@ -232,7 +232,7 @@ describe("HomeScreen — Sending section", () => {
     );
     const { findByText, queryByText } = renderScreen();
     await findByText("No phone");
-    expect(queryByText("Sending")).toBeNull();
+    expect(queryByText("Remind Someone")).toBeNull();
   });
 
   it("counts send reminders in the header subtitle alongside upcoming ones", async () => {
