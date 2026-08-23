@@ -277,3 +277,22 @@ describe("mergeReminders", () => {
     expect(incoming).toHaveLength(1);
   });
 });
+
+
+// BackupSettings is an explicit allow-list, not a spread - a new setting
+// silently vanishes from every backup unless it is added there.
+describe("quiet hours in a backup", () => {
+  it("carries quiet hours through a round-trip", () => {
+    const json = serializeBackup([], {
+      quietHours: { startMinute: 1320, endMinute: 480 },
+    });
+    const result = parseBackup(json);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.backup.settings.quietHours).toEqual({
+      startMinute: 1320,
+      endMinute: 480,
+    });
+  });
+});

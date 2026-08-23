@@ -20,6 +20,8 @@ import {
   getShowDescriptionEnabled,
   getInviteNudgeEnabled,
   getSnoozePreset,
+  getQuietHours,
+  setQuietHours as serviceSetQuietHours,
   getUserName,
   setUserName as serviceSetUserName,
   getVibrationEnabled,
@@ -35,6 +37,7 @@ import {
   snoozeReminder as serviceSnooze,
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
+import { DEFAULT_QUIET_HOURS, type QuietHours } from "@/utils/quietHours";
 import {
   DEFAULT_SNOOZE_PRESET,
   type SnoozePreset,
@@ -70,6 +73,9 @@ interface RemindersContextType {
   setInviteNudgeEnabled: (enabled: boolean) => Promise<void>;
   vibrationEnabled: boolean;
   setVibrationEnabled: (enabled: boolean) => Promise<void>;
+  /** When the app stays silent. Applies to alerts it schedules itself. */
+  quietHours: QuietHours;
+  setQuietHours: (window: QuietHours) => Promise<void>;
   /** The user's own name, or "" when unset. Never undefined. */
   userName: string;
   setUserName: (name: string) => Promise<void>;
@@ -102,6 +108,7 @@ export function RemindersProvider({
     useState<SnoozePreset>(DEFAULT_SNOOZE_PRESET);
   const [vibrationEnabled, setVibrationEnabledState] = useState(true);
   const [userName, setUserNameState] = useState("");
+  const [quietHours, setQuietHoursState] = useState<QuietHours>(DEFAULT_QUIET_HOURS);
   const [inviteNudgeEnabled, setInviteNudgeEnabledState] = useState(true);
 
   // Shared by the initial mount and by refreshFromStorage, so a restore can
@@ -116,6 +123,7 @@ export function RemindersProvider({
       vibration,
       nudge,
       name,
+      quiet,
     ] =
       await Promise.all([
         loadReminders(),
@@ -126,6 +134,7 @@ export function RemindersProvider({
         getVibrationEnabled(),
         getInviteNudgeEnabled(),
         getUserName(),
+        getQuietHours(),
       ]);
     setReminders(loadedReminders);
     setDefaultAlarmEnabledState(defaultAlarm);
@@ -135,6 +144,7 @@ export function RemindersProvider({
     setVibrationEnabledState(vibration);
     setInviteNudgeEnabledState(nudge);
     setUserNameState(name);
+    setQuietHoursState(quiet);
   }, []);
 
   const refreshFromStorage = useCallback(async () => {
@@ -182,6 +192,11 @@ export function RemindersProvider({
   const setVibrationEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetVibrationEnabled(enabled);
     setVibrationEnabledState(enabled);
+  }, []);
+
+  const setQuietHours = useCallback(async (window: QuietHours) => {
+    await serviceSetQuietHours(window);
+    setQuietHoursState(window);
   }, []);
 
   const setUserName = useCallback(async (name: string) => {
@@ -273,6 +288,8 @@ export function RemindersProvider({
         setInviteNudgeEnabled,
         vibrationEnabled,
         setVibrationEnabled,
+        quietHours,
+        setQuietHours,
         userName,
         setUserName,
         dictationLanguage,

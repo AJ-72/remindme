@@ -10,6 +10,7 @@ import {
 } from "@/utils/snoozePresets";
 
 import { buildSnoozeTitle } from "@/utils/greeting";
+import { DEFAULT_QUIET_HOURS, type QuietHours } from "@/utils/quietHours";
 
 import {
   mergeReminders,
@@ -18,6 +19,7 @@ import {
 } from "@/utils/reminderBackup";
 
 export type { SnoozePreset };
+export type { QuietHours };
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -42,6 +44,7 @@ export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
  * data loss by the very next write.
  */
 export const QUARANTINE_KEY_PREFIX = "@reminders_corrupt_";
+export const QUIET_HOURS_KEY = "@quiet_hours_v1";
 export const USER_NAME_KEY = "@user_name_v1";
 // Separate from PERMISSION_ONBOARDING_KEY on purpose: one flow completing must
 // not mark the other done, or a user who granted permissions before this
@@ -194,6 +197,37 @@ export async function markNamePromptSeen(): Promise<void> {
   try {
     await AsyncStorage.setItem(NAME_PROMPT_KEY, "1");
   } catch {}
+}
+
+function isQuietHours(value: unknown): value is QuietHours {
+  if (typeof value !== "object" || value === null) return false;
+  const q = value as Partial<QuietHours>;
+  return (
+    typeof q.startMinute === "number" &&
+    typeof q.endMinute === "number" &&
+    Number.isInteger(q.startMinute) &&
+    Number.isInteger(q.endMinute) &&
+    q.startMinute >= 0 &&
+    q.startMinute < 1440 &&
+    q.endMinute >= 0 &&
+    q.endMinute < 1440
+  );
+}
+
+export async function getQuietHours(): Promise<QuietHours> {
+  try {
+    const raw = await AsyncStorage.getItem(QUIET_HOURS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // A corrupt or out-of-range value must not be able to wedge scheduling.
+      if (isQuietHours(parsed)) return parsed;
+    }
+  } catch {}
+  return DEFAULT_QUIET_HOURS;
+}
+
+export async function setQuietHours(window: QuietHours): Promise<void> {
+  await AsyncStorage.setItem(QUIET_HOURS_KEY, JSON.stringify(window));
 }
 
 export async function getDefaultAlarmEnabled(): Promise<boolean> {
@@ -901,6 +935,7 @@ export async function buildBackupJson(): Promise<string> {
     vibrationEnabled,
     dictationLanguage,
     snoozePreset,
+    quietHours,
   ] = await Promise.all([
     loadReminders(),
     getDefaultAlarmEnabled(),
@@ -908,6 +943,7 @@ export async function buildBackupJson(): Promise<string> {
     getVibrationEnabled(),
     getDictationLanguage(),
     getSnoozePreset(),
+    getQuietHours(),
   ]);
 
   return serializeBackup(reminders, {
@@ -916,6 +952,7 @@ export async function buildBackupJson(): Promise<string> {
     vibrationEnabled,
     dictationLanguage,
     snoozePreset,
+    quietHours,
   });
 }
 
@@ -951,6 +988,11 @@ export async function importRemindersFromJson(raw: string): Promise<ImportResult
   }
   if (settings.dictationLanguage !== undefined) {
     await setDictationLanguage(settings.dictationLanguage);
+  }
+  // Validated like snoozePreset: a backup is user-editable text, so a
+  // malformed window must not reach storage and wedge scheduling.
+  if (settings.quietHours !== undefined && isQuietHours(settings.quietHours)) {
+    await setQuietHours(settings.quietHours);
   }
   if (settings.snoozePreset !== undefined && isSnoozePreset(settings.snoozePreset)) {
     await setSnoozePreset(settings.snoozePreset);

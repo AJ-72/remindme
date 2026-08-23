@@ -11,6 +11,9 @@ import {
   MARK_DONE_ACTION_ID,
   STORAGE_KEY,
   QUARANTINE_KEY_PREFIX,
+  QUIET_HOURS_KEY,
+  getQuietHours,
+  setQuietHours,
   addReminder,
   buildBackupJson,
   importRemindersFromJson,
@@ -54,6 +57,7 @@ import {
   type ReminderRecipient,
   type NotificationData,
 } from "@/services/ReminderService";
+import { DEFAULT_QUIET_HOURS } from "@/utils/quietHours";
 import {
   scheduleNotificationAsync,
   cancelScheduledNotificationAsync,
@@ -1314,5 +1318,61 @@ describe("reminder instrumentation", () => {
     expect(twice[0].snoozeCount).toBe(2);
     // Still the FIRST intended time - this is how far the task has slid.
     expect(twice[0].originalDatetime).toBe(first);
+  });
+});
+
+
+describe("quiet hours persistence", () => {
+  it("defaults to 22:00-08:00 when nothing is stored", async () => {
+    expect(await getQuietHours()).toEqual(DEFAULT_QUIET_HOURS);
+  });
+
+  it("round-trips a stored window", async () => {
+    await setQuietHours({ startMinute: 9 * 60, endMinute: 17 * 60 });
+    expect(await getQuietHours()).toEqual({ startMinute: 540, endMinute: 1020 });
+  });
+
+  // A corrupt value must not be able to wedge scheduling, matching the
+  // defensive read used for every other setting in this service.
+  it("falls back to the default on a corrupt stored value", async () => {
+    await AsyncStorage.setItem(QUIET_HOURS_KEY, "not json");
+    expect(await getQuietHours()).toEqual(DEFAULT_QUIET_HOURS);
+
+    await AsyncStorage.setItem(QUIET_HOURS_KEY, JSON.stringify({ startMinute: "9pm" }));
+    expect(await getQuietHours()).toEqual(DEFAULT_QUIET_HOURS);
+
+    await AsyncStorage.setItem(
+      QUIET_HOURS_KEY,
+      JSON.stringify({ startMinute: -5, endMinute: 99999 })
+    );
+    expect(await getQuietHours()).toEqual(DEFAULT_QUIET_HOURS);
+  });
+
+  // Two separate per-setting lists have to know about a new setting:
+  // buildBackupJson writes it, importRemindersFromJson applies it. Missing
+  // either drops it silently, with no error on the round-trip.
+  it("applies quiet hours from an imported backup", async () => {
+    await setQuietHours({ startMinute: 1320, endMinute: 480 });
+    const json = await buildBackupJson();
+    await setQuietHours({ startMinute: 0, endMinute: 0 });
+
+    await importRemindersFromJson(json);
+    expect(await getQuietHours()).toEqual({ startMinute: 1320, endMinute: 480 });
+  });
+
+  it("ignores a malformed window in an imported backup", async () => {
+    const json = await buildBackupJson();
+    const tampered = JSON.parse(json);
+    tampered.settings.quietHours = { startMinute: "10pm", endMinute: 480 };
+
+    await importRemindersFromJson(JSON.stringify(tampered));
+    // Unchanged, not corrupted: a backup is user-editable text.
+    expect(await getQuietHours()).toEqual(DEFAULT_QUIET_HOURS);
+  });
+
+  it("includes quiet hours in the backup payload", async () => {
+    await setQuietHours({ startMinute: 1320, endMinute: 480 });
+    const parsed = JSON.parse(await buildBackupJson());
+    expect(parsed.settings.quietHours).toEqual({ startMinute: 1320, endMinute: 480 });
   });
 });

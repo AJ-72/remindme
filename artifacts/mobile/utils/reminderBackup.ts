@@ -1,3 +1,4 @@
+import type { QuietHours } from "@/utils/quietHours";
 import type { DictationLanguage, Reminder } from "@/services/ReminderService";
 import type { SnoozePreset } from "@/utils/snoozePresets";
 
@@ -14,6 +15,7 @@ export interface BackupSettings {
   vibrationEnabled?: boolean;
   dictationLanguage?: DictationLanguage;
   snoozePreset?: SnoozePreset;
+  quietHours?: QuietHours;
 }
 
 export interface ReminderBackup {
