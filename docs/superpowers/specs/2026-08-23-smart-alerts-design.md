@@ -1,8 +1,8 @@
 # Smart Alerts — design
 
 **Date:** 2026-08-23
-**Status:** approved design, not yet planned
-**Scope:** three related features sharing one foundation — vague-task detection at input, reminder-lifecycle instrumentation, and an adaptive re-nudge engine with a dread override.
+**Status:** approved — all open decisions resolved 2026-08-23; ready for an implementation plan
+**Scope:** five components sharing one foundation — vague-task detection at input, reminder-lifecycle instrumentation, user-owned quiet hours, an in-app explainer of the research, and an adaptive re-nudge engine with a dread override.
 
 ---
 
@@ -88,7 +88,7 @@ Added to `Reminder`, all optional so existing records stay valid:
 New **reminder** fields need no work: `parseBackup` and `mergeReminders` both spread (`{...entry}`, `{...clean}`), so unrecognised fields already survive a round-trip. Two real gaps remain:
 
 - **`BackupSettings` is an explicit allow-list**, not a spread. The re-nudge level is a *setting*, so it will be silently dropped from every backup unless added there. This is the gap that actually bites.
-- **`mergeReminders` resolves conflicts as "local always wins"**, discarding the incoming copy wholesale. That rule is correct for its original purpose — a restore must never un-complete a reminder — but it means a locally re-typed reminder (fresh, no history) beats a backup copy carrying real accumulated `snoozeCount`. Instrumentation is lost precisely in the export → reinstall → re-type-a-few → import path the merge was built for. **Accept this loss rather than reworking the merge rule**: inverting it to preserve history would risk un-completing reminders, which is far worse than losing a counter. Document it; do not fix it.
+- **`mergeReminders` resolves conflicts as "local always wins"**, discarding the incoming copy wholesale. That rule is correct for its original purpose — a restore must never un-complete a reminder — but it means a locally re-typed reminder (fresh, no history) beats a backup copy carrying real accumulated `snoozeCount`. Instrumentation is lost precisely in the export → reinstall → re-type-a-few → import path the merge was built for. **Accept this loss rather than reworking the merge rule**: inverting it to preserve history would risk un-completing reminders, which is far worse than losing a counter. Document it; do not fix it. Confirmed 2026-08-23.
 - Bumping `BACKUP_VERSION` is **not** required and should be avoided: `parseBackup` refuses any backup whose version exceeds its own, so a bump makes new backups unreadable by older installs for no gain, since the fields are additive and optional.
 
 ---
@@ -220,7 +220,7 @@ The argument for including it at all is not documentation: **the content is itse
 
 A dedicated screen, reached from a prominent row at the **top** of Settings rather than buried among the existing toggles.
 
-> **Open decision:** the request was for a "top level feature". This design puts it at the top of Settings with its own screen, not as a fourth tab — the tab bar is Home/Settings/About, and a settings screen does not earn permanent bottom-bar real estate. Flagging in case a tab was intended.
+> **Decided:** a Settings row, not a fourth tab. The tab bar is Home/Settings/About, and a configuration screen does not earn permanent bottom-bar real estate. Confirmed 2026-08-23.
 
 The screen shows three choices as full-width cards, each with a one-line plain-language description and a concrete example of what it does. No per-reminder overrides — the whole point is that one choice covers it.
 
@@ -235,6 +235,28 @@ Quiet hours is the only control here with any configuration surface, and it earn
 Name: **Smart Alerts**. "Intelligent alerting" reads as infrastructure; "Smart Alerts" is shorter, is what the user will call it, and fits a settings row without wrapping.
 
 ---
+
+## Persistence — why this stays on AsyncStorage
+
+Asked directly during review: do these requirements need SQLite? **No — but the question surfaced two real problems that must be addressed regardless.** Recording the reasoning here because this decision gets silently revisited otherwise.
+
+**Volume does not justify it.** A reminder is roughly 200–400 bytes of JSON. A thousand reminders is ~300KB, five thousand ~1.5MB; serialising that is single-digit milliseconds. The instrumentation adds five small scalar fields per record and does not move the needle. The deferred insights screen wants grouping by hour and weekday, which SQL would express elegantly, but over a few thousand rows in JS it is trivially fast.
+
+**Migration cost is the counterweight.** AsyncStorage holds the *only* copy of a user's data — no backend, and backup is manual. A migration bug destroys real reminders unrecoverably. `expo-sqlite` is also a native module, and this repo has documented, painful local-Android native build failures (the CMake/Ninja and JDK traps in `CLAUDE.md`). That is substantial risk to buy capacity nobody needs yet.
+
+**The one honest argument in favour.** `markDoneById` and `updateSnoozeById` run in the *headless* notification task and do load-whole-array → modify → save-whole-array; `markDoneById` even `await`s `cancelNotification()` between load and save, widening the window with a native call. `RemindersContext` separately writes the whole array from a long-lived React state snapshot. This design **adds** background writers (`nudgesSent`, `checkInSent`, `snoozeCount`), so concurrent whole-array writers increase. Be precise about the limit: **a JS-level mutex cannot fix this**, because the headless task runs in a separate JS runtime and would not share the lock. `UPDATE ... SET nudges_sent = nudges_sent + 1 WHERE id = ?` genuinely would. The risk is today mitigated — but not eliminated — by the AppState-active reload in `RemindersContext`.
+
+**Decision: stay on AsyncStorage, with three mitigations that also defer the migration.**
+
+1. **Keep high-frequency scheduler state out of the reminders blob.** The daily-ceiling counter gets its own key, so frequent writes never rewrite the big array.
+2. **Make `nudgesSent` / `checkInSent` writes narrow and idempotent** — re-read immediately before writing, and design so a lost update is harmless rather than corrupting. Setting `checkInSent = true` twice is fine; losing one costs at most one extra check-in. **Never** make a scheduler write a read-modify-write that must not be lost.
+3. **Add an archival policy for completed reminders.** Unbounded array growth is what will *actually* force this migration eventually, and it is far cheaper to address before the array is large.
+
+**Revisit when** the insights screen is built, or lost-update bugs are observed in the wild, or reminder counts climb materially — whichever comes first.
+
+### Required regardless: harden the corrupt-read path
+
+`loadReminders` catches a JSON parse failure and returns `[]`. The app then renders an empty list, and **the next write persists that empty array over the user's real data.** Rare, unrecoverable, and a latent bug independent of this feature. Distinguish "store is empty" from "store is unreadable", and refuse to write over an unreadable store. This is a prerequisite task, not a nice-to-have — the instrumentation makes each record more valuable and therefore the loss worse.
 
 ## Error handling
 
