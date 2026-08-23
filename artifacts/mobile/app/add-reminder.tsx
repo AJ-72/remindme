@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 import ContactPickerModal from "@/components/ContactPickerModal";
+import { useDictation } from "@/hooks/useDictation";
 import type { PickableContact } from "@/services/ContactsService";
 import type { ReminderRecipient } from "@/services/ReminderService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
@@ -80,6 +81,10 @@ export default function AddReminderScreen() {
   const [alarm, setAlarm] = useState<boolean>(defaultAlarmEnabled);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  // The editor had no mic at all: dictation was reachable only from the
+  // quick-add bar, so correcting a mis-heard reminder meant typing it out.
+  const editDictation = useDictation(editTitle, setEditTitle);
+  const newDictation = useDictation(input, setInput);
   const seededFromExisting = useRef(false);
 
   useEffect(() => {
@@ -220,6 +225,35 @@ export default function AddReminderScreen() {
       borderWidth: 1,
       borderColor: colors.border,
       padding: 16,
+    },
+    inputWithMicRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    inputFlex: {
+      flex: 1,
+    },
+    micBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.muted,
+    },
+    micBtnStandalone: {
+      alignSelf: "flex-start",
+      marginTop: 8,
+    },
+    micBtnListening: {
+      backgroundColor: colors.primary,
+    },
+    micNoticeText: {
+      fontSize: 12,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginTop: 8,
     },
     inputHint: {
       fontSize: 12,
@@ -433,17 +467,46 @@ export default function AddReminderScreen() {
           {isEditing ? (
             <View style={styles.inputCard}>
               <Text style={styles.inputHint}>Title</Text>
-              <TextInput
-                ref={inputRef}
-                style={[styles.input, { fontFamily: getFontFamily(editTitle, "400Regular") }]}
-                placeholder="Reminder title"
-                placeholderTextColor={colors.mutedForeground}
-                value={editTitle}
-                onChangeText={setEditTitle}
-                maxLength={300}
-                returnKeyType="done"
-                testID="edit-title-input"
-              />
+              <View style={styles.inputWithMicRow}>
+                <TextInput
+                  ref={inputRef}
+                  style={[
+                    styles.input,
+                    styles.inputFlex,
+                    { fontFamily: getFontFamily(editTitle, "400Regular") },
+                  ]}
+                  placeholder="Reminder title"
+                  placeholderTextColor={colors.mutedForeground}
+                  value={editTitle}
+                  onChangeText={setEditTitle}
+                  maxLength={300}
+                  returnKeyType="done"
+                  testID="edit-title-input"
+                />
+                <Pressable
+                  style={[styles.micBtn, editDictation.listening && styles.micBtnListening]}
+                  onPress={editDictation.toggle}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    editDictation.listening ? "Stop dictation" : "Dictate title"
+                  }
+                  testID="edit-title-mic"
+                >
+                  <Feather
+                    name="mic"
+                    size={16}
+                    color={
+                      editDictation.listening
+                        ? colors.primaryForeground
+                        : colors.mutedForeground
+                    }
+                  />
+                </Pressable>
+              </View>
+              {!!editDictation.notice && (
+                <Text style={styles.micNoticeText}>{editDictation.notice}</Text>
+              )}
             </View>
           ) : (
             /* Natural language input */
@@ -462,6 +525,33 @@ export default function AddReminderScreen() {
                 blurOnSubmit
                 testID="input-textbox"
               />
+              <Pressable
+                style={[
+                  styles.micBtn,
+                  styles.micBtnStandalone,
+                  newDictation.listening && styles.micBtnListening,
+                ]}
+                onPress={newDictation.toggle}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  newDictation.listening ? "Stop dictation" : "Dictate reminder"
+                }
+                testID="new-title-mic"
+              >
+                <Feather
+                  name="mic"
+                  size={16}
+                  color={
+                    newDictation.listening
+                      ? colors.primaryForeground
+                      : colors.mutedForeground
+                  }
+                />
+              </Pressable>
+              {!!newDictation.notice && (
+                <Text style={styles.micNoticeText}>{newDictation.notice}</Text>
+              )}
               {/* Example chips — only when input is empty */}
               {!input && (
                 <View style={styles.examplesWrap}>

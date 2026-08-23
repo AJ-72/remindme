@@ -6,6 +6,7 @@ import * as Contacts from "expo-contacts";
 import AddReminderScreen from "@/app/add-reminder";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { STORAGE_KEY, type Reminder } from "@/services/ReminderService";
+import * as SpeechService from "@/services/SpeechService";
 
 jest.mock("expo-haptics");
 
@@ -187,5 +188,63 @@ describe("AddReminderScreen — recipient", () => {
     const { queryByText, findByText } = renderScreen();
     await findByText("Remind me to message someone");
     expect(queryByText("Remind someone else")).toBeNull();
+  });
+});
+
+// The editor shipped with no mic: a reminder created by voice could only be
+// corrected by typing, which is the worst case for Malayalam input.
+describe("AddReminderScreen — dictation", () => {
+  it("starts dictation from the edit-title mic and writes the transcript back", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ title: "Original title" })])
+    );
+    jest.spyOn(SpeechService, "getMicPermissionStatus").mockResolvedValue({
+      granted: true,
+      canAskAgain: true,
+    });
+    jest
+      .spyOn(SpeechService, "ensureOfflineModelReady")
+      .mockResolvedValue("ready" as any);
+    const startListening = jest
+      .spyOn(SpeechService, "startListening")
+      .mockReturnValue({ busy: false });
+
+    const { findByTestId, findByDisplayValue } = renderScreen();
+    // Wait for the async seed from storage — pressing before it lands would
+    // capture an empty baseline and prove nothing.
+    await findByDisplayValue("Original title");
+    fireEvent.press(await findByTestId("edit-title-mic"));
+
+    await waitFor(() => expect(startListening).toHaveBeenCalled());
+    // Baseline is the text already in the field, so dictation appends to the
+    // existing title rather than silently replacing it.
+    expect(startListening.mock.calls[0][0]).toBe("Original title");
+
+    const onResult = startListening.mock.calls[0][2];
+    onResult("Original title and buy milk");
+    expect(await findByDisplayValue("Original title and buy milk")).toBeTruthy();
+  });
+
+  it("shows a notice instead of listening while the offline model is preparing", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    jest.spyOn(SpeechService, "getMicPermissionStatus").mockResolvedValue({
+      granted: true,
+      canAskAgain: true,
+    });
+    jest
+      .spyOn(SpeechService, "ensureOfflineModelReady")
+      .mockResolvedValue("preparing" as any);
+    const startListening = jest
+      .spyOn(SpeechService, "startListening")
+      .mockReturnValue({ busy: false });
+
+    const { findByTestId, findByText } = renderScreen();
+    fireEvent.press(await findByTestId("edit-title-mic"));
+
+    expect(
+      await findByText("Preparing voice recognition — try again in a moment")
+    ).toBeTruthy();
+    expect(startListening).not.toHaveBeenCalled();
   });
 });
