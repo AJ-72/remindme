@@ -9,6 +9,18 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-23 — Generated router types are gitignored, so every clone must regenerate them
+
+Building the Smart Alerts foundations hit the 2026-08-17 Expo Router typed-route trap again, exactly as recorded, and the documented fix worked first try (`npx expo customize tsconfig.json`, then re-run `tsc`). Two things that entry did not say, both learned by hitting them:
+
+**1. Do NOT commit the regenerated types — `artifacts/mobile/.expo/` is gitignored.** `git add .expo/types/router.d.ts` is refused, correctly: it is a build artefact. The consequence is that **a fresh clone or a clean CI checkout has no typed-route union at all**, so the first `tsc` after adding a route file can fail on a pathname that is perfectly valid in the committed source. Regenerating is a setup step, not a fix for a mistake. Any plan step that says to commit that file is wrong.
+
+**2. A screen that starts navigating breaks its existing test file.** `__tests__/screens/settings.test.tsx` had no `jest.mock("expo-router", ...)` because the Settings screen had never called `router.push`. Adding one row that navigates made the mock mandatory, and the failure surfaces in a test file the change does not otherwise touch. **When adding the first navigation call to a screen, check whether its test file mocks the router.**
+
+**WHERE:** `artifacts/mobile/.expo/types/router.d.ts` (generated, gitignored), `artifacts/mobile/.gitignore`, `__tests__/screens/settings.test.tsx`. Commits `54c4506`, `40dd5e0`.
+
+---
+
 ## 2026-08-23 — loadReminders launders a corrupt store into data loss, and headless writers race the foreground
 
 Both found while answering "does Smart Alerts need SQLite?" (answer: no — reasoning in `docs/superpowers/specs/2026-08-23-smart-alerts-design.md`, "Persistence"). These two are code facts rather than design opinions, and both would be expensive to re-derive from a bug report.
