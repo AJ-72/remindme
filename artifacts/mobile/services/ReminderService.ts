@@ -35,6 +35,13 @@ export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
 export const VIBRATION_KEY = "@vibration_v1";
 export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
+/**
+ * Corrupt reminder payloads are copied here rather than discarded. AsyncStorage
+ * holds the ONLY copy of a user's reminders - no backend, manual backup - so a
+ * parse failure that returns [] would otherwise be laundered into permanent
+ * data loss by the very next write.
+ */
+export const QUARANTINE_KEY_PREFIX = "@reminders_corrupt_";
 export const USER_NAME_KEY = "@user_name_v1";
 // Separate from PERMISSION_ONBOARDING_KEY on purpose: one flow completing must
 // not mark the other done, or a user who granted permissions before this
@@ -105,11 +112,39 @@ export interface NotificationData {
 export type DictationLanguage = "en-US" | "ml-IN";
 
 export async function loadReminders(): Promise<Reminder[]> {
+  let raw: string | null = null;
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as Reminder[];
+    raw = await AsyncStorage.getItem(STORAGE_KEY);
+  } catch {
+    // Storage itself is unavailable; there is nothing to quarantine.
+    return [];
+  }
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed as Reminder[];
   } catch {}
+
+  // Unreadable, or readable but not an array. Preserve it before any caller
+  // can overwrite the slot, then present as empty so the app still starts.
+  await quarantineCorruptStore(raw);
   return [];
+}
+
+async function quarantineCorruptStore(raw: string): Promise<void> {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    // One quarantine per corrupt payload. Re-reading the same bad value on
+    // every launch must not spawn a new copy each time and fill storage.
+    for (const key of keys) {
+      if (!key.startsWith(QUARANTINE_KEY_PREFIX)) continue;
+      if ((await AsyncStorage.getItem(key)) === raw) return;
+    }
+    await AsyncStorage.setItem(`${QUARANTINE_KEY_PREFIX}${Date.now()}`, raw);
+  } catch {
+    // Best effort. A failed quarantine must not stop the app from loading.
+  }
 }
 
 export async function saveReminders(reminders: Reminder[]): Promise<void> {

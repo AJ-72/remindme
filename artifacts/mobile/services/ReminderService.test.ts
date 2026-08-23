@@ -10,6 +10,7 @@ import {
   SNOOZE_ACTION_ID,
   MARK_DONE_ACTION_ID,
   STORAGE_KEY,
+  QUARANTINE_KEY_PREFIX,
   addReminder,
   buildBackupJson,
   importRemindersFromJson,
@@ -1204,5 +1205,48 @@ describe("send reminder notification body", () => {
     });
     const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
     expect(call.content.body).toBe("Reminder!");
+  });
+});
+
+
+describe("corrupt store quarantine", () => {
+  it("preserves an unreadable payload instead of letting the next write destroy it", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, "{ this is not json");
+
+    // Reads as empty, so the UI shows an empty list rather than crashing.
+    expect(await loadReminders()).toEqual([]);
+
+    // The corrupt payload is still recoverable under a quarantine key.
+    const keys = await AsyncStorage.getAllKeys();
+    const quarantined = keys.filter((k) => k.startsWith(QUARANTINE_KEY_PREFIX));
+    expect(quarantined).toHaveLength(1);
+    expect(await AsyncStorage.getItem(quarantined[0])).toBe("{ this is not json");
+  });
+
+  it("does not quarantine a genuinely empty store", async () => {
+    expect(await loadReminders()).toEqual([]);
+    const keys = await AsyncStorage.getAllKeys();
+    expect(keys.filter((k) => k.startsWith(QUARANTINE_KEY_PREFIX))).toHaveLength(0);
+  });
+
+  // A second failed read must not bury the first quarantine under a new one,
+  // nor spawn unbounded copies on every cold start.
+  it("quarantines at most once per corrupt payload", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, "{ bad");
+    await loadReminders();
+    await loadReminders();
+
+    const keys = await AsyncStorage.getAllKeys();
+    expect(keys.filter((k) => k.startsWith(QUARANTINE_KEY_PREFIX))).toHaveLength(1);
+  });
+
+  // Valid JSON that is not an array would break every consumer that maps over
+  // it, so it is treated as corrupt rather than returned.
+  it("treats valid-but-wrong-shaped JSON as corrupt", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ not: "an array" }));
+    expect(await loadReminders()).toEqual([]);
+
+    const keys = await AsyncStorage.getAllKeys();
+    expect(keys.filter((k) => k.startsWith(QUARANTINE_KEY_PREFIX))).toHaveLength(1);
   });
 });
