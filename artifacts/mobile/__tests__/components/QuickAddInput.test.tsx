@@ -9,6 +9,7 @@ import { DEFAULT_ALARM_KEY, STORAGE_KEY } from "@/services/ReminderService";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { Linking, Platform, StyleSheet } from "react-native";
 import * as SpeechService from "@/services/SpeechService";
+import * as ContactsService from "@/services/ContactsService";
 
 jest.mock("expo-haptics");
 
@@ -453,5 +454,67 @@ describe("QuickAddInput — mic toggle", () => {
     expect(getMicColor()).toBe("#ffffff");
     expect(stopListeningSpy).not.toHaveBeenCalled();
     stopListeningSpy.mockRestore();
+  });
+});
+
+// Attaching a recipient used to require saving the reminder and then
+// re-opening it in the editor — the quick-add bar had no way in at all.
+describe("QuickAddInput — remind someone", () => {
+  beforeEach(() => {
+    jest
+      .spyOn(ContactsService, "loadPickableContacts")
+      .mockResolvedValue({
+        permission: "granted",
+        contacts: [{ name: "Priya", phone: "9876543210", contactId: "c1" }],
+      });
+  });
+
+  it("saves the picked contact as the reminder's recipient", async () => {
+    const { findByTestId, findByText } = renderComponent();
+
+    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByText("Priya"));
+
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Call Priya tomorrow at 3pm"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+      expect(stored[0].recipient).toEqual({
+        name: "Priya",
+        phone: "9876543210",
+        contactId: "c1",
+      });
+    });
+  });
+
+  // A recipient left behind after a save would silently aim the NEXT reminder
+  // at the same person.
+  it("clears the recipient after a save", async () => {
+    const { findByTestId, findByText } = renderComponent();
+
+    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByText("Priya"));
+    await waitFor(async () =>
+      expect(
+        (await findByTestId("quick-add-recipient")).props.accessibilityLabel
+      ).toBe("Remind Priya")
+    );
+
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Call Priya tomorrow at 3pm"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () =>
+      expect(
+        (await findByTestId("quick-add-recipient")).props.accessibilityLabel
+      ).toBe("Remind someone")
+    );
   });
 });

@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import ContactPickerModal from "@/components/ContactPickerModal";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
@@ -23,6 +24,8 @@ import {
   startListening,
   stopListening,
 } from "@/services/SpeechService";
+import type { PickableContact } from "@/services/ContactsService";
+import type { ReminderRecipient } from "@/services/ReminderService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import { getFontFamily } from "@/utils/getFontFamily";
 
@@ -112,6 +115,8 @@ export default function QuickAddInput({ onSaved }: Props) {
   const alarmTouchedRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [notesVisible, setNotesVisible] = useState(false);
+  const [recipient, setRecipient] = useState<ReminderRecipient | undefined>(undefined);
+  const [contactPickerVisible, setContactPickerVisible] = useState(false);
   const [description, setDescription] = useState("");
   const [listening, setListening] = useState(false);
   const [micNotice, setMicNotice] = useState<string | null>(null);
@@ -201,6 +206,10 @@ export default function QuickAddInput({ onSaved }: Props) {
         description: description.trim(),
         datetime: dateToUse.toISOString(),
         alarm,
+        // Spread rather than `recipient` so an unset value omits the key
+        // entirely - `'recipient' in obj` is true even when it holds undefined,
+        // which is what isSendReminder would otherwise trip over.
+        ...(recipient ? { recipient } : {}),
       });
       setInput("");
       setParsedTitle("");
@@ -211,6 +220,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       setAlarm(defaultAlarmEnabled);
       setDescription("");
       setNotesVisible(false);
+      setRecipient(undefined);
       onSaved?.();
     } catch {
       // silent — the list will just not update
@@ -642,6 +652,24 @@ export default function QuickAddInput({ onSaved }: Props) {
             />
           </Animated.View>
         </Pressable>
+        {/* Lets a reminder be aimed at someone without a trip through the
+            editor, which was the only place a recipient could be attached. */}
+        <Pressable
+          style={styles.alarmBtn}
+          onPress={() => setContactPickerVisible(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={
+            recipient ? `Remind ${recipient.name}` : "Remind someone"
+          }
+          testID="quick-add-recipient"
+        >
+          <Feather
+            name={recipient ? "user-check" : "user-plus"}
+            size={16}
+            color={recipient ? colors.primary : colors.mutedForeground}
+          />
+        </Pressable>
         <Pressable
           style={styles.alarmBtn}
           onPress={() => setNotesVisible((v) => !v)}
@@ -693,6 +721,17 @@ export default function QuickAddInput({ onSaved }: Props) {
           <Text style={styles.micNoticeText}>{micNotice}</Text>
         )
       )}
+
+      <ContactPickerModal
+        visible={contactPickerVisible}
+        onClose={() => setContactPickerVisible(false)}
+        onSelect={(c: PickableContact) => {
+          // Name is a SNAPSHOT - never re-resolved from contacts, so a deleted
+          // contact or a revoked permission cannot break an existing reminder.
+          setRecipient({ name: c.name, phone: c.phone, contactId: c.contactId });
+          setContactPickerVisible(false);
+        }}
+      />
 
       <Modal
         visible={showDebugInfo}
