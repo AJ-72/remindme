@@ -1,0 +1,195 @@
+# Smart Alerts — design
+
+**Date:** 2026-08-23
+**Status:** approved design, not yet planned
+**Scope:** three related features sharing one foundation — vague-task detection at input, reminder-lifecycle instrumentation, and an adaptive re-nudge engine with a dread override.
+
+---
+
+## Problem
+
+Reminders fire and nothing happens. The app currently treats this as an event with no consequence: the notification is delivered once, the card turns red in the list, and that is the end of the system's involvement.
+
+Users read that silence as the app's failure. The design question is what to do about it, and the naive answer — ping again — is wrong for the most common cause.
+
+### Why people don't complete reminders
+
+Six mechanisms, ordered by how much they matter and how detectable they are from data this app can hold:
+
+1. **Avoidance, not forgetting.** The best-supported finding in procrastination research (Sirois & Pychyl) is that procrastination is *mood repair*: you postpone a task because contemplating it feels bad, and postponing delivers immediate relief. This is the dominant cause of the repeatedly-postponed reminder. It is also the most detectable, because **snooze count is a dread meter** — a deliberate user action, not an inference. Critically, additional notifications are the *worst* response: they raise avoidance and train reflexive dismissal.
+2. **The task isn't a task.** "Sort out insurance" is a project wearing a reminder's clothing. With no obvious first physical action there is nothing to start, so it stalls. Partially detectable from the verb.
+3. **Context mismatch.** Time-based reminders assume the clock predicts availability; it doesn't. Gollwitzer's implementation-intentions work found situation-anchored plans ("when I sit down at my desk") substantially outperform clock-anchored ones. Every reminder in this app is clock-anchored, so this failure is structural.
+4. **Alert habituation.** When most alerts aren't actionable in the moment, dismissal stops being a decision. Any re-nudge adds to this pressure and must earn its place.
+5. **Planning fallacy at the day level.** Eleven reminders on one day means none get done, and then the list itself becomes something to avoid opening.
+6. **Phantom incompletes.** Some incomplete reminders were done in life and never marked. Note that tray Mark-Done was broken until `53bc7b9` (2026-08-23), so **any data collected before that commit is contaminated and skews pessimistic.** Do not treat pre-fix history as a baseline.
+
+### The constraint this imposes
+
+The obvious build — a completion-rate dashboard with streaks — is the wrong one and would likely worsen behavior. Shame reliably *increases* procrastination; self-compassion reduces it. A red completion percentage and a breakable streak are shame engines.
+
+**Everything here is diagnostic and specific, never evaluative.** "You finish most morning reminders and few evening ones — move this one to 9am?" is in scope. "You missed 12 tasks this month" is not, and no surface may compute or display such a number.
+
+## Non-goals
+
+- **No insights/statistics screen.** Explicitly deferred. Instrumentation lands now so it becomes possible later; the screen itself is out of scope.
+- **No completion rate, score, streak, or any aggregate the user could read as a grade.** This is a hard constraint on every surface, not a matter of visual treatment.
+- **No location or activity triggers.** Fixing cause #3 properly means situation-anchored reminders, which is a separate feature requiring new permissions.
+- **No Malayalam vague-task detection.** See "Input fix" below — the English heuristic does not transfer, and machine translation of the prompt copy produces exactly the tone this design exists to avoid. Follows the `INVITE_NUDGES_ML` precedent in `utils/inviteNudges.ts`.
+- **No backend.** Everything stays local, consistent with the rest of the app.
+
+---
+
+## Build order
+
+The three components deliberately ship in this order:
+
+1. **Input fix** — needs no history, so it delivers value immediately.
+2. **Instrumentation** — lands alongside, and quietly accumulates the data the re-nudge needs.
+3. **Smart re-nudge** — built last, on real data.
+
+Reversing this means a long release with nothing visible to the user. The input fix is also the only one that addresses a cause at its source rather than after the failure.
+
+---
+
+## Component 1 — Instrumentation
+
+### The problem it solves
+
+The `Reminder` record holds `{id, title, description, datetime, completed, notificationId, alarm, recipient}` and nothing else. Consequently:
+
+- No `createdAt` — a reminder set three weeks ahead is indistinguishable from one set an hour ahead.
+- No `completedAt` — we cannot tell *when* things get done versus when they were scheduled. This is the single most valuable missing field.
+- **Snoozing overwrites `datetime` in place and keeps no counter** (`snoozeReminder` in `services/ReminderService.ts`), so the strongest avoidance signal in the system is erased every time it occurs.
+
+### Fields
+
+Added to `Reminder`, all optional so existing records stay valid:
+
+| Field | Type | Written by |
+| --- | --- | --- |
+| `createdAt` | ISO string | `addReminder` |
+| `completedAt` | ISO string | `toggleComplete`, `markDoneById` — cleared when un-completing |
+| `snoozeCount` | number | `snoozeReminder`, incremented; never reset |
+| `originalDatetime` | ISO string | `snoozeReminder`, set once on first snooze only |
+| `nudgesSent` | number | the re-nudge scheduler |
+
+`originalDatetime` is set **once** and never overwritten, so the distance a task has slid from its first intended time stays measurable across many snoozes.
+
+### Migration and compatibility
+
+- **Every field is optional and every reader must tolerate its absence.** Existing reminders are not back-filled — there is no honest value to back-fill with, and inventing one poisons the data.
+- Treat `snoozeCount ?? 0` and `nudgesSent ?? 0` as the reading convention. `isValidReminder` does not type-check the new fields, so a corrupt backup could deliver a string where a number is expected; read defensively rather than trusting the shape.
+
+### Backup interaction (verified against `utils/reminderBackup.ts`)
+
+New **reminder** fields need no work: `parseBackup` and `mergeReminders` both spread (`{...entry}`, `{...clean}`), so unrecognised fields already survive a round-trip. Two real gaps remain:
+
+- **`BackupSettings` is an explicit allow-list**, not a spread. The re-nudge level is a *setting*, so it will be silently dropped from every backup unless added there. This is the gap that actually bites.
+- **`mergeReminders` resolves conflicts as "local always wins"**, discarding the incoming copy wholesale. That rule is correct for its original purpose — a restore must never un-complete a reminder — but it means a locally re-typed reminder (fresh, no history) beats a backup copy carrying real accumulated `snoozeCount`. Instrumentation is lost precisely in the export → reinstall → re-type-a-few → import path the merge was built for. **Accept this loss rather than reworking the merge rule**: inverting it to preserve history would risk un-completing reminders, which is far worse than losing a counter. Document it; do not fix it.
+- Bumping `BACKUP_VERSION` is **not** required and should be avoided: `parseBackup` refuses any backup whose version exceeds its own, so a bump makes new backups unreadable by older installs for no gain, since the fields are additive and optional.
+
+---
+
+## Component 2 — Smart re-nudge
+
+### Levels
+
+Configurable, defaulting to Gentle.
+
+| | **Off** | **Gentle** (default) | **Persistent** |
+| --- | --- | --- | --- |
+| Re-alerts | none | 1 | 3 |
+| Schedule | — | +1 hour | +15 min, +1 hr, +4 hr |
+| Then | card sits overdue | card sits overdue | card sits overdue |
+
+**Off** is today's behavior and must stay reachable in one tap. Some users experience any repeat alert as harassment; for them this feature is a reason to uninstall, and the escape hatch matters more than the adoption number.
+
+**Gentle** is the default because it is the smallest intervention addressing the most common benign failure — the alert arrived while your hands were full, and an hour later is a different context. Defaulting to Persistent would quadruple every existing user's notification volume on upgrade, unasked.
+
+**Persistent** serves people who want to be chased. **The hard stop at 3 is not negotiable.** An unbounded ladder is precisely what trains reflexive dismissal, and once that reflex forms it degrades every notification the app sends.
+
+### Rules applying at every level
+
+**Quiet hours.** No re-nudge fires between 22:00 and 08:00. One scheduled inside that window is deferred to 08:00, not dropped. If several reminders have rungs deferred across the same night, they collapse into **one** 08:00 notification naming the count ("3 reminders still open") rather than a burst of separate alerts — waking to a stack of overnight notifications is the same fatigue failure quiet hours exist to prevent. Without any of this, the 4-hour rung on an evening reminder fires at 2am.
+
+**The dread override.** A reminder with `snoozeCount >= 3` gets **no further re-nudge notifications at any level, Persistent included.** It has demonstrated that more pings do not work on it. Instead it surfaces the shrink prompt in-app. The setting must not be able to override the evidence; this is the psychological thesis of the feature, not a tunable.
+
+**Daily ceiling.** Re-nudges across all reminders are capped per day, starting at 6. Eleven reminders on Persistent would otherwise add 33 notifications in a day and burn the channel down. On hitting the cap the remainder are dropped silently rather than deferred — deferring merely moves the flood.
+
+**Snooze wins.** An explicit snooze cancels that reminder's entire pending ladder and starts it fresh from the new time. Otherwise a snoozed reminder is re-nudged at its old rungs while also waiting on its new one. This is the same double-fire failure `cancelScheduledForReminder` already exists to prevent, and it must reuse that sweep rather than track ids independently.
+
+### Mechanics
+
+Re-nudges are ordinary scheduled notifications carrying the same `reminderId` payload, so the existing `cancelScheduledForReminder` sweep already reaches them. They must **not** reuse `notificationId` on the `Reminder`, which names one notification only; the ladder is found by payload.
+
+Interactions to get right:
+
+- **Completion cancels the ladder** — via `toggleComplete`, `markDoneById`, and the notification action path alike.
+- **Editing a reminder re-arms it** — `editReminder` already cancels and reschedules.
+- **Boot reschedule** (`tasks/rescheduleTask.ts`) must re-arm pending ladders, or a phone restart silently disarms them.
+- **A ladder rung whose reminder is already complete must not fire.** The cheapest guard is checking storage at schedule time and relying on the completion sweep; a stale rung firing on a done task is the most damaging possible failure for trust in this feature.
+
+### The shrink prompt
+
+Shown in-app when a reminder crosses `snoozeCount >= 3`. **Level-independent** — it is the replacement for pinging, not a companion to it, so it appears at Gentle and Persistent alike. It is not a notification, so it does not violate Off's promise either; it appears only when the user has already chosen to open the app.
+
+Offers, in this order:
+
+- **Just do 2 minutes** — the smallest credible first action, targeting cause #1 directly.
+- **Move to a better time** — targeting cause #3.
+- **Break it into steps** — targeting cause #2; splits into a first concrete action plus the remainder.
+- **Actually, drop it** — deleting is a legitimate outcome and must be offered without friction or guilt copy. A task avoided ten times is often a task that should never have been on the list.
+
+Copy discipline: it names the observation ("This one keeps sliding") and never the user's character. No "you", no counts, no "you've snoozed this 4 times".
+
+---
+
+## Component 3 — Input fix
+
+Detects a vague task at creation and offers a concrete first action before saving. Targets cause #2 at its source.
+
+- **Advisory, never blocking.** The user can always save exactly what they typed. A creation flow that argues with you is a creation flow you stop using — and the quick-add bar's whole value is that it is fast.
+- **Triggered by leading verb**, on a small curated list: "sort out", "deal with", "look into", "figure out", "think about", "handle", "organise/organize", "review", "plan". Kept deliberately short; a broad list fires on ordinary tasks and becomes noise.
+- **Never fires twice for the same text.** Dismissing the hint suppresses it for that input.
+- **English only.** The heuristic is verb-position-dependent and does not transfer to Malayalam, whose verbs are final and inflected. `MALAYALAM_RANGE` (exported from `utils/parseNaturalLanguage.ts` — do not redefine) gates it off. Deferred exactly as `INVITE_NUDGES_ML` is.
+
+Lives in `QuickAddInput` and the add/edit screen, as a hint below the input rather than a modal.
+
+---
+
+## Settings — "Smart Alerts"
+
+A dedicated screen, reached from a prominent row at the **top** of Settings rather than buried among the existing toggles.
+
+> **Open decision:** the request was for a "top level feature". This design puts it at the top of Settings with its own screen, not as a fourth tab — the tab bar is Home/Settings/About, and a settings screen does not earn permanent bottom-bar real estate. Flagging in case a tab was intended.
+
+The screen shows three choices as full-width cards, each with a one-line plain-language description and a concrete example of what it does. No sliders, no minute-pickers, no per-reminder overrides — the whole point is that one choice covers it.
+
+Below the choice, a short static footer states the two automatic behaviors, so neither feels like a bug when observed:
+
+- that nothing arrives overnight;
+- that the app stops sending alerts for tasks you keep postponing, and offers to help instead.
+
+Name: **Smart Alerts**. "Intelligent alerting" reads as infrastructure; "Smart Alerts" is shorter, is what the user will call it, and fits a settings row without wrapping.
+
+---
+
+## Error handling
+
+- All new storage reads follow the established `try/catch` + sensible-default pattern in `ReminderService`. A corrupt or missing value must never wedge scheduling.
+- A failed re-nudge schedule is swallowed like existing scheduling failures — the reminder itself is unaffected; only the extra alert is lost.
+- The daily-ceiling counter is keyed by local date and read defensively; a corrupt counter degrades to allowing nudges, never to blocking them permanently.
+
+## Testing
+
+- **Pure logic first.** Ladder computation, quiet-hours deferral, dread override, and daily-ceiling arithmetic all belong in a pure, fully-unit-tested util taking an injected `now` — mirroring `utils/snoozePresets.ts`. No timing-dependent tests.
+- **Service tests** for each instrumentation field, including that `originalDatetime` is written once and only once across repeated snoozes, and that un-completing clears `completedAt`.
+- **Backup round-trip tests** proving the new fields survive `serializeBackup` → `parseBackup` → `mergeReminders`.
+- **Screen tests** for the Smart Alerts screen, the shrink prompt at each level (including that it appears on Gentle), and the input hint's advisory/dismissible behavior.
+- **A regression test that no surface renders a completion rate.** The hardest constraint to keep is the one no test enforces.
+
+## Risks
+
+- **Notification fatigue is the failure mode that kills the feature**, and it is invisible in tests. The daily ceiling, the hard stop, and quiet hours are all load-bearing; none should be relaxed without evidence.
+- **The re-nudge cannot be validated locally.** It depends on real scheduling over hours across a device sleep cycle. It needs the same device-verification treatment as backlog item D3, which is still unverified.
+- **`snoozeCount >= 3` as the dread threshold is a guess.** It is a constant, deliberately, so it can be tuned once real data exists.
