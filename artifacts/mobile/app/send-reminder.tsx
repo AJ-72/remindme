@@ -31,7 +31,8 @@ export default function SendReminderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { reminders, loading, inviteNudgeEnabled, toggleComplete } = useReminders();
+  const { reminders, loading, inviteNudgeEnabled, toggleComplete, userName } =
+    useReminders();
 
   const reminder = reminders.find((r) => r.id === id);
 
@@ -64,6 +65,7 @@ export default function SendReminderScreen() {
         composeMessage({
           title: reminder.title,
           description: reminder.description ?? "",
+          signature: userName,
           nudge: inviteNudgeEnabled ? line : null,
         })
       );
@@ -72,6 +74,10 @@ export default function SendReminderScreen() {
     return () => {
       cancelled = true;
     };
+    // userName is intentionally absent from the deps: `seeded` makes this run
+    // once, and re-seeding on a later name change would discard whatever the
+    // user has already typed into the message box.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reminder, phoneDigits, inviteNudgeEnabled]);
 
   const options = useMemo(

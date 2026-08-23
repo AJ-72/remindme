@@ -12,6 +12,7 @@ import {
   INVITE_NUDGE_COUNT_KEY,
   INVITE_NUDGE_ENABLED_KEY,
   STORAGE_KEY,
+  USER_NAME_KEY,
   type Reminder,
 } from "@/services/ReminderService";
 
@@ -256,5 +257,33 @@ describe("dark mode", () => {
     const flat = StyleSheet.flatten((await findByText("Priya")).props.style);
     expect(flat.color).toBe(lightColors.light.foreground);
     expect(flat.color).not.toBe("#e8e8f0");
+  });
+});
+
+describe("SendReminderScreen — sender signature", () => {
+  it("signs the seeded message with the user's name", async () => {
+    await AsyncStorage.setItem(USER_NAME_KEY, "Anand");
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeSendReminder({ title: "Call the plumber", description: "" })])
+    );
+    const { findByTestId } = renderScreen();
+    await waitFor(async () =>
+      expect((await findByTestId("message-input")).props.value).toContain("— Anand")
+    );
+  });
+
+  it("leaves the message unsigned when no name is stored", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeSendReminder({ title: "Call the plumber", description: "" })])
+    );
+    const { findByTestId } = renderScreen();
+    await waitFor(async () =>
+      expect((await findByTestId("message-input")).props.value).toContain(
+        "Call the plumber"
+      )
+    );
+    expect((await findByTestId("message-input")).props.value).not.toContain("—");
   });
 });

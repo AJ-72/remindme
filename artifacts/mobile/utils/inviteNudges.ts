@@ -83,17 +83,25 @@ export function nudgeForSendCount(
 export interface ComposeInput {
   title: string;
   description: string;
+  /**
+   * The sender's own name. Appended as an em-dash signature so the recipient
+   * knows who the
+   * reminder came from. Optional throughout: the name is a skippable setting,
+   * and an empty value must produce no line at all rather than a dangling dash.
+   */
+  signature?: string | null;
   nudge?: string | null;
 }
 
 /**
- * Build the outgoing message body. Truncates the BODY, never the nudge - the
- * nudge is the shortest part and dropping it silently would defeat the cap's
- * purpose while looking fine.
+ * Build the outgoing message body. Truncates the BODY, never the signature or
+ * the nudge - those are the shortest parts, and dropping one silently would
+ * defeat the cap's purpose while looking fine.
  */
 export function composeMessage({
   title,
   description,
+  signature,
   nudge,
 }: ComposeInput): string {
   const parts: string[] = [title.trim()];
@@ -101,15 +109,18 @@ export function composeMessage({
 
   let body = parts.filter(Boolean).join("\n\n");
 
-  if (nudge) {
-    const room = MAX_MESSAGE_CHARS - nudge.length - 2; // 2 for the blank line
-    if (body.length > room) body = body.slice(0, Math.max(0, room)).trimEnd();
-    return body ? `${body}\n\n${nudge}` : nudge;
-  }
+  // Both trailers are short and fixed; the body is the only part that can be
+  // arbitrarily long, so it is the only part that may be cut. Their combined
+  // cost is reserved BEFORE truncating - adding the signature afterwards
+  // would push an already-capped message back over the limit.
+  const signatureLine = signature?.trim() ? `— ${signature.trim()}` : "";
+  const trailers = [signatureLine, nudge || ""].filter(Boolean);
+  const trailerCost = trailers.reduce((sum, part) => sum + part.length + 2, 0);
 
-  return body.length > MAX_MESSAGE_CHARS
-    ? body.slice(0, MAX_MESSAGE_CHARS).trimEnd()
-    : body;
+  const room = MAX_MESSAGE_CHARS - trailerCost;
+  if (body.length > room) body = body.slice(0, Math.max(0, room)).trimEnd();
+
+  return [body, ...trailers].filter(Boolean).join("\n\n");
 }
 
 /**

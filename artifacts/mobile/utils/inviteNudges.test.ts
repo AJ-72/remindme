@@ -156,3 +156,62 @@ describe("stripNudge", () => {
     expect(stripNudge("Milk", "")).toBeNull();
   });
 });
+
+
+// The signature is the user's own name, appended so the recipient knows who
+// the reminder came from. It shares composeMessage's budget with the nudge -
+// a signature that escaped truncation could push the message past Android's
+// intent-URI limit and fail the send outright.
+/** The blank line composeMessage puts between message parts. */
+const SEP = "\n\n";
+
+describe("composeMessage — sender signature", () => {
+  it("appends the signature after the body", () => {
+    expect(
+      composeMessage({ title: "Call the plumber", description: "", signature: "Anand" })
+    ).toBe(["Call the plumber", "— Anand"].join(SEP));
+  });
+
+  it("places the signature after the body but before the nudge", () => {
+    expect(
+      composeMessage({
+        title: "Call the plumber",
+        description: "",
+        signature: "Anand",
+        nudge: "(Sent via Reminders.)",
+      })
+    ).toBe(["Call the plumber", "— Anand", "(Sent via Reminders.)"].join(SEP));
+  });
+
+  it("omits the signature line entirely when there is no name", () => {
+    expect(
+      composeMessage({ title: "Call the plumber", description: "", signature: "" })
+    ).toBe("Call the plumber");
+    expect(
+      composeMessage({ title: "Call the plumber", description: "", signature: "   " })
+    ).toBe("Call the plumber");
+  });
+
+  it("truncates the body, never the signature", () => {
+    const result = composeMessage({
+      title: "x".repeat(2000),
+      description: "",
+      signature: "Anand",
+    });
+    expect(result.length).toBeLessThanOrEqual(MAX_MESSAGE_CHARS);
+    expect(result.endsWith("— Anand")).toBe(true);
+  });
+
+  it("keeps body, signature and nudge all within the cap together", () => {
+    const nudge = "(Sent via Reminders.)";
+    const result = composeMessage({
+      title: "x".repeat(2000),
+      description: "",
+      signature: "Anand",
+      nudge,
+    });
+    expect(result.length).toBeLessThanOrEqual(MAX_MESSAGE_CHARS);
+    expect(result.endsWith(nudge)).toBe(true);
+    expect(result).toContain("— Anand");
+  });
+});
