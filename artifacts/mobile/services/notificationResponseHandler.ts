@@ -61,18 +61,27 @@ export async function handleNotificationResponse(
   response: NotificationResponseLike,
   deps: NotificationResponseHandlerDeps
 ): Promise<void> {
-  const notificationIdentifier = response.notification.request.identifier;
-  if (deps.lastHandledId.current === notificationIdentifier) return;
-  deps.lastHandledId.current = notificationIdentifier;
+  // Keyed by notification AND action, not by notification alone. One tray
+  // notification legitimately carries several distinct responses: tapping the
+  // body opens the app, and Mark Done is pressed afterwards on the SAME
+  // notification. Keying on the notification id alone let the body tap consume
+  // the key and silently drop every later action on that notification - which
+  // is exactly how Mark Done from the tray stopped working, and why send
+  // reminders (whose flow always starts with a body tap) could never be
+  // completed there. Replays of one action still collapse, which is all the
+  // dedupe ever needed to do.
+  const responseKey = `${response.notification.request.identifier}::${response.actionIdentifier}`;
+  if (deps.lastHandledId.current === responseKey) return;
+  deps.lastHandledId.current = responseKey;
   // A response can reach us from the headless task, from the live listener, and
   // again from getLastNotificationResponseAsync() on every later cold start.
   // Only the first one may act.
-  if (await deps.hasHandledResponse(notificationIdentifier)) return;
+  if (await deps.hasHandledResponse(responseKey)) return;
 
   const data = response.notification.request.content.data;
   if (!isNotificationData(data)) return;
 
-  await deps.markResponseHandled(notificationIdentifier);
+  await deps.markResponseHandled(responseKey);
 
   if (response.actionIdentifier === deps.defaultActionIdentifier) {
     // Read STORAGE, not the notification payload. Notifications already in the

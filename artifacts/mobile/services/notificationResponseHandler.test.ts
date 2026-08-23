@@ -264,6 +264,29 @@ describe("handleNotificationResponse", () => {
     expect(deps.markResponseHandled).not.toHaveBeenCalled();
   });
 
+  // The dedupe key used to be the notification identifier alone, so ONE tray
+  // notification could be acted on only once ever. Tapping the body to open
+  // the app burned the key, and the Mark Done button on that same notification
+  // was then silently dropped. Send reminders were hit hardest: their flow
+  // starts with a body tap, so they could never be completed from the tray.
+  it("still handles Mark Done after the same notification's body was tapped", async () => {
+    const deps = makeDeps();
+    await handleNotificationResponse(
+      makeResponse(DEFAULT_ACTION_IDENTIFIER, { identifier: "notif-1" }),
+      deps
+    );
+    const later = makeDeps();
+    later.handled = deps.handled;
+    later.hasHandledResponse = jest.fn(async (id: string) =>
+      deps.handled.has(id)
+    );
+    await handleNotificationResponse(
+      makeResponse(MARK_DONE_ACTION_ID, { identifier: "notif-1" }),
+      later
+    );
+    expect(later.markDoneById).toHaveBeenCalledWith("r1");
+  });
+
   it("processes a different notification identifier normally after a previous one was handled", async () => {
     const deps = makeDeps();
     await handleNotificationResponse(
