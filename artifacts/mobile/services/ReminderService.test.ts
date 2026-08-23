@@ -33,6 +33,7 @@ import {
   requestNotificationPermissions,
   rescheduleAllFutureReminders,
   scheduleSnoozeNotification,
+  USER_NAME_KEY,
   setupSnoozeCategory,
   setDefaultAlarmEnabled,
   setDictationLanguage,
@@ -275,6 +276,47 @@ describe("notification scheduling", () => {
     expect(call.trigger.date.getTime()).toBe(
       target.getTime() - ALARM_EARLY_OFFSET_MS
     );
+  });
+});
+
+describe("snooze re-nudge personalization", () => {
+  const data: NotificationData = {
+    reminderId: "r1",
+    title: "Call the plumber",
+    body: "body",
+    alarm: true,
+    channelId: "reminders-alarm",
+  };
+
+  it("names the user in the snooze notification title", async () => {
+    await AsyncStorage.setItem(USER_NAME_KEY, "Anand");
+    await scheduleSnoozeNotification(data, new Date(Date.now() + 30 * 60 * 1000));
+
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.title).toBe("Still waiting, Anand — Call the plumber");
+  });
+
+  // The name is skippable, so the unnamed path is the one that must not
+  // regress into a dangling greeting.
+  it("keeps the plain reminder title when no name is stored", async () => {
+    await scheduleSnoozeNotification(data, new Date(Date.now() + 30 * 60 * 1000));
+
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.title).toBe("Call the plumber");
+  });
+
+  // Only the snooze re-alert is personalized: an ordinary reminder fires all
+  // day and the name would wear out fast.
+  it("leaves an ordinary reminder's notification title unpersonalized", async () => {
+    await AsyncStorage.setItem(USER_NAME_KEY, "Anand");
+    await addReminder([], {
+      title: "Call the plumber",
+      description: "",
+      datetime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.title).toBe("Call the plumber");
   });
 });
 

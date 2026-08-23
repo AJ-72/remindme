@@ -20,6 +20,8 @@ import {
   getShowDescriptionEnabled,
   getInviteNudgeEnabled,
   getSnoozePreset,
+  getUserName,
+  setUserName as serviceSetUserName,
   getVibrationEnabled,
   initNotifications,
   loadReminders,
@@ -68,6 +70,9 @@ interface RemindersContextType {
   setInviteNudgeEnabled: (enabled: boolean) => Promise<void>;
   vibrationEnabled: boolean;
   setVibrationEnabled: (enabled: boolean) => Promise<void>;
+  /** The user's own name, or "" when unset. Never undefined. */
+  userName: string;
+  setUserName: (name: string) => Promise<void>;
   dictationLanguage: DictationLanguage;
   setDictationLanguage: (lang: DictationLanguage) => Promise<void>;
   /**
@@ -96,12 +101,22 @@ export function RemindersProvider({
   const [snoozePreset, setSnoozePresetState] =
     useState<SnoozePreset>(DEFAULT_SNOOZE_PRESET);
   const [vibrationEnabled, setVibrationEnabledState] = useState(true);
+  const [userName, setUserNameState] = useState("");
   const [inviteNudgeEnabled, setInviteNudgeEnabledState] = useState(true);
 
   // Shared by the initial mount and by refreshFromStorage, so a restore can
   // never drift out of sync with what the provider loads at startup.
   const loadFromStorage = useCallback(async () => {
-    const [loadedReminders, defaultAlarm, showDescription, dictLang, preset, vibration, nudge] =
+    const [
+      loadedReminders,
+      defaultAlarm,
+      showDescription,
+      dictLang,
+      preset,
+      vibration,
+      nudge,
+      name,
+    ] =
       await Promise.all([
         loadReminders(),
         getDefaultAlarmEnabled(),
@@ -110,6 +125,7 @@ export function RemindersProvider({
         getSnoozePreset(),
         getVibrationEnabled(),
         getInviteNudgeEnabled(),
+        getUserName(),
       ]);
     setReminders(loadedReminders);
     setDefaultAlarmEnabledState(defaultAlarm);
@@ -118,6 +134,7 @@ export function RemindersProvider({
     setSnoozePresetState(preset);
     setVibrationEnabledState(vibration);
     setInviteNudgeEnabledState(nudge);
+    setUserNameState(name);
   }, []);
 
   const refreshFromStorage = useCallback(async () => {
@@ -165,6 +182,13 @@ export function RemindersProvider({
   const setVibrationEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetVibrationEnabled(enabled);
     setVibrationEnabledState(enabled);
+  }, []);
+
+  const setUserName = useCallback(async (name: string) => {
+    await serviceSetUserName(name);
+    // Store the trimmed form, matching what the service persisted, so the
+    // greeting never renders a stray space the next render would drop anyway.
+    setUserNameState(name.trim());
   }, []);
 
   const setDictationLanguage = useCallback(async (lang: DictationLanguage) => {
@@ -249,6 +273,8 @@ export function RemindersProvider({
         setInviteNudgeEnabled,
         vibrationEnabled,
         setVibrationEnabled,
+        userName,
+        setUserName,
         dictationLanguage,
         setDictationLanguage,
         refreshFromStorage,

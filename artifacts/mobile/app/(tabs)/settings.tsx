@@ -14,7 +14,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import NameSheet from "@/components/NameSheet";
 import { buildAppShareMessage } from "@/utils/appShare";
+import { getFontFamily } from "@/utils/getFontFamily";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -51,6 +53,8 @@ export default function SettingsScreen() {
     setVibrationEnabled,
     dictationLanguage,
     setDictationLanguage,
+    userName,
+    setUserName,
     refreshFromStorage,
   } = useReminders();
   const { preference, setPreference } = useThemePreference();
@@ -60,6 +64,7 @@ export default function SettingsScreen() {
   const [restoreVisible, setRestoreVisible] = useState(false);
   const [restoreText, setRestoreText] = useState("");
   const [restoreError, setRestoreError] = useState("");
+  const [nameSheetVisible, setNameSheetVisible] = useState(false);
 
   const openLogs = async () => {
     const entries = await getDebugLogs();
@@ -507,6 +512,34 @@ export default function SettingsScreen() {
 
         <Pressable
           style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
+          onPress={() => setNameSheetVisible(true)}
+          testID="user-name-row"
+        >
+          <Feather name="user" size={18} color={colors.mutedForeground} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alarmLabel}>Your name</Text>
+            <Text
+              style={[
+                styles.alarmSubLabel,
+                userName
+                  ? { fontFamily: getFontFamily(userName, "400Regular") }
+                  : null,
+              ]}
+              testID="user-name-value"
+            >
+              {userName || "Not set — used to greet you and sign your messages"}
+            </Text>
+          </View>
+          <Feather
+            name="chevron-right"
+            size={18}
+            color={colors.mutedForeground}
+            style={styles.chevron}
+          />
+        </Pressable>
+
+        <Pressable
+          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
           onPress={shareApp}
           testID="share-app-row"
         >
@@ -668,6 +701,16 @@ export default function SettingsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <NameSheet
+        visible={nameSheetVisible}
+        initialName={userName}
+        onSave={async (name) => {
+          await setUserName(name);
+          setNameSheetVisible(false);
+        }}
+        onDismiss={() => setNameSheetVisible(false)}
+      />
     </View>
   );
 }

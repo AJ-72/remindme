@@ -19,13 +19,18 @@ import { useReminders, type Reminder } from "@/contexts/RemindersContext";
 import { isSendReminder } from "@/services/ReminderService";
 import { useColors } from "@/hooks/useColors";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
+import { buildGreeting, initialsFor } from "@/utils/greeting";
+import { getFontFamily } from "@/utils/getFontFamily";
+import NameSheet from "@/components/NameSheet";
 
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { reminders, deleteReminder, loading } = useReminders();
+  const { reminders, deleteReminder, loading, userName, setUserName } =
+    useReminders();
   const [refreshing, setRefreshing] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [nameSheetVisible, setNameSheetVisible] = useState(false);
 
   const { upcoming, sending, completed } = useMemo(() => {
     const byDateAsc = (a: Reminder, b: Reminder) =>
@@ -111,7 +116,19 @@ export default function HomeScreen() {
       width: 38,
       height: 38,
       borderRadius: 19,
-      backgroundColor: colors.muted,
+      backgroundColor: userName ? colors.primary + "1A" : colors.muted,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    headerAvatarText: {
+      fontSize: 14,
+      color: colors.primary,
+    },
+    headerAddName: {
+      fontSize: 14,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
+      marginTop: 2,
     },
     scrollContent: {
       paddingHorizontal: 20,
@@ -200,7 +217,29 @@ export default function HomeScreen() {
         <View style={styles.headerRow}>
           <View style={styles.headerTitleBlock}>
             <View style={styles.headerTitleRow}>
-              <Text style={styles.headerTitle}>Today</Text>
+              {/* Someone who skipped onboarding keeps a permanent way in - the
+                  prompt is a one-time ask, so without this the name could
+                  never be set from the screen that shows it. */}
+              <Pressable
+                onPress={() => setNameSheetVisible(true)}
+                disabled={!!userName}
+                hitSlop={8}
+                accessibilityRole={userName ? undefined : "button"}
+                accessibilityLabel={userName ? undefined : "Add your name"}
+                testID="header-greeting-press"
+                style={styles.headerTitleBlock}
+              >
+                <Text
+                  style={[
+                    styles.headerTitle,
+                    { fontFamily: getFontFamily(userName, "700Bold") },
+                  ]}
+                  numberOfLines={1}
+                  testID="header-greeting"
+                >
+                  {userName ? buildGreeting(userName, new Date()) : "Hi there"}
+                </Text>
+              </Pressable>
               <Text style={styles.headerDate} testID="header-date">
                 {formatHeaderDate(new Date())}
               </Text>
@@ -208,13 +247,38 @@ export default function HomeScreen() {
             <Text style={styles.headerSubtitle}>
               {/* Counts BOTH sections: they partition the incomplete
                   reminders, so counting only `upcoming` would under-report
-                  the moment a send reminder exists. */}
+                  the moment a send reminder exists. The count must survive the
+                  unnamed state - it is the only status on this screen, and
+                  trading it for the name prompt would make the app LESS useful
+                  to the user who skipped onboarding. */}
               {upcoming.length + sending.length === 0
-                ? "All caught up!"
+                ? userName
+                  ? `All caught up, ${userName}!`
+                  : "All caught up!"
                 : `${upcoming.length + sending.length} upcoming`}
             </Text>
           </View>
-          <View style={styles.headerAvatar} />
+          <Pressable
+            style={styles.headerAvatar}
+            onPress={() => setNameSheetVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel={userName ? "Edit your name" : "Add your name"}
+            testID="header-avatar"
+          >
+            {!userName ? (
+              <Feather name="user-plus" size={17} color={colors.mutedForeground} />
+            ) : (
+              <Text
+                style={[
+                  styles.headerAvatarText,
+                  { fontFamily: getFontFamily(userName, "600SemiBold") },
+                ]}
+                testID="header-initials"
+              >
+                {initialsFor(userName)}
+              </Text>
+            )}
+          </Pressable>
         </View>
       </View>
 
@@ -295,6 +359,16 @@ export default function HomeScreen() {
           </>
         )}
       </KeyboardAwareScrollViewCompat>
+
+      <NameSheet
+        visible={nameSheetVisible}
+        initialName={userName}
+        onSave={async (name) => {
+          await setUserName(name);
+          setNameSheetVisible(false);
+        }}
+        onDismiss={() => setNameSheetVisible(false)}
+      />
 
       <ConfirmSheet
         visible={pendingDeleteId !== null}

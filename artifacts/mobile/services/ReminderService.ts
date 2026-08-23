@@ -9,6 +9,8 @@ import {
   type SnoozePreset,
 } from "@/utils/snoozePresets";
 
+import { buildSnoozeTitle } from "@/utils/greeting";
+
 import {
   mergeReminders,
   parseBackup,
@@ -33,6 +35,11 @@ export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
 export const VIBRATION_KEY = "@vibration_v1";
 export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
+export const USER_NAME_KEY = "@user_name_v1";
+// Separate from PERMISSION_ONBOARDING_KEY on purpose: one flow completing must
+// not mark the other done, or a user who granted permissions before this
+// feature existed would never be asked their name.
+export const NAME_PROMPT_KEY = "@name_prompt_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 // NOTE: the value must stay "SNOOZE_10" even though snooze is now
 // user-configurable. It is written into the categoryIdentifier of every
@@ -107,6 +114,39 @@ export async function loadReminders(): Promise<Reminder[]> {
 
 export async function saveReminders(reminders: Reminder[]): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(reminders));
+}
+
+/**
+ * The user's own name, or "" when unset. Never undefined - the empty string is
+ * the single "no name" signal every consumer checks.
+ */
+export async function getUserName(): Promise<string> {
+  try {
+    const raw = await AsyncStorage.getItem(USER_NAME_KEY);
+    if (typeof raw === "string") return raw.trim();
+  } catch {}
+  return "";
+}
+
+export async function setUserName(name: string): Promise<void> {
+  await AsyncStorage.setItem(USER_NAME_KEY, name.trim());
+}
+
+/** Whether the first-launch name prompt has been shown (answered OR skipped). */
+export async function hasSeenNamePrompt(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(NAME_PROMPT_KEY)) !== null;
+  } catch {
+    // Treat a storage failure as "already seen" - re-prompting on every cold
+    // start is far worse than never prompting.
+    return true;
+  }
+}
+
+export async function markNamePromptSeen(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(NAME_PROMPT_KEY, "1");
+  } catch {}
 }
 
 export async function getDefaultAlarmEnabled(): Promise<boolean> {
@@ -523,9 +563,14 @@ export async function scheduleSnoozeNotification(
     const snoozeDate = new Date(
       Math.max(Date.now(), target.getTime() - ALARM_EARLY_OFFSET_MS)
     );
+    // Read the name here rather than threading it through NotificationData:
+    // the headless snooze path builds that payload from a notification that
+    // may predate this feature, so a payload field would be missing exactly
+    // when it is needed.
+    const title = buildSnoozeTitle(await getUserName(), data.title);
     const id = await Notifications.scheduleNotificationAsync({
       content: {
-        title: data.title,
+        title,
         body: data.body,
         sound: data.alarm,
         categoryIdentifier: SNOOZE_CATEGORY_ID,

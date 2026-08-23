@@ -23,6 +23,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ExactAlarmBanner from "@/components/ExactAlarmBanner";
+import NameOnboarding from "@/components/NameOnboarding";
 import NotificationResponseHandler from "@/components/NotificationResponseHandler";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
@@ -75,6 +76,7 @@ export default function RootLayout() {
   });
 
   const [showAlarmBanner, setShowAlarmBanner] = useState(false);
+  const [readyForNamePrompt, setReadyForNamePrompt] = useState(false);
   const alarmChecked = useRef(false);
 
   useEffect(() => {
@@ -103,13 +105,20 @@ export default function RootLayout() {
   // it isn't already granted. Runs once per install, tracked in AsyncStorage.
   useEffect(() => {
     hasCompletedPermissionOnboarding().then(async (completed) => {
-      if (completed) return;
+      if (completed) {
+        setReadyForNamePrompt(true);
+        return;
+      }
       await requestNotificationPermissions();
       const exactAlarmGranted = await checkExactAlarmPermission();
       if (exactAlarmGranted === false) {
         openExactAlarmSettings();
       }
       await markPermissionOnboardingComplete();
+      // Only now may the name sheet open. Asking while a system permission
+      // dialog is up would put it behind that dialog, and the tap dismissing
+      // the dialog would skip the name prompt for good.
+      setReadyForNamePrompt(true);
     });
   }, []);
 
@@ -147,6 +156,7 @@ export default function RootLayout() {
               <KeyboardProvider>
                 <RemindersProvider>
                   <NotificationResponseHandler />
+                  <NameOnboarding enabled={readyForNamePrompt} />
                   <SharedTextProvider>
                     <View style={{ flex: 1 }}>
                       {showAlarmBanner && (

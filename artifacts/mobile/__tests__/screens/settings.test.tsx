@@ -13,6 +13,7 @@ import {
   DICTATION_LANGUAGE_KEY,
   VIBRATION_KEY,
   STORAGE_KEY,
+  USER_NAME_KEY,
 } from "@/services/ReminderService";
 import { logDebug } from "@/services/DebugLogService";
 import darkColors from "@/constants/colors";
@@ -447,5 +448,43 @@ describe("SettingsScreen — share this app", () => {
     expect(shared).toContain(APP_SHARE_BLURB);
     // APP_STORE_URL is a documented placeholder until first publish.
     expect(shared).not.toMatch(/https?:\/\//);
+  });
+});
+
+describe("SettingsScreen — your name", () => {
+  it("shows a not-set hint until a name exists", async () => {
+    const { findByTestId } = renderScreen();
+    expect((await findByTestId("user-name-value")).props.children).toBe(
+      "Not set — used to greet you and sign your messages"
+    );
+  });
+
+  it("saves an edited name and reflects it in the row", async () => {
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("user-name-row"));
+    fireEvent.changeText(await findByTestId("name-sheet-input"), "  Anand  ");
+    fireEvent.press(await findByTestId("name-sheet-save"));
+
+    await waitFor(async () =>
+      // Trimmed on the way to storage, so the greeting can concatenate it
+      // without producing a double space.
+      expect(await AsyncStorage.getItem(USER_NAME_KEY)).toBe("Anand")
+    );
+    expect((await findByTestId("user-name-value")).props.children).toBe("Anand");
+  });
+
+  it("leaves the stored name untouched when the sheet is cancelled", async () => {
+    await AsyncStorage.setItem(USER_NAME_KEY, "Anand");
+    const { findByTestId } = renderScreen();
+    await waitFor(async () =>
+      expect((await findByTestId("user-name-value")).props.children).toBe("Anand")
+    );
+
+    fireEvent.press(await findByTestId("user-name-row"));
+    fireEvent.changeText(await findByTestId("name-sheet-input"), "Someone else");
+    fireEvent.press(await findByTestId("name-sheet-dismiss"));
+
+    expect(await AsyncStorage.getItem(USER_NAME_KEY)).toBe("Anand");
+    expect((await findByTestId("user-name-value")).props.children).toBe("Anand");
   });
 });
