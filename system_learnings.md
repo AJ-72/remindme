@@ -9,6 +9,26 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-23 — A notification-response dedupe key must include the ACTION, and a screen with no in-app route is a dead screen
+
+**1. Keying response dedupe on the notification id alone silently disables every action button.** `services/handledResponses.ts` marks a response handled by `response.notification.request.identifier`, and `handleNotificationResponse` returns early on a hit. That identifier names the NOTIFICATION, not the response — so one tray notification could be acted on exactly once, ever. Tapping the body (which navigates) burned the key, and pressing **Mark Done** on that same notification afterwards was dropped before reaching `markDoneById`. Send reminders could never be completed from the tray at all, because their flow *always* opens with a body tap. Fixed by keying on `` `${notificationId}::${actionIdentifier}` `` in `services/notificationResponseHandler.ts`. **The dedupe still collapses replays of a single action, which is all it was ever for** — the cross-process (headless task vs. foreground listener) and cold-start-replay protections are unaffected, and their four existing tests passed unchanged. Reported as "mark as done doesn't work"; the in-app checkbox was never involved.
+
+**2. A screen reachable only from a notification is effectively unreachable.** `app/send-reminder.tsx` had shipped with a working "Mark as done" button that no user had ever seen: `ReminderCard` routed every tap to `/add-reminder`, so the only route in was tapping a fired notification. **When adding a screen, check that something in the running UI navigates to it** — "the notification opens it" is not a route users can find. Send cards now route to `/send-reminder`; the trade is that tapping a send card no longer opens the editor.
+
+**3. Reserve a trailer's length BEFORE truncating the body, not after.** `composeMessage` (`utils/inviteNudges.ts`) now appends both a `— Name` signature and the invite nudge. Appending the signature after the nudge-aware truncation would push an already-capped message back over `MAX_MESSAGE_CHARS` and fail the Android intent-URI send outright. Both trailers are short and fixed; the body is the only arbitrarily-long part, so it is the only part that may be cut. One combined `trailerCost` is subtracted up front.
+
+**4. Do not extract a hook out of `QuickAddInput`'s mic.** `hooks/useDictation.ts` is used by `app/add-reminder.tsx` only. QuickAddInput deliberately keeps its own copy because it shares the recognizer with `expo-share-intent` audio transcription: every start/stop there must consult `micSourceRef` first and must never stop a transcription in flight (see Finding 2b in that file). Folding that branch into the shared hook would push a concern the hook's only other caller cannot reach onto every caller. **The duplication is the cheaper side of this trade.**
+
+**5. Sequence first-launch sheets explicitly; do not race them.** The name prompt (`components/NameOnboarding.tsx`) is gated behind a `readyForNamePrompt` flag that `app/_layout.tsx` sets only after permission onboarding resolves. Rendering it unconditionally puts it *behind* the system permission dialog, where the tap dismissing that dialog also skips the name prompt — permanently, since skipping is recorded as answered. Its `@name_prompt_v1` key is deliberately separate from `PERMISSION_ONBOARDING_KEY`: sharing one key would mean anyone who granted permissions before this feature existed is never asked their name.
+
+**6. An optional personalization must not cost the user information.** The first cut of the greeting header replaced the "N upcoming" subtitle with "tap to add your name" — making the app *less* useful to anyone who skipped onboarding. The count now always renders; the greeting line itself carries the tap target. **When a feature has a skippable setup, check that the un-set state is no worse than before the feature existed.**
+
+**Also worth keeping:** `APP_STORE_URL` in `utils/appShare.ts` is an intentionally empty placeholder until first store publish, and `buildAppShareMessage` **omits the link line entirely** rather than emitting an empty or dead URL — an unreleased build shares clean text. Fill it in at publish; a test pins the omission.
+
+**WHERE:** `services/{notificationResponseHandler,ReminderService}.ts`, `components/{ReminderCard,QuickAddInput,NameSheet,NameOnboarding}.tsx`, `hooks/useDictation.ts`, `utils/{inviteNudges,greeting,appShare}.ts`, `app/{_layout,send-reminder,add-reminder}.tsx`, `app/(tabs)/{index,settings}.tsx`. Commits `53bc7b9`..`7f41cf2`.
+
+---
+
 ## 2026-08-17 — Expo Router path types are GENERATED, and splitting a list section silently breaks its header count
 
 Two traps from building M4 Tier 1's UI. Both produce a *plausible* wrong result rather than an obvious failure.
