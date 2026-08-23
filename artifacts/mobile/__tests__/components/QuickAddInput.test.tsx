@@ -518,3 +518,80 @@ describe("QuickAddInput — remind someone", () => {
     );
   });
 });
+
+
+describe("QuickAddInput — quiet hours confirmation", () => {
+  // 23:30 is inside the default 22:00-08:00 window; 14:00 is outside. Both
+  // phrasings verified against the real parser before being used here.
+  it("asks before saving inside quiet hours, and keeps the time when told to", async () => {
+    const { findByTestId } = renderComponent();
+
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Take the tablet at 11:30pm"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    // Nothing saved yet - the sheet is asking first.
+    expect(await AsyncStorage.getItem(STORAGE_KEY)).toBeNull();
+
+    fireEvent.press(await findByTestId("quiet-hours-sheet-keep"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+      expect(new Date(stored[0].datetime).getHours()).toBe(23);
+      expect(new Date(stored[0].datetime).getMinutes()).toBe(30);
+    });
+  });
+
+  it("moves the reminder to the end of quiet hours when asked", async () => {
+    const { findByTestId } = renderComponent();
+
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Take the tablet at 11:30pm"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+    fireEvent.press(await findByTestId("quiet-hours-sheet-move"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+      expect(new Date(stored[0].datetime).getHours()).toBe(8);
+      expect(new Date(stored[0].datetime).getMinutes()).toBe(0);
+    });
+  });
+
+  it("saves without asking when the time is outside quiet hours", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Call the plumber at 2pm"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+    });
+    expect(queryByTestId("quiet-hours-sheet-keep")).toBeNull();
+  });
+
+  // Dismissing must abandon the save entirely rather than silently writing
+  // the reminder the user was still deciding about.
+  it("saves nothing when the sheet is dismissed", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Take the tablet at 11:30pm"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+    fireEvent.press(await findByTestId("quiet-hours-sheet-overlay"));
+
+    await waitFor(() => expect(queryByTestId("quiet-hours-sheet-keep")).toBeNull());
+    expect(await AsyncStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+});

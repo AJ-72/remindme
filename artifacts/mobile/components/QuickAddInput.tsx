@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import ContactPickerModal from "@/components/ContactPickerModal";
+import QuietHoursSheet from "@/components/QuietHoursSheet";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
@@ -27,6 +28,7 @@ import {
 import type { PickableContact } from "@/services/ContactsService";
 import type { ReminderRecipient } from "@/services/ReminderService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
+import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
 import { getFontFamily } from "@/utils/getFontFamily";
 
 type DateTimePickerEvent = { type: string; nativeEvent: object };
@@ -97,7 +99,8 @@ interface Props {
 
 export default function QuickAddInput({ onSaved }: Props) {
   const colors = useColors();
-  const { addReminder, defaultAlarmEnabled, dictationLanguage } = useReminders();
+  const { addReminder, defaultAlarmEnabled, dictationLanguage, quietHours } =
+    useReminders();
   const {
     sharedText,
     clearSharedText,
@@ -117,6 +120,7 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [notesVisible, setNotesVisible] = useState(false);
   const [recipient, setRecipient] = useState<ReminderRecipient | undefined>(undefined);
   const [contactPickerVisible, setContactPickerVisible] = useState(false);
+  const [quietPrompt, setQuietPrompt] = useState<Date | null>(null);
   const [description, setDescription] = useState("");
   const [listening, setListening] = useState(false);
   const [micNotice, setMicNotice] = useState<string | null>(null);
@@ -197,6 +201,29 @@ export default function QuickAddInput({ onSaved }: Props) {
   }, [input]);
 
   const doSave = async (dateToUse: Date) => {
+    // Ask, never block. The app defers its OWN alerts out of quiet hours
+    // silently, but a time the user chose deliberately is a different thing -
+    // refusing to set it is the only genuinely wrong move here.
+    if (isQuietAt(dateToUse, quietHours)) {
+      setQuietPrompt(dateToUse);
+      return;
+    }
+    await performSave(dateToUse);
+  };
+
+  const handleQuietKeep = async () => {
+    const target = quietPrompt;
+    setQuietPrompt(null);
+    if (target) await performSave(target);
+  };
+
+  const handleQuietMove = async () => {
+    const target = quietPrompt;
+    setQuietPrompt(null);
+    if (target) await performSave(quietHoursEndAfter(target, quietHours));
+  };
+
+  const performSave = async (dateToUse: Date) => {
     const title = parsedTitle || input.trim();
     if (!title.trim()) return;
     setSaving(true);
@@ -720,6 +747,17 @@ export default function QuickAddInput({ onSaved }: Props) {
         ) : (
           <Text style={styles.micNoticeText}>{micNotice}</Text>
         )
+      )}
+
+      {quietPrompt && (
+        <QuietHoursSheet
+          visible
+          datetime={quietPrompt}
+          quietEnd={quietHoursEndAfter(quietPrompt, quietHours)}
+          onKeep={handleQuietKeep}
+          onMove={handleQuietMove}
+          onCancel={() => setQuietPrompt(null)}
+        />
       )}
 
       <ContactPickerModal
