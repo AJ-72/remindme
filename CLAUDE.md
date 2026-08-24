@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Reminders** — a mobile app (React Native/Expo) for scheduling reminders with local notifications. Reminders are stored locally on-device via AsyncStorage; the API server exists but the mobile app does not yet use it. Supports voice dictation (English/Malayalam, user-selectable in Settings) and Malayalam-script text input/rendering throughout.
+**Reminders** — a mobile app (React Native/Expo) for scheduling reminders with local notifications. Reminders are stored locally on-device via AsyncStorage. **There is no working backend**: `artifacts/api-server` serves exactly one route (`GET /api/healthz`) and `lib/db` defines zero tables — see "The backend is empty scaffolding" below before planning anything that assumes a server. Supports voice dictation (English/Malayalam, user-selectable in Settings) and Malayalam-script text input/rendering throughout.
 
 ## Run & Operate
 
@@ -68,9 +68,9 @@ Required env: `DATABASE_URL` — Postgres connection string (for api-server and 
 
 ## Architecture decisions
 
-**API codegen flow**: Edit `lib/api-spec/openapi.yaml` → run `codegen` → `lib/api-client-react` and `lib/api-zod` regenerate. Never edit files inside `generated/` directories directly. The OpenAPI `info.title` **must stay "Api"** — the orval config enforces this and import paths break if it changes.
+**API codegen flow**: Edit `lib/api-spec/openapi.yaml` → run `codegen` → `lib/api-client-react` and `lib/api-zod` regenerate. Never edit files inside `generated/` directories directly. The OpenAPI `info.title` **must stay "Api"** — the orval config enforces this and import paths break if it changes. Note the spec currently declares a single path (`/healthz`), so the generated client has one hook; this is a working pipeline with nothing yet flowing through it.
 
-**DB schema source of truth**: `lib/db/src/schema/` — one file per table, each exporting a Drizzle table, `insertXSchema` (via `drizzle-zod`), and `InsertX`/`X` types. The `lib/db/src/schema/index.ts` re-exports all tables.
+**DB schema source of truth**: `lib/db/src/schema/` — one file per table, each exporting a Drizzle table, `insertXSchema` (via `drizzle-zod`), and `InsertX`/`X` types. The `lib/db/src/schema/index.ts` re-exports all tables. **It currently defines no tables at all** — `index.ts` is a commented template ending in `export {}`. This describes the convention to follow, not an existing schema.
 
 **Mobile data layer**: `RemindersContext` (`contexts/RemindersContext.tsx`) wraps `ReminderService` (`services/ReminderService.ts`), which is the single source of truth for AsyncStorage reads/writes, all persisted settings, and `expo-notifications` scheduling/permissions/channels. All reminder CRUD and settings access goes through the context — screens never call the service directly. `RemindersProvider` must wrap `SharedTextProvider` in the provider tree (see Testing below) since `SharedTextContext` reads settings via `useReminders()`.
 
@@ -121,7 +121,9 @@ Expo Router with file-based routing under `artifacts/mobile/app/`. Screens impor
 
 ## Gotchas
 
-- The mobile app uses `AsyncStorage` for persistence, not the API server. The `@workspace/api-client-react` hooks exist but are not wired into the mobile app yet.
+- **The backend is empty scaffolding.** `artifacts/api-server`, `lib/db`, `lib/api-spec` and the generated clients all exist and build, which makes it look like there is a server to develop against. There is not: the API serves one health route, `openapi.yaml` declares one path, and `lib/db` defines zero tables. The mobile app persists everything in `AsyncStorage` and calls none of it. Re-verified 2026-08-24.
+
+  This matters for planning: anything needing a server — device sync, accounts, MCP (backlog M8), remind-someone-else Tier 2 (M4), group RSVP (M7) — starts by **building that backend**, and its cost is the whole cost. Do not scope such work as "wire up the existing API".
 - `expo-notifications` is loaded via dynamic `require()` wrapped in try/catch to avoid crashes in non-native environments.
 - Android requires explicit notification channel setup; see `setupNotificationChannel()` in `ReminderService.ts` — there's a legacy channel migration to handle.
 - Use `pnpm` only — the root `package.json` preinstall hook rejects npm/yarn.
