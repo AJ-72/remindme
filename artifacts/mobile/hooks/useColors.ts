@@ -18,11 +18,24 @@ import { useThemePreference } from "@/contexts/ThemeContext";
  * enforces that, since a token missing from one palette resolves to
  * `undefined` and renders as no colour at all.
  */
-export function useColors() {
+/**
+ * The scheme the APP is actually painted in, which is not the same thing as
+ * the device scheme: an explicit "light" or "dark" preference overrides it.
+ *
+ * Exported because anything styling itself against the app's background has to
+ * agree with `useColors`. Reading `useColorScheme()` directly gives the DEVICE
+ * scheme, which is wrong whenever the user has overridden it - that mismatch
+ * is what made the status-bar icons invisible.
+ */
+export function useResolvedScheme(): "light" | "dark" {
   const systemScheme = useColorScheme();
   const { preference } = useThemePreference();
-
   const scheme = preference === "system" ? systemScheme : preference;
+  return scheme === "dark" ? "dark" : "light";
+}
+
+export function useColors() {
+  const scheme = useResolvedScheme();
   const palette = scheme === "dark" ? colors.dark : colors.light;
 
   return {

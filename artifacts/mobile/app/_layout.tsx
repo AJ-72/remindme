@@ -14,7 +14,6 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import { AppState, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -24,6 +23,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ExactAlarmBanner from "@/components/ExactAlarmBanner";
 import NameOnboarding from "@/components/NameOnboarding";
+import ThemedStatusBar from "@/components/ThemedStatusBar";
 import NotificationResponseHandler from "@/components/NotificationResponseHandler";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
@@ -144,14 +144,13 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      {/* "auto" flips the status-bar icons to match the current scheme.
-          Hardcoding "dark" renders dark icons on a dark background, i.e.
-          an invisible clock and battery. */}
-      <StatusBar style="auto" />
       {/* Outside ErrorBoundary on purpose: ErrorFallback calls useColors(),
           so the provider has to be above it for a crash screen to honour the
           user's theme. */}
       <ThemeProvider>
+        {/* Inside ThemeProvider: the icons must follow the APP's resolved
+            scheme, not the device's. See ThemedStatusBar. */}
+        <ThemedStatusBar />
         <ErrorBoundary>
           <QueryClientProvider client={queryClient}>
             <GestureHandlerRootView>
