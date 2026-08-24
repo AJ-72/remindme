@@ -19,7 +19,7 @@ import { useReminders, type Reminder } from "@/contexts/RemindersContext";
 import { isSendReminder } from "@/services/ReminderService";
 import { useColors } from "@/hooks/useColors";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
-import { buildGreeting, initialsFor } from "@/utils/greeting";
+import { buildGreeting, greetingName, initialsFor } from "@/utils/greeting";
 import { getFontFamily } from "@/utils/getFontFamily";
 import NameSheet from "@/components/NameSheet";
 
@@ -82,11 +82,17 @@ export default function HomeScreen() {
       fontFamily: "Inter_700Bold",
       color: colors.foreground,
     },
+    headerSubtitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginTop: 2,
+      flexWrap: "wrap",
+    },
     headerSubtitle: {
       fontSize: 14,
       fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
-      marginTop: 2,
     },
     headerRow: {
       flexDirection: "row",
@@ -97,20 +103,6 @@ export default function HomeScreen() {
     // it off-screen once the date sits alongside the title.
     headerTitleBlock: {
       flex: 1,
-    },
-    headerTitleRow: {
-      flexDirection: "row",
-      // baseline, not center: the date is much smaller than the title, and
-      // centering it against a 28px word makes it look like it's floating.
-      alignItems: "baseline",
-      gap: 8,
-    },
-    headerDate: {
-      fontSize: 13,
-      fontFamily: "Inter_400Regular",
-      color: colors.mutedForeground,
-      // Lets the date shrink before the title does if the row runs out of room.
-      flexShrink: 1,
     },
     headerAvatar: {
       width: 38,
@@ -216,47 +208,58 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <View style={styles.headerTitleBlock}>
-            <View style={styles.headerTitleRow}>
-              {/* Someone who skipped onboarding keeps a permanent way in - the
-                  prompt is a one-time ask, so without this the name could
-                  never be set from the screen that shows it. */}
-              <Pressable
-                onPress={() => setNameSheetVisible(true)}
-                disabled={!!userName}
-                hitSlop={8}
-                accessibilityRole={userName ? undefined : "button"}
-                accessibilityLabel={userName ? undefined : "Add your name"}
-                testID="header-greeting-press"
-                style={styles.headerTitleBlock}
+            {/* Someone who skipped onboarding keeps a permanent way in - the
+                prompt is a one-time ask, so without this the name could
+                never be set from the screen that shows it. */}
+            <Pressable
+              onPress={() => setNameSheetVisible(true)}
+              disabled={!!userName}
+              hitSlop={8}
+              accessibilityRole={userName ? undefined : "button"}
+              accessibilityLabel={userName ? undefined : "Add your name"}
+              testID="header-greeting-press"
+            >
+              <Text
+                style={[
+                  styles.headerTitle,
+                  { fontFamily: getFontFamily(userName, "700Bold") },
+                ]}
+                numberOfLines={1}
+                // Shrinks before it truncates. The greeting already uses the
+                // first name only, so this is the last resort for an unusually
+                // long one rather than the normal case.
+                adjustsFontSizeToFit
+                minimumFontScale={0.7}
+                testID="header-greeting"
               >
-                <Text
-                  style={[
-                    styles.headerTitle,
-                    { fontFamily: getFontFamily(userName, "700Bold") },
-                  ]}
-                  numberOfLines={1}
-                  testID="header-greeting"
-                >
-                  {userName ? buildGreeting(userName, new Date()) : "Hi there"}
-                </Text>
-              </Pressable>
-              <Text style={styles.headerDate} testID="header-date">
+                {userName ? buildGreeting(userName, new Date()) : "Hi there"}
+              </Text>
+            </Pressable>
+            {/* The date moved down here so the greeting owns the full width.
+                Sharing a row with it is what truncated "Good morning, Anand"
+                to "Good morn.." on a normal-width phone. */}
+            {/* Siblings rather than nested Text children: a nested run makes
+                the whole subtitle one text node, and every by-text query for
+                the count stops matching. */}
+            <View style={styles.headerSubtitleRow}>
+              <Text style={styles.headerSubtitle} testID="header-date">
                 {formatHeaderDate(new Date())}
               </Text>
-            </View>
-            <Text style={styles.headerSubtitle}>
+              <Text style={styles.headerSubtitle}>·</Text>
               {/* Counts BOTH sections: they partition the incomplete
                   reminders, so counting only `upcoming` would under-report
                   the moment a send reminder exists. The count must survive the
                   unnamed state - it is the only status on this screen, and
                   trading it for the name prompt would make the app LESS useful
                   to the user who skipped onboarding. */}
-              {upcoming.length + sending.length === 0
-                ? userName
-                  ? `All caught up, ${userName}!`
-                  : "All caught up!"
-                : `${upcoming.length + sending.length} upcoming`}
-            </Text>
+              <Text style={styles.headerSubtitle}>
+                {upcoming.length + sending.length === 0
+                  ? userName
+                    ? `All caught up, ${greetingName(userName)}!`
+                    : "All caught up!"
+                  : `${upcoming.length + sending.length} upcoming`}
+              </Text>
+            </View>
           </View>
           <Pressable
             style={styles.headerAvatar}

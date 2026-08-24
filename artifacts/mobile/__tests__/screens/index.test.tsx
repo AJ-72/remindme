@@ -313,3 +313,45 @@ describe("HomeScreen — personal greeting", () => {
     expect(flat.fontFamily).toBe("NotoSansMalayalam_700Bold");
   });
 });
+
+
+// "Good morn.." on a real device: the greeting shared a row with the date and
+// truncated. The date now sits on the subtitle line so the greeting owns the
+// full width, and it greets by first name only.
+describe("HomeScreen — header fits a long name", () => {
+  it("greets by first name, not the full stored name", async () => {
+    await AsyncStorage.setItem(USER_NAME_KEY, "Anand Jayaram");
+    const { findByTestId } = renderScreen();
+    await waitFor(async () =>
+      expect((await findByTestId("header-greeting")).props.children).toContain("Anand")
+    );
+    expect((await findByTestId("header-greeting")).props.children).not.toContain(
+      "Jayaram"
+    );
+  });
+
+  it("still shows full initials in the avatar", async () => {
+    await AsyncStorage.setItem(USER_NAME_KEY, "Anand Jayaram");
+    const { findByTestId } = renderScreen();
+    await waitFor(async () =>
+      expect((await findByTestId("header-initials")).props.children).toBe("AJ")
+    );
+  });
+
+  it("shrinks rather than truncating when the name is still long", async () => {
+    await AsyncStorage.setItem(USER_NAME_KEY, "Bartholomew");
+    const { findByTestId } = renderScreen();
+    const greeting = await findByTestId("header-greeting");
+    expect(greeting.props.numberOfLines).toBe(1);
+    expect(greeting.props.adjustsFontSizeToFit).toBe(true);
+    expect(greeting.props.minimumFontScale).toBeLessThan(1);
+  });
+
+  it("keeps the date visible on its own line", async () => {
+    await AsyncStorage.setItem(USER_NAME_KEY, "Anand Jayaram");
+    const { findByTestId } = renderScreen();
+    expect((await findByTestId("header-date")).props.children).toBe(
+      formatHeaderDate(new Date())
+    );
+  });
+});

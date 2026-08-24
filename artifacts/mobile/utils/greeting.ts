@@ -24,12 +24,27 @@ function timeOfDayGreeting(date: Date): string {
 }
 
 /**
+ * The name to greet someone by: their first word only.
+ *
+ * "Anand Jayaram" greets as "Anand", which is both how people actually
+ * address each other and materially shorter - the header greeting sits on one
+ * line beside nothing else, and a full name pushed it into truncation
+ * ("Good morn..") on a normal-width phone. Full name still shows in Settings;
+ * full initials still show in the avatar.
+ */
+export function greetingName(name: string): string {
+  return name.trim().split(/\s+/).filter(Boolean)[0] ?? "";
+}
+
+/**
  * "Good morning, Anand" - or plain "Good morning" when no name is stored.
+ *
+ * Uses the first name only; see greetingName.
  */
 export function buildGreeting(name: string, date: Date): string {
-  const trimmed = name.trim();
+  const first = greetingName(name);
   const greeting = timeOfDayGreeting(date);
-  return trimmed ? `${greeting}, ${trimmed}` : greeting;
+  return first ? `${greeting}, ${first}` : greeting;
 }
 
 /**

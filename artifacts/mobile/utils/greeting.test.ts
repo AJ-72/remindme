@@ -1,4 +1,9 @@
-import { buildGreeting, buildSnoozeTitle, initialsFor } from "./greeting";
+import {
+  buildGreeting,
+  buildSnoozeTitle,
+  greetingName,
+  initialsFor,
+} from "./greeting";
 
 function at(hour: number): Date {
   const d = new Date(2026, 7, 23, hour, 0, 0);
@@ -30,6 +35,13 @@ describe("buildGreeting", () => {
 
   it("trims surrounding whitespace from the name", () => {
     expect(buildGreeting("  Anand  ", at(9))).toBe("Good morning, Anand");
+  });
+
+  // A full name truncated the header to "Good morn.." on a real device. The
+  // first name is both shorter and how people actually address each other.
+  it("greets by first name only", () => {
+    expect(buildGreeting("Anand Jayaram", at(9))).toBe("Good morning, Anand");
+    expect(buildGreeting("Anand Kumar Jayaram", at(9))).toBe("Good morning, Anand");
   });
 
   it("greets a Malayalam name unchanged", () => {
@@ -78,5 +90,22 @@ describe("buildSnoozeTitle", () => {
   it("falls back to the bare reminder title with no name", () => {
     expect(buildSnoozeTitle("", "Call the plumber")).toBe("Call the plumber");
     expect(buildSnoozeTitle("  ", "Call the plumber")).toBe("Call the plumber");
+  });
+});
+
+describe("greetingName", () => {
+  it("takes the first word", () => {
+    expect(greetingName("Anand Jayaram")).toBe("Anand");
+    expect(greetingName("Anand")).toBe("Anand");
+    expect(greetingName("  Anand   Jayaram ")).toBe("Anand");
+  });
+
+  it("returns an empty string when there is no name", () => {
+    expect(greetingName("")).toBe("");
+    expect(greetingName("   ")).toBe("");
+  });
+
+  it("keeps a Malayalam first name intact", () => {
+    expect(greetingName("ആനന്ദ് ജയറാം")).toBe("ആനന്ദ്");
   });
 });
