@@ -129,6 +129,7 @@ export default function SendReminderScreen() {
       paddingVertical: 14,
     },
     headerTitle: { fontSize: 17, fontFamily: "Inter_600SemiBold", color: colors.foreground },
+    headerSpacer: { flex: 1 },
     body: { paddingHorizontal: 20, paddingBottom: 40, gap: 20 },
     label: {
       fontSize: 12,
@@ -231,6 +232,21 @@ export default function SendReminderScreen() {
           <Feather name="x" size={22} color={colors.foreground} />
         </Pressable>
         <Text style={styles.headerTitle}>Send</Text>
+        {/* A send reminder's card opens THIS screen, so without this its
+            title, description and time could not be edited at all - the
+            editor had no route in. */}
+        <View style={styles.headerSpacer} />
+        <Pressable
+          onPress={() =>
+            router.push({ pathname: "/add-reminder", params: { id: reminder.id } })
+          }
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Edit reminder"
+          testID="send-edit"
+        >
+          <Feather name="edit-2" size={19} color={colors.foreground} />
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">

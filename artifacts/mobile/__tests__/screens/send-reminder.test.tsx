@@ -3,6 +3,7 @@ import { Linking, StyleSheet, useColorScheme } from "react-native";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router } from "expo-router";
 import { getLocales } from "expo-localization";
 import lightColors from "@/constants/colors";
 import SendReminderScreen from "@/app/send-reminder";
@@ -285,5 +286,21 @@ describe("SendReminderScreen — sender signature", () => {
       )
     );
     expect((await findByTestId("message-input")).props.value).not.toContain("—");
+  });
+});
+
+
+// A send reminder's card opens this screen, so the editor had no route in at
+// all: its title, description and time could not be changed once created.
+describe("SendReminderScreen — edit access", () => {
+  it("opens the editor for this reminder", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeSendReminder()]));
+    const { findByTestId } = renderScreen();
+
+    fireEvent.press(await findByTestId("send-edit"));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/add-reminder",
+      params: { id: "s1" },
+    });
   });
 });
