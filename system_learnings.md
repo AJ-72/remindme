@@ -9,6 +9,56 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-24 — setAlarmClock() is the fix for downgraded exact alarms, and it takes over the system's ONE next-alarm slot
+
+Resolves the ColorOS downgrade recorded below. `AlarmManager.setAlarmClock()`
+is honoured where `setExactAndAllowWhileIdle()` was silently converted to
+inexact: `window=0`, and **delivery measured 0ms late in forced deep Doze** on a
+OnePlus CPH2569, against 5m02s late on the same device minutes earlier.
+
+**Why it works, and why `FLAG_WAKE_FROM_IDLE` is a red herring.** The alarm gets
+`flags 0x9` — `FLAG_STANDALONE` set but **not** `FLAG_WAKE_FROM_IDLE (0x2)` —
+and the app never appears in the dump's `Next wake from idle:` list. It is exact
+anyway, because `setAlarmClock()` registers in `mNextAlarmClockForUser` and
+`DeviceIdleController` pulls the device out of Doze *ahead of* the alarm.
+Confirmed in the dump:
+
+```
+Next alarm clock information:
+  user:0 pendingSend:false time:1787576009521 = 2026-08-24 18:23:29.521
+```
+
+**The trap: that slot holds exactly one alarm, device-wide.** It drives the
+status-bar alarm icon *and the lock screen's next-alarm text*. Our 18:23
+reminder displaced the OnePlus clock app's **06:00 alarm** there. A user with a
+morning alarm and an evening reminder sees the reminder as their "next alarm"
+and can reasonably conclude their wake-up alarm is gone. This is user harm, not
+clutter.
+
+**So route conditionally: `setAlarmClock()` ONLY for alarm-type reminders**
+(`data.alarm`, which arrives in Kotlin as `request.content.body`), and keep the
+exact/inexact path for silent ones. Consequences that follow:
+
+- `ALARM_EARLY_OFFSET_MS` **stays**. It exists solely to absorb inexact drift,
+  and silent reminders still drift. Zeroing it globally would only be correct
+  under unconditional `setAlarmClock()`. Note several tests build their
+  scenarios from that constant (`ALARM_EARLY_OFFSET_MS / 2`), so setting it to 0
+  would leave them passing while asserting nothing.
+- Anything scheduling *extra* notifications per reminder must force the
+  non-alarm-clock route explicitly — see backlog M9 (smart re-nudge), where a
+  ladder rung inheriting `alarm: true` would have every rung fight over that one
+  slot and trip OEM "frequently wakes your system" heuristics.
+- `setAlarmClock()` requires exact-alarm permission on S+ and **throws
+  SecurityException** without it. The fallback chain is mandatory, not defensive
+  padding.
+
+**WHERE:** `patches/expo-notifications@0.32.17.patch` (needs the
+`buildFromSource` opt-out — see the AAR entry below). Evidence and the remaining
+checks: D19/D20 in [`device-tests.md`](device-tests.md). Commits `df3ec64`,
+`6898f25`.
+
+---
+
 ## 2026-08-24 — Patching an Expo module's Kotlin does NOTHING: SDK 54 links a prebuilt AAR, not your source
 
 Chasing an alarm-precision bug (below) meant editing `expo-notifications`'
