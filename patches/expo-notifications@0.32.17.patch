@@ -1,0 +1,103 @@
+diff --git a/android/src/main/java/expo/modules/notifications/service/delegates/ExpoSchedulingDelegate.kt b/android/src/main/java/expo/modules/notifications/service/delegates/ExpoSchedulingDelegate.kt
+index eddd1422c5048da9aa2cecb6445d4781b62767c4..eb5d9fb3041b771639557b28c9a90f6c023db562 100644
+--- a/android/src/main/java/expo/modules/notifications/service/delegates/ExpoSchedulingDelegate.kt
++++ b/android/src/main/java/expo/modules/notifications/service/delegates/ExpoSchedulingDelegate.kt
+@@ -64,7 +64,11 @@ class ExpoSchedulingDelegate(protected val context: Context) : SchedulingDelegat
+         NotificationsService.removeScheduledNotification(context, request.identifier)
+       } else {
+         store.saveNotificationRequest(request)
+-        setupAlarm(nextTriggerDate.time, NotificationsService.createNotificationTrigger(context, request.identifier))
++        setupAlarm(
++          nextTriggerDate.time,
++          NotificationsService.createNotificationTrigger(context, request.identifier),
++          isAlarmReminder(request)
++        )
+       }
+     }
+   }
+@@ -102,21 +106,77 @@ class ExpoSchedulingDelegate(protected val context: Context) : SchedulingDelegat
+     }
+   }
+ 
+-  private fun setupAlarm(triggerAtMillis: Long, operation: PendingIntent) {
+-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()) {
++  /**
++   * PATCH (remindme, see device-tests.md D7/D19). True when the JS side marked
++   * this reminder as an alarm (`data.alarm`), which maps to NotificationContent
++   * body. Only these use setAlarmClock().
++   */
++  private fun isAlarmReminder(request: NotificationRequest): Boolean =
++    request.content?.body?.optBoolean("alarm", false) ?: false
++
++  /**
++   * PATCH (remindme, see device-tests.md D7/D19).
++   *
++   * OxygenOS/ColorOS converts a successful setExactAndAllowWhileIdle() into an
++   * INEXACT alarm at registration: the exact call was logged with no exception,
++   * yet the alarm carried windowLength 1303905 / flags 0x4 (no FLAG_STANDALONE),
++   * and Doze then deferred delivery by 2-5 minutes. setAlarmClock() is honoured
++   * (window=0, delivered 0ms late in forced Doze).
++   *
++   * It is applied ONLY to alarm-type reminders, because setAlarmClock() takes
++   * over the system's single "next alarm clock" slot -- the one driving the
++   * status-bar icon and the lock screen's next-alarm text. Using it for every
++   * reminder would overwrite the user's real wake-up alarm in that display.
++   */
++  private fun setupAlarm(triggerAtMillis: Long, operation: PendingIntent, useAlarmClock: Boolean) {
++    if (useAlarmClock) {
++      val showIntent = context.packageManager
++        .getLaunchIntentForPackage(context.packageName)
++        ?.let {
++          PendingIntent.getActivity(
++            context,
++            0,
++            it,
++            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
++          )
++        }
++
++      // setAlarmClock() requires exact-alarm permission on S+ and THROWS
++      // SecurityException without it, so the fallback below is mandatory.
++      try {
++        alarmManager.setAlarmClock(
++          AlarmManager.AlarmClockInfo(triggerAtMillis, showIntent),
++          operation
++        )
++        Log.i("ExpoSchedulingDelegate", "remindme-patch: ALARM_CLOCK set for $triggerAtMillis")
++        return
++      } catch (e: SecurityException) {
++        Log.w("ExpoSchedulingDelegate", "remindme-patch: setAlarmClock refused", e)
++      }
++    }
++
++    val exactAllowed =
++      Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
++    try {
+       AlarmManagerCompat.setExactAndAllowWhileIdle(
+         alarmManager,
+         AlarmManager.RTC_WAKEUP,
+         triggerAtMillis,
+         operation
+       )
+-    } else {
+-      AlarmManagerCompat.setAndAllowWhileIdle(
+-        alarmManager,
+-        AlarmManager.RTC_WAKEUP,
+-        triggerAtMillis,
+-        operation
++      Log.i(
++        "ExpoSchedulingDelegate",
++        "remindme-patch: EXACT set for $triggerAtMillis (alarmClock=$useAlarmClock, canScheduleExactAlarms=$exactAllowed)"
+       )
++      return
++    } catch (e: SecurityException) {
++      Log.w("ExpoSchedulingDelegate", "remindme-patch: exact refused, using inexact", e)
+     }
++    AlarmManagerCompat.setAndAllowWhileIdle(
++      alarmManager,
++      AlarmManager.RTC_WAKEUP,
++      triggerAtMillis,
++      operation
++    )
+   }
+ }

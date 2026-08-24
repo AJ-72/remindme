@@ -183,3 +183,6 @@ overrides:
 
 allowBuilds:
   esbuild: true
+
+patchedDependencies:
+  expo-notifications@0.32.17: patches/expo-notifications@0.32.17.patch
