@@ -23,6 +23,8 @@ Seven findings from testing on a real phone. Four were invisible to the whole su
 
 **Also:** an icon swap is not feedback. The quick-add contact button changed `user-plus` to `user-check` and users could not tell whether a contact had attached, because nothing named the person. State that a user must be sure of needs words, not a glyph.
 
+**The standing list of what this affects lives in [`device-tests.md`](device-tests.md)** (added 2026-08-24, canonical — `backlog.md`'s old D1-D9 section points there now). Add a feature's device-only checks in the same change that ships it, and never mark one `PASS` from a green Jest run.
+
 **WHERE:** `app/(tabs)/settings.tsx`, `app/(tabs)/index.tsx`, `components/{ThemedStatusBar,ContactPickerModal,QuickAddInput}.tsx`, `hooks/useColors.ts`. Commits `e93b46a`..`2f04bf9`.
 
 ---
