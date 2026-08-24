@@ -9,6 +9,165 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-24 — Patching an Expo module's Kotlin does NOTHING: SDK 54 links a prebuilt AAR, not your source
+
+Chasing an alarm-precision bug (below) meant editing `expo-notifications`'
+Android source via `pnpm patch`. The patch applied cleanly, the build
+succeeded, the app installed — and the patched code **never ran**. No log line,
+no behaviour change.
+
+**Root cause: Expo SDK 54 ships precompiled Android modules.** The package
+carries its own binary at
+`expo-notifications/local-maven-repo/host/exp/exponent/expo.modules.notifications/0.32.17/expo.modules.notifications-0.32.17.aar`,
+and autolinking prefers that publication over compiling `android/src/main/java`.
+A source patch is silently ignored. Nothing warns you; the only symptom is that
+your change has no effect, which reads exactly like "the fix didn't work" and
+sends you off debugging the wrong thing.
+
+**Fix — force that one module to build from source**, in
+`artifacts/mobile/package.json`:
+
+```json
+"expo": { "autolinking": { "android": { "buildFromSource": ["expo-notifications"] } } }
+```
+
+`buildFromSource` entries are regexes **full-matched against the Gradle project
+name** (`SettingsManager.kt`: `it.matches(project.name)`), so `"expo-notifications"`
+hits exactly one module and everything else keeps its fast prebuilt path.
+Expect that module to compile from scratch afterwards.
+
+**Generalise:** before concluding a native patch to any Expo module failed,
+confirm it was compiled at all — `find <pkg> -name "*.aar"`, and grep the build
+log for `:<module>:compile*Kotlin`. Absence of your log line means "not built",
+not "didn't work".
+
+**WHERE:** `patches/expo-notifications@0.32.17.patch`, `pnpm-workspace.yaml`
+(`patchedDependencies`), `artifacts/mobile/package.json`.
+
+---
+
+## 2026-08-24 — OxygenOS/ColorOS refuses exact alarms outright, so every reminder gets a multi-minute window
+
+`adb shell dumpsys alarm` on a OnePlus CPH2569 (Android 15) showed reminders
+registered **inexact**: `flags 0x4` (bare `FLAG_ALLOW_WHILE_IDLE`, missing
+`FLAG_STANDALONE` 0x1 and `FLAG_WAKE_FROM_IDLE` 0x2) with a non-zero
+`windowLength`. The window scales with distance — 43 s for a 2-minute reminder,
+21.7 min for a 30-minute one, **3600000 ms for a next-morning one**. A 09:00
+reminder may legally fire at 09:59.
+
+**The ROM silently downgrades the alarm — for us, but demonstrably not for
+every app.** `com.google.android.deskclock`, a non-system app with identical
+exact-alarm permissions, no doze exemption and a worse standby bucket, gets
+`windowLength 0` on the same device. So the cause is NOT permissions, appops,
+battery standing or system privilege — all four were checked. The mechanism is
+unknown; resist the tempting explanations, two of which were wrong here.
+An instrumented build proved the downgrade itself, by pairing the call-site log
+with the resulting alarm on a matching trigger timestamp (the only method that
+actually discriminates — see the two traps below):
+`canScheduleExactAlarms()` returned **true**, `setExactAndAllowWhileIdle()` was
+called, **nothing threw**, and the alarm still landed with `flags 0x4` and a
+21.7-minute window. `expo-notifications` is not at fault and a source patch to
+it cannot help — it would force a branch already taken. Beware the tempting
+wrong inference here: inexact flags do NOT prove the app chose the inexact
+branch, because the platform does not honour what it is told. Only logging at
+the call site distinguishes the two. Not fixable by settings either: a
+user-granted Doze exemption (`RUN_ANY_IN_BACKGROUND: allow`, standby bucket 5 /
+EXEMPTED) changed nothing. The ROM also strips `MANAGE_APP_OPS_MODES` from the
+shell user, so `adb shell cmd appops set ... SCHEDULE_EXACT_ALARM allow` is
+rejected where stock Android permits it.
+
+**Two traps for whoever tests this next:**
+
+- The app does **not** appear under Settings -> Special app access -> Alarms &
+  reminders. That is expected, not a misconfiguration — Android only lists apps
+  relying on the user-revocable `SCHEDULE_EXACT_ALARM`, and this app also holds
+  the auto-granted `USE_EXACT_ALARM`.
+- **"The notification arrived" is not evidence.** A 2-minute reminder fired ~42 s
+  late against its own target and still felt on time, because
+  `ALARM_EARLY_OFFSET_MS` had aimed 60 s early and absorbed the drift. That
+  offset exists for the duplicate-notification fix, not as slack for inexact
+  alarms, and it cannot cover an hour. **Record how late a delivery was, never
+  just that it happened.**
+
+**Three `dumpsys alarm` interpretation traps, all of which produced wrong
+conclusions here before being caught:**
+
+- **`exactAllowReason` does not mean the request was exact** — it reflects the
+  app's entitlement. The same dump had
+  `com.google.android.googlequicksearchbox` with
+  `window=+1h0m0s0ms exactAllowReason=permission flags=0x4`.
+- **`policyWhenElapsed` showing no delay does not mean the alarm is exact.** It
+  only rules out post-registration deferral by Doze/Standby/Battery Saver. The
+  window is applied at registration.
+- **The logcat ring buffer holds ~4 minutes on this device** (256 KiB; ColorOS
+  wrote ~22k lines in 7 minutes). A missing log line is far more likely
+  eviction than absence. Capture with `adb logcat -v time > file &` started
+  BEFORE the action; never conclude from `logcat -d` afterwards.
+
+**WHERE:** tracked as D7 in [`device-tests.md`](device-tests.md), which carries
+the full evidence and the remaining phases.
+
+---
+
+## 2026-08-24 — Local Android builds: release has never worked here, and installing debug destroys all app data
+
+Four independent traps hit in one session while trying to get a locally-built
+APK onto a device. None are in `CLAUDE.md`'s existing Windows section.
+
+**1. `--variant release` does not build in this repo, and never has.**
+`android/app/build/outputs/apk/` contains only `debug/`. Release fails in
+`:app:createBundleReleaseJsAndAssets` with
+`Unable to resolve module ./index.ts from <repo root>` — Metro resolves the
+entry against the **repo root** instead of `artifacts/mobile`, even though
+`react.root` is correctly left at its default. The same bundle succeeds
+standalone via `npx expo export` from `artifacts/mobile`, so it is the
+Gradle-invoked path specifically. **Release APKs come from EAS. Use
+`--variant debug` locally** — unresolved, and not worth debugging unless local
+release builds become necessary.
+
+**2. `react-native-worklets` needs `CMAKE_VERSION` in the environment.**
+`CLAUDE.md` notes the `:app` module needs an explicit
+`externalNativeBuild.cmake.version` block; that pin does **not** reach other
+native modules. Worklets failed with the documented
+`ninja: error: manifest 'build.ninja' still dirty after 100 tries`. Exporting
+`CMAKE_VERSION=4.1.2` alongside the `:app` pin fixed it.
+
+**3. A locally-built debug APK cannot replace an EAS-signed install.**
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match`. `adb install -r`
+does not help — the only route is `adb uninstall` first, which **erases
+AsyncStorage: every reminder, the user's name, quiet hours, all settings**.
+Treat swapping an EAS build for a local one as a destructive operation and get
+explicit consent.
+
+**4. There is no way to rescue that data over adb.** `run-as` refuses on a
+release build (`package not debuggable`), and the in-app backup is
+`Share.share({ message: await buildBackupJson() })`
+(`app/(tabs)/settings.tsx:96`) — it shares the JSON as **message text, not a
+file**, so nothing lands in `/sdcard/Download` to pull. If the Settings screen
+is unreachable (as it was, pre-scroll-fix), the data is simply unrecoverable.
+A file-based export would be more robust.
+
+**5. `artifacts/mobile/android/` is gitignored, prebuild-generated, and drifts
+from `app.json` — so a local APK is not equivalent to an EAS build.** EAS
+regenerates that folder every build; `expo run:android` reuses whatever is on
+disk, however old. Observed 2026-08-24: the local manifest had no
+`READ_CONTACTS` despite `app.json` declaring both the permission and the
+`expo-contacts` plugin. Android returns `denied` for an undeclared permission
+**without ever prompting**, so it presented as "the app stopped asking for
+contacts permission" — indistinguishable from a code bug, and it cost real time
+before the manifest was checked. **When a permission-dependent feature fails on
+a locally-built APK, diff the generated manifest against `app.json` before
+touching any code.** Repair with `npx expo prebuild --platform android`, then
+reapply the CMake pin (prebuild wipes it).
+
+**Operational notes:** `adb` is not on PATH — its full path is recorded in
+`device-tests.md`. From PowerShell use `Select-String`, not `grep`. And tick
+**"Always allow from this computer"** on the USB-debugging prompt: without it
+every `adb kill-server` re-prompts and the device reverts to `unauthorized`
+mid-operation.
+
+---
+
 ## 2026-08-24 — Four device-only failures that no test could have caught
 
 Seven findings from testing on a real phone. Four were invisible to the whole suite, and the pattern is worth internalising: **jsdom has no viewport, no keyboard, and no system chrome**, so anything whose failure mode is "off-screen" or "behind something" passes green forever.

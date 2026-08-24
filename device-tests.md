@@ -50,15 +50,372 @@ Package: `com.curios.remindme` · adb:
 Some items need a **native build** (not OTA): anything touching a new native
 module or a config plugin. Marked per item.
 
+**A locally-built APK is NOT equivalent to an EAS build — do not accept results
+from one as results for the other.** `artifacts/mobile/android/` is
+prebuild-generated and **gitignored**, so it is a stale local artifact that
+drifts from `app.json`. EAS regenerates it every build; a local
+`expo run:android` does not. Observed 2026-08-24: the local debug APK's
+manifest had **no `READ_CONTACTS`** even though `app.json` declares both the
+permission and the `expo-contacts` plugin — so the contacts prompt never
+appeared and the picker was empty. Android returns `denied` for an undeclared
+permission **without prompting**, which looks exactly like a code bug.
+
+Before trusting any local build, check the generated manifest against
+`app.json`:
+
+```
+grep -o 'android:name="android.permission.[A-Z_]*"'   artifacts/mobile/android/app/src/main/AndroidManifest.xml | sort -u
+```
+
+To repair: `npx expo prebuild --platform android`, then **reapply the CMake
+pin** in `android/app/build.gradle` (see CLAUDE.md) — prebuild wipes it and
+local builds then fail with the Ninja long-path error.
+
 ---
 
 ## A. Cross-cutting risks
 
-### D7 — OEM battery-killer survival · `PENDING`
-Do scheduled alarms fire at all on Xiaomi/Oppo/Vivo with battery optimization
-at its default aggressive setting? Flagged as a listing blocker in the
-2026-08-09 adoption assessment, and the blind spot behind D1 and D4. **Test
-this first** — several other items are meaningless if alarms do not fire.
+### D20 — Re-verify on an EAS build after the setAlarmClock change · `PENDING`
+*Added 2026-08-24.* Everything measured for D19 was on a **local debug APK**,
+which is not the shipping artifact. Re-run on an EAS build
+(`eas build --platform android --profile preview`, see CLAUDE.md):
+
+- **Contacts** — permission prompt appears, picker lists contacts, recipient
+  chip populates. This regressed on the local build only (missing
+  `READ_CONTACTS`, see Test environment above); confirm the EAS build is clean.
+- **Alarm-type reminder** fires exactly, and appears under
+  `dumpsys alarm` -> `Next alarm clock information`.
+- **Silent reminder** (alarm toggle off) does **not** take the next-alarm slot
+  — this is the whole point of routing conditionally, and it is
+  **uncompiled and unverified** as of 2026-08-24.
+- **The user's real clock alarm still shows** on the lock screen while a silent
+  reminder is pending. Regression watch: with unconditional `setAlarmClock()`,
+  an 18:23 reminder displaced the OnePlus clock's 06:00 alarm in that slot.
+- Confirm the release build still shows `window=0` — release and debug can
+  differ in OEM battery treatment.
+
+### D19 — setAlarmClock() fixes exact delivery · `PASS` (2026-08-24, OnePlus CPH2569, Android 15)
+*Added 2026-08-24. Read D7 first — this is the fix for it.* Measured on a
+**local debug APK**, not the shipping artifact — see D20 for the EAS re-verify.
+The alarm-timing result itself is solid (AlarmManager's own delivery log), but
+do not read it as clearance for the whole feature.
+
+`AlarmManager.setAlarmClock()` produces exact, Doze-proof delivery where
+`setExactAndAllowWhileIdle()` was silently converted to inexact. Same device,
+same conditions, forced Doze both times:
+
+| | setExactAndAllowWhileIdle | setAlarmClock |
+| --- | --- | --- |
+| `windowLength` | 1303905 ms (21m43s) | **0** |
+| `flags` | `0x4` (no FLAG_STANDALONE) | `0x9` (FLAG_STANDALONE set) |
+| Doze rewrites `whenElapsed`? | yes, onto a 5-min boundary | **no** |
+| delivery under forced Doze | **5m02s / 2m19.8s late** | **0 ms late** |
+
+```
+08-24 17:57:45.581 AlarmManager: sending alarm ... origWhen 1787574465581
+```
+Target 17:57:45.581, delivered 17:57:45.581, while `deep=IDLE`.
+
+Implemented in `patches/expo-notifications@0.32.17.patch` (requires the
+`buildFromSource` opt-out in `artifacts/mobile/package.json` — see
+system_learnings.md). Three-tier fallback with distinct log lines:
+`setAlarmClock` -> `setExactAndAllowWhileIdle` -> `setAndAllowWhileIdle`.
+
+**Still to verify before this can be called done:**
+
+- **`FLAG_WAKE_FROM_IDLE` (0x2) is NOT set** and the app does not appear in the
+  dump's `Next wake from idle:` list, yet delivery was exact anyway. Not
+  understood. Re-check after a longer Doze period, where maintenance windows
+  are further apart than under `force-idle`.
+- **`ALARM_EARLY_OFFSET_MS = 60000` must now be revisited.** It exists ONLY to
+  absorb inexact-alarm drift (see its comment in `ReminderService.ts`). With
+  exact delivery it makes every reminder fire a minute early. Removing it also
+  needs the duplicate-delivery guard at `ReminderService.ts:857-864` revisited
+  (see system_learnings.md 2026-08-09).
+- **The status-bar alarm icon.** Every scheduled reminder now registers as a
+  system alarm clock. Confirm what the user actually sees with several
+  reminders pending, and decide whether this should apply to all reminders or
+  only ones the user marks as alarms.
+- **OEM frequency heuristics.** Some ROMs flag apps calling `setAlarmClock()`
+  often as "frequently wakes your system". Unverified; watch for it.
+- **Other OEMs** — MIUI/HyperOS, OneUI, Funtouch all still untested.
+- Overnight unplugged run, and after-reboot re-arm (the boot path goes through
+  the same `setupAlarm`, so it should inherit the fix).
+
+### D7 — OEM battery-killer survival · `PARTIAL`
+Do scheduled alarms fire at all with battery optimization at its default
+aggressive setting? Flagged as a listing blocker in the 2026-08-09 adoption
+assessment, and the blind spot behind D1 and D4. **Test this first** — several
+other items are meaningless if alarms do not fire.
+
+**Passing** (2026-08-24, OnePlus `CPH2569`, Android 15 / SDK 35, battery
+optimization on, app *not* doze-whitelisted): Phase 0 (app open), Phase 1
+(backgrounded, screen off), Phase 2 (swiped from recents) and Phase 4
+(overnight, unplugged) all delivered.
+
+**Open defect — alarms are registered INEXACT with a one-hour window.**
+`adb shell dumpsys alarm` on that device shows the pending reminder as:
+
+```
+RTC_WAKEUP #160: Alarm{... com.curios.remindme} type 0
+  windowLength 3600000 ... flags 0x4
+  action expo.modules.notifications.NOTIFICATION_EVENT
+```
+
+`windowLength 3600000` means Android may fire it up to **an hour late**; an
+exact alarm has `windowLength 0`. `flags 0x4` is `FLAG_ALLOW_WHILE_IDLE`
+alone — `setExactAndAllowWhileIdle` would also set `FLAG_STANDALONE` (0x1)
+and `FLAG_WAKE_FROM_IDLE` (0x2), i.e. `0x7`. So this took the *inexact*
+branch of `setupAlarm` in expo-notifications
+(`ExpoSchedulingDelegate.kt:105`), which is only reached when
+`alarmManager.canScheduleExactAlarms()` returns false.
+
+That is surprising, because `USE_EXACT_ALARM` is `granted=true` on this
+device (auto-granted on Android 13+).
+
+**Confirmed 2026-08-24 as a live ColorOS behaviour, not a stale alarm.** A
+freshly created 2-minute reminder registered on the current build came back
+inexact too — `windowLength 43509 ... flags 0x4`. (The window scales with how
+far out the reminder is, roughly futurity/4, which is why a next-morning
+reminder gets a full hour and a 2-minute one gets 43 s.) Caught mid-flight:
+
+```
+nowELAPSED       214428005
+whenElapsed      214411527   <- 16.5 s overdue, still unfired
+maxWhenElapsed   214455036   <- OS may hold it 27 s longer
+```
+
+So `canScheduleExactAlarms()` returns false on OxygenOS/ColorOS despite the
+granted permission. Corroborating signal: this ROM also strips
+`MANAGE_APP_OPS_MODES` from the shell user, so
+`adb shell cmd appops set ... SCHEDULE_EXACT_ALARM allow` is rejected —
+stock Android permits it.
+
+**Consequence:** reminders are silently allowed to fire late, and the further
+out the reminder, the later. For an alarm-style app this is a correctness bug,
+not a polish item.
+
+**Measured on device.** The 2-minute reminder fired at ~15:07:00 against an
+alarm target of 15:06:17.9 — about 42 s late, i.e. at the very end of its
+43.5 s window. The user perceived it as on time only because
+`ALARM_EARLY_OFFSET_MS` had aimed 60 s early, so it still landed ~18 s before
+the requested 15:07:18. **That offset is masking the drift at short horizons.**
+It exists for the duplicate-notification fix (D4), not as slack for inexact
+alarms, and it cannot cover a one-hour window: the pending 09:00 reminder is
+set for 08:59 and may legally fire as late as 09:59.
+
+This is why "Phase 4 passed overnight" was weak evidence — it recorded that a
+notification *arrived*, not *when*. Always record lateness, not arrival.
+
+**Methodological trap: USB charging suppresses Doze entirely.** Every timing
+observation on 2026-08-24 was taken with the phone plugged in for adb, i.e. in
+Android's best case, where inexact alarms usually fire near their target. A
+16:59 reminder with a 16.8-minute window landed on time under exactly those
+conditions — which proves nothing, since a window is *permission* to be late,
+spent mainly when the device is idle and batching wakeups. Note that even so, a
+2-minute reminder still drifted 42 s to the edge of its window while plugged in
+and awake.
+
+**Any timing measurement for D7 must be taken UNPLUGGED**, screen off, phone
+left alone. A reminder set for the next morning, with the actual delivery time
+noted to the minute, is the single measurement that settles this.
+
+**Phase 3 (forced Doze) — RUN 2026-08-24, and it reproduces deterministically.**
+You do not need to unplug: `dumpsys battery unplug` makes the OS believe it is
+on battery while USB stays connected, so adb and Metro keep working.
+
+```
+adb shell dumpsys battery unplug          # OS now sees no charger
+adb shell input keyevent 26               # screen off
+adb shell dumpsys deviceidle force-idle
+adb shell dumpsys deviceidle get deep     # must print IDLE
+...
+adb shell dumpsys deviceidle unforce      # ALWAYS restore
+adb shell dumpsys battery reset
+```
+
+**Doze does not merely permit lateness — it rewrites the alarm.** On entering
+IDLE, both pending reminders had `whenElapsed` moved forward onto an exact
+multiple of 300000 (a 5-minute maintenance-window boundary), with
+`maxWhenElapsed` collapsed to equal it:
+
+```
+#29  whenElapsed 221860231 -> 222000000   (+139769 ms)
+#8   whenElapsed 221398059 -> 221700000   (+301941 ms)
+```
+
+Delivery matched those rewritten times to the second, per AlarmManager's own
+`sending alarm` log lines:
+
+| asked for   | delivered   | late by      |
+| ----------- | ----------- | ------------ |
+| 17:02:44.49 | 17:07:46.49 | **5m 02.0s** |
+| 17:10:26.66 | 17:12:46.47 | **2m 19.8s** |
+
+**Treat this as a FLOOR, not the worst case.** Forced Doze still runs
+maintenance windows every ~5 minutes; real overnight Doze stretches them
+progressively further apart, up to an hour. The 3600000 ms window observed on a
+next-morning reminder is the honest upper bound. An overnight unplugged run is
+still worth doing, but the mechanism is now proven and no longer in doubt.
+
+Caveat: this exercises **AOSP** Doze. ColorOS's own battery layer sits on top
+and may defer further; a pass here would be necessary, not sufficient.
+
+**Not fixable by settings — established 2026-08-24.** Enabling ColorOS's
+"Allow background activity" / Auto-launch moved the app into the Doze
+whitelist (`user,com.curios.remindme,10210`), promoted it to standby bucket
+`5` (EXEMPTED) and set `RUN_ANY_IN_BACKGROUND: allow`. A 30-minute reminder
+created in that state was **still inexact**:
+
+```
+RTC_WAKEUP #38 ... windowLength 1302875  maxWhenElapsed 217853424  flags 0x8
+```
+
+21.7 minutes of slack — a 15:42 reminder could fire as late as 16:03. The flag
+moved 0x4 -> 0x8 (a different allow-while-idle variant, presumably a quota
+class change from the exemption), but `FLAG_STANDALONE` (0x1) and
+`FLAG_WAKE_FROM_IDLE` (0x2) are still absent and the window is still non-zero.
+
+Note the app does **not** appear under Settings -> Special app access ->
+Alarms & reminders. That is expected, not a misconfiguration: Android hides
+apps holding the auto-granted `USE_EXACT_ALARM` from that screen, since it
+only lists the user-revocable `SCHEDULE_EXACT_ALARM`. So no user-facing
+setting remains to enable.
+
+**CONFIRMED by same-alarm pairing (2026-08-24, second run).** The earlier
+evidence was circumstantial; this is not. Call-site log and resulting alarm,
+matched on the trigger timestamp:
+
+```
+17:28:47.044 I ExpoSchedulingDelegate: remindme-patch: EXACT alarm set for
+                                       1787574465581 (canScheduleExactAlarms=true)
+dumpsys:  origWhen=2026-08-24 17:57:45.581   (= 1787574465581)
+          window=+21m43s905ms  flags 0x4  exactAllowReason=policy_permission
+```
+
+`setExactAndAllowWhileIdle()` called, no SecurityException, inexact alarm
+registered. The window is applied **at registration**, not by a later policy:
+`policyWhenElapsed` shows `requester` as the binding value with every policy
+offset negative (`app_standby=-24s815ms`, `device_idle=--`,
+`battery_saver=-24s815ms`), i.e. nothing deferred it afterwards.
+
+**Two interpretation traps, both of which caught me:**
+
+- **`exactAllowReason` does NOT mean the request was exact.** It reflects the
+  app's entitlement. The same dump shows
+  `com.google.android.googlequicksearchbox` with
+  `window=+1h0m0s0ms exactAllowReason=permission flags=0x4` — an inexact alarm
+  carrying a reason. Never argue exactness from this field.
+- **`policyWhenElapsed` showing no delay does NOT mean the alarm is exact.** It
+  only rules out post-registration deferral by Doze/Standby/Battery Saver.
+- **The logcat ring buffer holds ~4 minutes on this device** (256 KiB, ~22k
+  lines in 7 min). A missing log line is very likely eviction, not absence.
+  Capture with `adb logcat -v time > file &` before the action, never
+  `logcat -d` after.
+
+**ROOT CAUSE, established 2026-08-24 — ColorOS silently DOWNGRADES exact
+alarms.** An instrumented build of `expo-notifications` (forced to compile from
+source, see system_learnings.md) logged, for the very alarm below:
+
+```
+remindme-patch: EXACT alarm set for 1787571626662 (canScheduleExactAlarms=true)
+RTC_WAKEUP #56 ... origWhen 1787571626662  windowLength 1302623  flags 0x4
+```
+
+`canScheduleExactAlarms()` returned **true**, `setExactAndAllowWhileIdle()` was
+called, **no SecurityException was thrown** — and the OS registered an inexact
+alarm with a 21.7-minute window regardless.
+
+**This corrects an earlier reading in this file.** The inexact flags were first
+attributed to `canScheduleExactAlarms()` returning false and expo taking its
+inexact branch. That inference assumed the platform honours the call. It does
+not. `expo-notifications` was scheduling correctly all along; neither it nor
+the app is at fault.
+
+**The same phone DOES grant exact alarms — to its clock app.** Dumped at the
+same moment as ours:
+
+```
+com.oneplus.deskclock  windowLength 0  maxWhenElapsed == whenElapsed  flags 0x3 / 0x9
+com.curios.remindme    windowLength 1302623                            flags 0x4
+```
+
+`windowLength 0` is a true exact alarm. The dump also carries a dedicated
+`Next wake from idle:` entry naming the clock app (flags `0x3` =
+`FLAG_STANDALONE` | `FLAG_WAKE_FROM_IDLE`) — the list of alarms permitted to
+punch through Doze. Our reminder is absent from it. So the capability exists on
+this ROM and is simply not being extended to us; the difference is the API,
+not battery settings or permissions.
+
+**And it is not about privilege.** `com.google.android.deskclock` — an
+ordinary user-space app in `/data/app`, `flags=0x0`, **not** doze-whitelisted,
+standby bucket 20 (WORSE than our 10) — also gets `windowLength 0`, with
+`flags 0x5` (`FLAG_STANDALONE` | `FLAG_ALLOW_WHILE_IDLE`), the signature of
+`setExactAndAllowWhileIdle` — the same API we call. Permission state is
+identical to ours: both hold `USE_EXACT_ALARM: granted=true`, both have the
+`SCHEDULE_EXACT_ALARM` appop at `MODE_DEFAULT`.
+
+Note what our alarm is *missing*: `FLAG_STANDALONE` (0x1), which marks an alarm
+as unbatched. Its absence plus a window appearing is the fingerprint of a
+request demoted after the fact.
+
+**So the mechanism is UNKNOWN.** Permissions, appops, doze whitelist, standby
+bucket and system-app status were each checked and either match ours or favour
+us. The likeliest remaining explanation is a ColorOS-internal classification of
+clock/alarm packages not exposed via `dumpsys`/`appops` — but that is a guess,
+not a finding. Do not record it as a cause without evidence.
+
+**What this DOES establish:** a normal third-party app can obtain exact alarms
+on this ROM. The capability is reachable; the key has not been found.
+
+`setAlarmClock()` remains the one untried API. The case for it is not the OEM
+clock app (that comparison was over-read initially — the OnePlus clock is a
+whitelisted system app and proves nothing on its own) but that it is the only
+alarm API carrying a user-visible commitment: a status-bar icon and a
+`getNextAlarmClock()` entry. One dump after one call would settle it.
+
+**Therefore a source patch to expo-notifications cannot help** — it forces a
+branch already being taken. The remaining candidate is
+`AlarmManager.setAlarmClock()`, a different alarm type OEMs generally honour
+because it backs alarm-clock apps (it surfaces in the status bar and the
+next-alarm API, which is likely why it survives). Unproven here.
+**Design decision — not yet agreed.**
+
+**Also outstanding:** the Doze exemption above is still enabled on the test
+device, so it is no longer representative of a fresh install. Turn it back off
+before re-running any other D7 phase.
+
+This also explains why the Phase 0/1/2/4 passes are weaker evidence than they
+look: a one-hour window can be satisfied by a Doze maintenance window, so
+"the notification arrived" does not prove "it arrived on time". **Record how
+late each delivery was, not just that it happened.**
+
+**Still outstanding:**
+
+- Phase 3 — forced Doze:
+  `adb shell dumpsys battery unplug` +
+  `adb shell dumpsys deviceidle force-idle`, then
+  `adb shell dumpsys alarm | grep -A 15 com.curios.remindme`.
+  Restore with `dumpsys battery reset` / `deviceidle unforce`.
+- Phase 5 — after a reboot, **without opening the app** (exercises
+  `RECEIVE_BOOT_COMPLETED` and `tasks/rescheduleTask.ts`).
+- **App Standby Buckets.** Every run so far was on a freshly-used app, i.e.
+  bucket 10 (`ACTIVE`) — the best case, and not how a reminder app is used.
+  Simulate the real case:
+  ```
+  adb shell am set-standby-bucket com.curios.remindme restricted
+  adb shell am get-standby-bucket com.curios.remindme
+  # set a reminder ~10 min out, unplug, screen off
+  adb shell am set-standby-bucket com.curios.remindme active   # reset after
+  ```
+- **Other OEMs.** OxygenOS has shared the ColorOS codebase since OxygenOS 12,
+  so this pass is reasonable evidence for Oppo and Realme too. Still
+  uncovered, in priority order: **Xiaomi (MIUI/HyperOS)** — most aggressive,
+  and its Autostart has no equivalent elsewhere; **Samsung (OneUI)** — its
+  "Deep sleeping apps" demotes by usage over days; **Vivo/iQOO (Funtouch)**.
+
+Note for Windows: `adb` is not on PATH; use the full path recorded above, and
+`Select-String` in place of `grep` when running from PowerShell.
 
 ### D1 — Does Android Auto Backup actually restore reminders? · `PENDING`
 *Highest value: could close backlog item 1 on Android.*
