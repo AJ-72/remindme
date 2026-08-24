@@ -22,121 +22,14 @@ P1. All project-related files/processes must stay inside the remindme project fo
 
 ---
 
-## Device verification (needs a real phone + laptop; Jest cannot reach any of this)
+## Device verification
 
-Collected 2026-08-10. These are all "written and green in tests, unproven on
-hardware". Aggressive OEM power management (Xiaomi/Oppo/Vivo/Realme) is the
-recurring risk across several of them — it has now come up twice
-independently, so **test on a mid-range OEM device, not a Pixel or emulator**.
+**Moved to [`device-tests.md`](device-tests.md)** (2026-08-24), which is now the
+canonical list and tracks a pass/fail/pending status per item. D1-D9 kept their
+IDs, so existing references still resolve.
 
-**D1. Does Android Auto Backup actually restore reminders?** *(highest value — could close backlog item 1 on Android)*
-
-Evidence so far (2026-08-10, user's own OEM device): Settings → Back up other
-data lists **Reminders at 11 MB with the toggle on**, so Auto Backup is
-enabled AND has genuinely run. `android:allowBackup="true"` is already in the
-generated manifest (Expo's default; nothing was configured for it).
-
-What that does *not* prove: 11 MB is far larger than our data (a few KB of
-JSON) and is almost certainly the JS bundle/image cache — sitting next to Expo
-Go at 12 MB is the tell. So it is unconfirmed whether `RKStorage` (the SQLite
-DB where AsyncStorage lives — verified from source: `ReactDatabaseSupplier
-extends SQLiteOpenHelper`, `DATABASE_NAME = "RKStorage"`) is inside the backup
-set. Android documents database files as included by default, so it *should*
-be. And a settings screen only shows the sending half; the restore half is
-what matters.
-
-Procedure (package is `com.curios.remindme`; adb at
-`C:\Users\anand\AppData\Local\Android\Sdk\platform-tools\adb.exe`):
-
-1. **Export first via Settings → Back up reminders** — if the restore fails the
-   reminders on that phone are gone.
-2. `adb shell pm list packages | grep curios` → must print
-   `com.curios.remindme`. A package-name mismatch is exactly what produced a
-   false negative in the async-storage repo's own bug report.
-3. `adb shell bmgr backupnow com.curios.remindme` → wait for
-   `Backup finished with result: Success`. Captures current state rather than
-   whatever last night's scheduled run happened to grab.
-4. `adb uninstall com.curios.remindme` — use adb, **not** the launcher, since
-   some OEM launchers offer "keep app data" and would invalidate the test.
-5. Reinstall and **DO NOT LAUNCH THE APP**. Restore lands *after* install and
-   *before* first launch; opening it early is the most common false negative.
-6. `adb shell dumpsys backup | grep -i "restore\|com.curios"`, then open the app.
-
-Reading the result: reminders present → Auto Backup works end to end, item 1
-is effectively solved on Android and Drive sync drops well down the roadmap.
-App empty → the 11 MB is cache; confirm with
-`adb shell run-as com.curios.remindme ls -la databases/` (debuggable builds
-only) and, if `RKStorage` is present but not surviving, add explicit
-`dataExtractionRules` — which then needs a native build.
-
-Caveats: must be the standalone build, **not Expo Go** (which backs up
-separately — it is its own row in that screenshot). Auto Backup needs device
-idle + Wi-Fi + 24h since last run, so on a battery-aggressive OEM ROM it may
-simply never fire unaided; step 3 forces it, which proves the plumbing but not
-the everyday behaviour. **Do not ship any Settings copy claiming automatic
-backup until this passes** — on a Redmi it may be false, and a wrong promise
-about data safety is worse than saying nothing. Manual export stays the
-primary mechanism regardless: it is the only path identical across every
-device and the only one that works on iOS.
-
-**D2. Vibration setting** — needs a **fresh install or cleared app data**.
-Android creates a notification channel once and never updates it, so the new
-`reminders-alarm-novibrate` channel won't exist on an existing install and the
-fix will look like it failed. See the 2026-08-09 ledger entry.
-
-**D3. Mark Done / Snooze from a notification with the app fully closed** —
-the TaskManager path (`tasks/notificationResponseTask.ts`). Jest covers the
-listener only.
-
-**D4. Duplicate notifications** — the `ALARM_EARLY_OFFSET_MS` fix. Needs a
-reminder left to fire naturally, ideally across a background-fetch cycle.
-
-**D5. Large notification icon** — the `withLargeNotificationIcon` config
-plugin. Needs a native build.
-
-**D6. Malayalam dictation end-to-end** — parser tests use *typed* text; the
-speech recognizer's actual output is unverified. Settings → Debug logs shows
-the raw transcription.
-
-**D8. Dark mode, visually** — M1 is implemented and token-covered, but Jest
-asserts *token values*, not pixels. Walk every screen with the system theme
-set to dark: home list (incl. an overdue card and a completed one), add/edit,
-reminder detail, settings (incl. both modals), about, the snooze sheet, the
-confirm sheet, the exact-alarm banner, and the error fallback. Watch for text
-that vanishes into its background, the status bar, and modal overlays. Also
-toggle the system theme **while the app is open** — the switch should be
-immediate, since `useColorScheme()` is reactive.
-
-Also exercise the in-app override (Settings → Appearance): Light on a
-dark device and Dark on a light device should both win; System should
-hand control back to the OS; the choice must survive an app restart; and
-force a crash (if there's a convenient way) to confirm the error screen
-honours the chosen theme rather than reverting.
-
-**D9. Remind-someone-else Tier 1, end to end** *(new 2026-08-17 — nothing below is reachable from Jest)*
-
-Needs a **native build** (`expo-contacts` has no OTA path). Walk through:
-create a reminder with a recipient a minute out -> lock the phone -> tap the
-notification when it fires (confirm the body reads "Message <name>", not
-"Reminder!") -> confirm the send screen opens with the message and the invite
-line -> toggle the invite off and watch the preview update -> send on WhatsApp
--> return -> confirm the reminder is still under "Sending" -> mark done ->
-confirm it moves to Completed.
-
-Specifically unproven: `wa.me` opening WhatsApp rather than a browser (test on
-a device where WhatsApp was installed *after* this app — Android App Links
-verification is a real failure mode); WhatsApp actually pre-filling the text;
-the "number not on WhatsApp" path; `sms:` pre-fill across Samsung Messages,
-Google Messages and iOS Messages; the contacts permission dialog and the
-denied-then-re-granted path; contacts list scrolling at 1000+ contacts; and the
-notification tap from a **cold start** (Jest covers only the foreground
-listener). Also confirm READ_CONTACTS does not trip Play Store review — the
-in-app rationale doubles as the justification.
-
-**D7. OEM battery-killer survival** — do scheduled alarms fire at all on
-Xiaomi/Oppo/Vivo with battery optimization at its default aggressive setting?
-This is the cross-cutting risk behind D1 and D4 and is currently a blind spot;
-it was flagged as a listing blocker in the 2026-08-09 adoption assessment.
+Anything written and green in Jest but unproven on hardware belongs there, not
+here. Add new items in the same change that ships the feature.
 
 ---
 
