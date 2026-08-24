@@ -9,6 +9,24 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-24 — Four device-only failures that no test could have caught
+
+Seven findings from testing on a real phone. Four were invisible to the whole suite, and the pattern is worth internalising: **jsdom has no viewport, no keyboard, and no system chrome**, so anything whose failure mode is "off-screen" or "behind something" passes green forever.
+
+**1. A screen whose root is a `View` silently clips everything past one viewport.** `app/(tabs)/settings.tsx` had never been scrollable. Nothing errors, nothing is marked overflowing, and every element is present in the render tree — so `findByTestId` finds rows a user physically cannot reach. It only became visible when a new row pushed the last control off the bottom. **When adding a row to any settings-style screen, confirm its root is a `ScrollView`.**
+
+**2. `<StatusBar style="auto" />` resolves from the DEVICE scheme, not your app's theme.** This app paints from an in-app Appearance preference, so Light-app-on-dark-phone drew light icons on a light background: an invisible clock and battery. The fix is to drive it from the resolved app scheme (`useResolvedScheme`, now exported from `hooks/useColors.ts` rather than duplicated) and render it INSIDE `ThemeProvider`. **Any component styling itself against the app background must use `useResolvedScheme`, never `useColorScheme` directly** — the latter is the device's answer to a different question.
+
+**3. React Native's `KeyboardAvoidingView` is unreliable inside an Android `Modal`.** The modal renders in its own window and does not reliably receive the soft-input resize, so a bottom-anchored sheet stays put and its own search keyboard covers it. `react-native-keyboard-controller` (already a dependency — see `KeyboardProvider` in `app/_layout.tsx`) exports a `KeyboardAvoidingView` that handles it. **Prefer that one for anything inside a Modal.**
+
+**4. Nesting `<Text>` inside `<Text>` breaks every by-text query.** Building a subtitle as `<Text>{date}{" · "}{count}</Text>` collapses it into one text node, so `findByText("2 upcoming")` stops matching even though the words are on screen. Render the parts as sibling `<Text>` elements in a row `View` instead.
+
+**Also:** an icon swap is not feedback. The quick-add contact button changed `user-plus` to `user-check` and users could not tell whether a contact had attached, because nothing named the person. State that a user must be sure of needs words, not a glyph.
+
+**WHERE:** `app/(tabs)/settings.tsx`, `app/(tabs)/index.tsx`, `components/{ThemedStatusBar,ContactPickerModal,QuickAddInput}.tsx`, `hooks/useColors.ts`. Commits `e93b46a`..`2f04bf9`.
+
+---
+
 ## 2026-08-23 — Generated router types are gitignored, so every clone must regenerate them
 
 Building the Smart Alerts foundations hit the 2026-08-17 Expo Router typed-route trap again, exactly as recorded, and the documented fix worked first try (`npx expo customize tsconfig.json`, then re-run `tsc`). Two things that entry did not say, both learned by hitting them:
