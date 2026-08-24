@@ -9,6 +9,41 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-24 — EAS `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` on patchedDependencies: EAS was running a different pnpm
+
+**Symptom:** the first EAS build carrying the exact-alarm patch died in dependency install:
+
+```
+ERR_PNPM_LOCKFILE_CONFIG_MISMATCH  Cannot proceed with the frozen installation.
+The current "patchedDependencies" configuration doesn't match the value found in the lockfile
+```
+
+`pnpm install --frozen-lockfile` passes locally, so the lockfile is fine.
+
+**ROOT CAUSE: `patchedDependencies` moved between pnpm majors** — pnpm <=9 reads
+it from `package.json`, pnpm 10+ from `pnpm-workspace.yaml` (where ours lives).
+The repo pinned **no** pnpm version anywhere: no `packageManager` field, no
+`engines`. So EAS used whatever pnpm its build image ships, that pnpm looked for
+`patchedDependencies` in `package.json`, found nothing, compared it against the
+entry recorded in the lockfile, and refused. The message points at the lockfile,
+which is the one thing that is not wrong.
+
+**Fix — both halves are required:**
+
+1. `"packageManager": "pnpm@11.17.0"` in the **root** `package.json`.
+2. `"corepack": true` on every build profile in `eas.json`. **Without this EAS
+   ignores `packageManager` and keeps its preinstalled pnpm**, so pinning alone
+   changes nothing.
+
+**Generalise:** an unpinned package manager is invisible until a config key
+moves between majors. Any repo using `patchedDependencies`, pnpm workspaces, or
+a lockfile-sensitive CI install should pin the version — and remember that on
+EAS the pin only takes effect with corepack enabled.
+
+**WHERE:** `package.json` (root), `artifacts/mobile/eas.json`.
+
+---
+
 ## 2026-08-24 — setAlarmClock() is the fix for downgraded exact alarms, and it takes over the system's ONE next-alarm slot
 
 Resolves the ColorOS downgrade recorded below. `AlarmManager.setAlarmClock()`
