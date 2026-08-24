@@ -25,6 +25,11 @@ here.
   change. A feature is not "done" merely because its tests are green.
 - **Ask the user for results** rather than assuming — a `PASS` must come from a
   human who actually watched it happen.
+- **Cadence: ask whenever a feature lands.** Add its items, then ask whether to
+  test now, before moving on to the next piece of work.
+- **Prefer per-sub-check status over a blanket `PASS`.** "The send screen
+  worked" is not the same as "D9 passes"; marking the whole item hides the
+  parts nobody exercised.
 - **Never mark `PASS` from a passing Jest run.** That is the exact mistake this
   file exists to prevent.
 - Keep IDs stable. `D1`–`D9` are referenced from `backlog.md` and
@@ -125,18 +130,23 @@ read as the plain title, with no dangling greeting.
 
 ## C. Feature end-to-end
 
-### D9 — Remind-someone-else Tier 1 · `PENDING` — needs a native build
-`expo-contacts` has no OTA path. Create a reminder with a recipient a minute
+### D9 — Remind-someone-else Tier 1 · `PARTIAL`
+**Passing** (2026-08-24, user's OEM device): the send screen opens with the
+message pre-filled, the signature and invite line render, and WhatsApp receives
+the pre-filled text.
+
+**Still outstanding** (needs a native build — `expo-contacts` has no OTA path):
+the full loop end to end. Create a reminder with a recipient a minute
 out → lock the phone → tap the notification when it fires (body must read
 "Message &lt;name&gt;", not "Reminder!") → send screen opens with the message and
 invite line → toggle the invite off and watch the preview update → send on
 WhatsApp → return → reminder still under "Remind Someone" → mark done → moves
 to Completed.
 
-Specifically unproven: `wa.me` opening WhatsApp rather than a browser (test on
-a device where WhatsApp was installed **after** this app — App Links
-verification is a real failure mode); WhatsApp actually pre-filling the text;
-the "number not on WhatsApp" path; `sms:` pre-fill across Samsung Messages,
+Specifically unproven: `wa.me` opening WhatsApp rather than a browser **on a
+device where WhatsApp was installed after this app** — App Links verification
+is a real failure mode, and the confirmed pass above does not cover it; the
+"number not on WhatsApp" path; `sms:` pre-fill across Samsung Messages,
 Google Messages and iOS Messages; the contacts permission dialog and the
 denied-then-re-granted path; contacts list scrolling at 1000+ contacts; and the
 notification tap from a **cold start**. Also confirm READ_CONTACTS does not
@@ -146,17 +156,24 @@ trip Play Store review.
 Parser tests use *typed* text; the speech recognizer's actual output is
 unverified. Settings → Debug logs shows the raw transcription.
 
-### D10 — Name capture and personalization · `PENDING`
-*Added 2026-08-23.* Needs a **fresh install** for the first-launch prompt.
+### D10 — Name capture and personalization · `PARTIAL`
+*Added 2026-08-23.*
 
-- First launch: the name sheet appears **after** the permission flow, never
-  stacked behind the system permission dialog.
+**Passing** (2026-08-24, user's OEM device): the first-launch prompt appeared
+and stored the name, the header greets by name, the avatar shows initials, and
+outgoing messages carry the "— &lt;name&gt;" signature.
+
+One defect found and fixed during this pass: a full name truncated the header
+to "Good morn.." (`4a2c522`). Not re-verified — see D14.
+
+**Still outstanding** (needs a **fresh install** for the prompt itself):
+
+- The sheet appears **after** the permission flow, never stacked behind the
+  system permission dialog. (Ordering unconfirmed — the prompt was seen, but
+  not whether it could ever race the permission dialog.)
 - **Skip** it → prompt never returns on later launches → header still offers
   "Hi there" as a tap target to set a name.
-- Set a name → header greets by **first name**, avatar shows initials.
-- A long name ("Anand Kumar Jayaram") must not truncate the greeting.
 - A **Malayalam** name renders in Noto Sans Malayalam, not as blank boxes.
-- Outgoing send-reminder message is signed "— &lt;name&gt;".
 - Settings → Your name edits it; Cancel leaves it unchanged.
 
 ### D11 — Quiet hours · `PENDING`
@@ -186,7 +203,14 @@ themes and that long citation lines wrap rather than overflow.
 
 ## D. Visual and layout
 
-### D8 — Dark mode, visually · `PENDING`
+### D8 — Dark mode, visually · `PASS` (2026-08-24, user's OEM device)
+One defect found and fixed during this pass: the status-bar icons were
+invisible with the app set to Light on a dark-mode phone (`017b785`). That fix
+is **not** re-verified — see D14.
+
+Re-run this whole walk after any new screen lands. The screens added since
+this passed (Smart Alerts, Why tasks slip, the quiet-hours and name sheets)
+were **not** part of it.
 Jest asserts *token values*, not pixels. Walk every screen with the system
 theme dark: home list (incl. an overdue card and a completed one), add/edit,
 reminder detail, settings (incl. both modals), about, smart alerts, why tasks
