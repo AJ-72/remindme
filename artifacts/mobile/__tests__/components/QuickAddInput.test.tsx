@@ -494,6 +494,56 @@ describe("QuickAddInput — remind someone", () => {
 
   // A recipient left behind after a save would silently aim the NEXT reminder
   // at the same person.
+  // On a device there was no way to tell whether a contact had been attached:
+  // the only feedback was the button icon swapping user-plus for user-check,
+  // which names nobody.
+  it("names the chosen contact on a chip", async () => {
+    const { findByTestId, findByText } = renderComponent();
+
+    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByText("Priya"));
+
+    const chip = await findByTestId("quick-add-recipient-chip");
+    expect(chip).toBeTruthy();
+    expect(await findByTestId("quick-add-recipient-clear")).toBeTruthy();
+  });
+
+  it("removes the recipient from the chip", async () => {
+    const { findByTestId, findByText, queryByTestId } = renderComponent();
+
+    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByText("Priya"));
+    await findByTestId("quick-add-recipient-chip");
+
+    fireEvent.press(await findByTestId("quick-add-recipient-clear"));
+    await waitFor(() =>
+      expect(queryByTestId("quick-add-recipient-chip")).toBeNull()
+    );
+  });
+
+  it("hides the chip again after a save", async () => {
+    const { findByTestId, findByText, queryByTestId } = renderComponent();
+
+    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByText("Priya"));
+    await findByTestId("quick-add-recipient-chip");
+
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Call Priya tomorrow at 3pm"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    // Wait for the write to land first: asserting on the chip alone races the
+    // async save chain and fails intermittently.
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).not.toBeNull()
+    );
+    await waitFor(() =>
+      expect(queryByTestId("quick-add-recipient-chip")).toBeNull()
+    );
+  });
+
   it("clears the recipient after a save", async () => {
     const { findByTestId, findByText } = renderComponent();
 

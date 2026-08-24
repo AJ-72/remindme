@@ -111,3 +111,15 @@ describe("ContactPickerModal", () => {
     expect(Contacts.requestPermissionsAsync).not.toHaveBeenCalled();
   });
 });
+
+
+// On a device the sheet is anchored to the bottom of the screen - exactly
+// where the keyboard opens - so the search field's own keyboard covered the
+// results. With only a couple of matches the sheet was hidden entirely.
+describe("ContactPickerModal — keyboard", () => {
+  it("wraps the sheet in a keyboard-avoiding view", () => {
+    const { UNSAFE_root } = renderPicker();
+    const { KeyboardAvoidingView } = require("react-native-keyboard-controller");
+    expect(UNSAFE_root.findAllByType(KeyboardAvoidingView).length).toBeGreaterThan(0);
+  });
+});

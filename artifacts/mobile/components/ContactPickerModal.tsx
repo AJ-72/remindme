@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useColors } from "@/hooks/useColors";
 import { getFontFamily } from "@/utils/getFontFamily";
 import {
@@ -58,6 +59,7 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
   );
 
   const styles = StyleSheet.create({
+    flex: { flex: 1 },
     overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
     sheet: {
       backgroundColor: colors.card,
@@ -184,6 +186,16 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      {/* The sheet is anchored to the bottom of the screen, which is exactly
+          where the keyboard opens. Without this the search field's own
+          keyboard covers the results - and with only a couple of matches the
+          sheet is short enough to be hidden entirely.
+          react-native-keyboard-controller's version, not React Native's:
+          RN's KeyboardAvoidingView is unreliable inside an Android Modal,
+          which renders in its own window and does not reliably receive the
+          soft-input resize. Already a dependency (see KeyboardProvider in
+          app/_layout.tsx), so this costs nothing. */}
+      <KeyboardAvoidingView behavior="padding" style={styles.flex}>
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.handle} />
@@ -210,6 +222,7 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
           {renderBody()}
         </Pressable>
       </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

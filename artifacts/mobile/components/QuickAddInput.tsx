@@ -428,11 +428,11 @@ export default function QuickAddInput({ onSaved }: Props) {
       marginBottom: 12,
     },
     bar: {
-      flexDirection: "row",
-      // flex-end so the button cluster stays on the last line as the input
-      // grows. The buttons center themselves within that cluster (see
-      // actionRow) rather than each aligning to the row's baseline.
-      alignItems: "flex-end",
+      // Column, not row: sharing a row with five buttons left the input about
+      // half the card width, so ordinary text wrapped after two or three
+      // words. The buttons now sit on their own line beneath it.
+      flexDirection: "column",
+      alignItems: "stretch",
       backgroundColor: colors.card,
       borderRadius: colors.radiusCapsule,
       borderWidth: 1,
@@ -459,9 +459,31 @@ export default function QuickAddInput({ onSaved }: Props) {
       alignItems: "center",
       gap: 8,
       minHeight: 32,
+      marginTop: 10,
+    },
+    // Pushes the save button to the trailing edge, away from the toggles, so
+    // the committing action is not adjacent to the ones that only alter state.
+    actionSpacer: {
+      flex: 1,
+    },
+    recipientChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      alignSelf: "flex-start",
+      gap: 4,
+      marginTop: 10,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+      borderRadius: 999,
+      backgroundColor: colors.primary + "1A",
+      maxWidth: "100%",
+    },
+    recipientChipText: {
+      fontSize: 12,
+      color: colors.primary,
+      flexShrink: 1,
     },
     textInput: {
-      flex: 1,
       fontSize: 15,
       lineHeight: 20,
       color: colors.foreground,
@@ -693,6 +715,30 @@ export default function QuickAddInput({ onSaved }: Props) {
           editable={!saving}
           testID="quick-add-input"
         />
+        {recipient && (
+          <View style={styles.recipientChip} testID="quick-add-recipient-chip">
+            <Feather name="send" size={11} color={colors.primary} />
+            <Text
+              style={[
+                styles.recipientChipText,
+                { fontFamily: getFontFamily(recipient.name, "600SemiBold") },
+              ]}
+              numberOfLines={1}
+            >
+              {recipient.name}
+            </Text>
+            <Pressable
+              onPress={() => setRecipient(undefined)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${recipient.name}`}
+              testID="quick-add-recipient-clear"
+            >
+              <Feather name="x" size={12} color={colors.primary} />
+            </Pressable>
+          </View>
+        )}
+
         <View style={styles.actionRow}>
         <Pressable
           style={[styles.micBtn, listening && styles.micBtnListening]}
@@ -756,6 +802,7 @@ export default function QuickAddInput({ onSaved }: Props) {
             color={alarm ? colors.primary : colors.mutedForeground}
           />
         </Pressable>
+        <View style={styles.actionSpacer} />
         <Pressable
           style={styles.saveBtn}
           onPress={handleSave}
