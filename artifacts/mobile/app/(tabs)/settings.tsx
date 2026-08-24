@@ -157,9 +157,13 @@ export default function SettingsScreen() {
       fontFamily: "Inter_700Bold",
       color: colors.foreground,
     },
+    // contentContainerStyle for a ScrollView, not a View style. The screen
+    // grew past one viewport once Smart Alerts was added, and a plain View
+    // simply clipped everything below the fold with no way to reach it.
     content: {
       paddingHorizontal: 20,
       paddingTop: 4,
+      paddingBottom: insets.bottom + 24,
     },
     alarmCard: {
       backgroundColor: colors.card,
@@ -331,7 +335,11 @@ export default function SettingsScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Settings</Text>
       </View>
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        testID="settings-scroll"
+      >
         <View style={styles.alarmCard}>
           <Feather
             name={defaultAlarmEnabled ? "bell" : "bell-off"}
@@ -638,7 +646,7 @@ export default function SettingsScreen() {
             style={styles.chevron}
           />
         </Pressable>
-      </View>
+      </ScrollView>
 
       <Modal
         visible={logsVisible}

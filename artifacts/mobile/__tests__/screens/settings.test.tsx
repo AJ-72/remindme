@@ -499,3 +499,19 @@ describe("SettingsScreen — Smart Alerts entry", () => {
     expect(router.push).toHaveBeenCalledWith("/smart-alerts");
   });
 });
+
+
+// The screen outgrew one viewport when Smart Alerts was added, and its root
+// was a plain View - everything below the fold was unreachable on a device
+// with no error, no clipping indicator, and nothing visible in tests.
+describe("SettingsScreen — scrolling", () => {
+  it("puts its content in a scroll view", async () => {
+    const { findByTestId } = renderScreen();
+    expect(await findByTestId("settings-scroll")).toBeTruthy();
+  });
+
+  it("renders the last row, which sits below the fold", async () => {
+    const { findByTestId } = renderScreen();
+    expect(await findByTestId("debug-logs-row")).toBeTruthy();
+  });
+});
