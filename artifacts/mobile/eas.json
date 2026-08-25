@@ -9,20 +9,23 @@
       "android": {
         "buildType": "apk"
       },
-      "corepack": true
+      "corepack": true,
+      "node": "22.20.0"
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
       },
-      "corepack": true
+      "corepack": true,
+      "node": "22.20.0"
     },
     "production": {
       "android": {
         "buildType": "apk"
       },
-      "corepack": true
+      "corepack": true,
+      "node": "22.20.0"
     }
   },
   "submit": {

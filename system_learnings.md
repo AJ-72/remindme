@@ -35,10 +35,29 @@ which is the one thing that is not wrong.
    ignores `packageManager` and keeps its preinstalled pnpm**, so pinning alone
    changes nothing.
 
-**Generalise:** an unpinned package manager is invisible until a config key
-moves between majors. Any repo using `patchedDependencies`, pnpm workspaces, or
-a lockfile-sensitive CI install should pin the version — and remember that on
-EAS the pin only takes effect with corepack enabled.
+**Second failure, immediately after:** with corepack enabled, EAS *did* fetch
+pnpm 11.17.0 and then died in corepack itself —
+
+```
+TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.
+    at Object.<anonymous> (/home/expo/.cache/node/corepack/v1/pnpm/11.17.0/bin/pnpm.cjs:3:1)
+Node.js v20.19.4
+```
+
+The corepack bundled with **Node 20** cannot load a package-manager binary that
+uses dynamic import; it is fixed in the corepack shipping with Node 22. EAS
+defaults to Node 20 while this repo develops on Node 24, so the pin has to cover
+Node as well: `"node": "22.20.0"` on each `eas.json` build profile. Both
+`corepack` and `node` are valid profile fields — `npx eas-cli config --platform
+android --profile preview` validates them locally without starting a build,
+which is worth doing before spending build quota.
+
+**Generalise:** an unpinned toolchain is invisible until a config key moves
+between majors — and pinning *one* layer just relocates the failure to the next.
+`patchedDependencies` forced a pnpm pin; the pnpm pin forced a Node pin. Any
+repo using `patchedDependencies`, pnpm workspaces, or a lockfile-sensitive CI
+install should pin **both**, and validate `eas.json` with `eas-cli config`
+rather than by launching a build.
 
 **WHERE:** `package.json` (root), `artifacts/mobile/eas.json`.
 
