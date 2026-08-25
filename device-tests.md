@@ -80,17 +80,43 @@ local builds then fail with the Ninja long-path error.
 which is not the shipping artifact. Re-run on an EAS build
 (`eas build --platform android --profile preview`, see CLAUDE.md):
 
-- **Contacts** — permission prompt appears, picker lists contacts, recipient
-  chip populates. This regressed on the local build only (missing
-  `READ_CONTACTS`, see Test environment above); confirm the EAS build is clean.
-- **Alarm-type reminder** fires exactly, and appears under
-  `dumpsys alarm` -> `Next alarm clock information`.
-- **Silent reminder** (alarm toggle off) does **not** take the next-alarm slot
-  — this is the whole point of routing conditionally, and it is
-  **uncompiled and unverified** as of 2026-08-24.
-- **The user's real clock alarm still shows** on the lock screen while a silent
-  reminder is pending. Regression watch: with unconditional `setAlarmClock()`,
-  an 18:23 reminder displaced the OnePlus clock's 06:00 alarm in that slot.
+- **Contacts** — `PASS` (2026-08-25, EAS preview build): permission prompt and
+  contact list both working, confirming the regression was confined to the
+  local APK's stale manifest (missing `READ_CONTACTS`, see Test environment
+  above) and never reached the shipping artifact. Recipient chip and the full
+  send flow are covered by D9, not re-checked here.
+- **Conditional routing** — `PASS` (2026-08-25, EAS preview build, OnePlus
+  CPH2569). Both reminder types pending simultaneously:
+
+  | reminder | window | flags | route |
+  | --- | --- | --- | --- |
+  | silent, today 09:22 | `+21m43s627ms` | `0x4` | inexact |
+  | alarm, tomorrow 15:59 | `0` | `0x9` | setAlarmClock |
+
+  ```
+  Next alarm clock information:
+    user:0 pendingSend:false time:1787740140000 = 2026-08-26 15:59:00.000
+  ```
+
+  The slot held the **alarm** reminder even though the silent one fires ~31h
+  sooner — so a silent reminder cannot displace it. Designed as a discriminating
+  test: broken routing would have let the sooner reminder seize the slot.
+  This also clears the "uncompiled" risk — the EAS build compiling proves
+  `request.content?.body?.optBoolean("alarm", false)` typechecks.
+
+  Still to observe: **actual delivery** of an alarm reminder on the EAS build
+  (registration is correct; a firing has not been watched), and the lock screen
+  with a **real clock alarm set alongside** a pending silent reminder — the slot
+  logic implies it is safe, but it has not been seen.
+
+**LIMITATION this makes explicit — silent reminders stay inexact on ColorOS.**
+The 21m43s window above is the D7 downgrade, still fully in force for anything
+not routed through `setAlarmClock()`. On this ROM only alarm-type reminders are
+punctual; a silent reminder can arrive ~20 minutes late, and up to an hour for a
+next-day one. `ALARM_EARLY_OFFSET_MS` covers only the first 60s of that. This is
+the accepted cost of not hijacking the system alarm slot — but it is a real
+product decision, not a technicality, and it deserves revisiting (default the
+alarm toggle on? say so in the UI?).
 - Confirm the release build still shows `window=0` — release and debug can
   differ in OEM battery treatment.
 
