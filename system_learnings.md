@@ -116,6 +116,18 @@ for a next-day one), and nothing in the UI says so. Expect this to resurface as
 a vague "some reminders are late" report; the first question is whether that
 reminder had the alarm toggle on.
 
+**The status-bar alarm icon cannot be engineered away.** It shows if *any*
+`setAlarmClock()` registration is pending — one is enough. The obvious
+mitigation, keeping reminders inexact and promoting them to `setAlarmClock()`
+shortly before due, is **circular**: the promotion would itself have to be
+triggered by an inexact alarm, which is the unreliable thing being routed
+around. WorkManager and foreground services sit under the same OEM throttling.
+Do not spend time designing around this — on this ROM the icon is the price of
+punctuality, and the only real lever is *which* reminders pay it. Android's own
+escape hatch is the per-app "Allow setting alarms and reminders" toggle, which
+trades punctuality for a clean status bar. Backlog item 20 carries the research
+on what other apps do.
+
 **Testing note worth reusing:** to prove the routing rather than infer it from
 flags, make the **silent** reminder the *sooner* of the two. The next-alarm slot
 holds exactly one alarm, so broken routing would let the sooner reminder seize
