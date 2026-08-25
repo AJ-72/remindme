@@ -106,10 +106,26 @@ exact/inexact path for silent ones. Consequences that follow:
   SecurityException** without it. The fallback chain is mandatory, not defensive
   padding.
 
+**The consequence to remember: punctuality is now a property of the alarm
+toggle.** Routing conditionally did not fix the downgrade — it routed around it
+for one class of reminder. Verified on the shipping EAS build 2026-08-25 with
+both types pending at once: the alarm reminder had `window=0`, the silent one
+`window=+21m43s627ms` with `flags 0x4`. So on ColorOS an **alarm** reminder is
+exact while a **silent** one can still arrive ~20 minutes late (up to an hour
+for a next-day one), and nothing in the UI says so. Expect this to resurface as
+a vague "some reminders are late" report; the first question is whether that
+reminder had the alarm toggle on.
+
+**Testing note worth reusing:** to prove the routing rather than infer it from
+flags, make the **silent** reminder the *sooner* of the two. The next-alarm slot
+holds exactly one alarm, so broken routing would let the sooner reminder seize
+it. Same-direction evidence (both types looking "right") does not distinguish
+the two cases.
+
 **WHERE:** `patches/expo-notifications@0.32.17.patch` (needs the
 `buildFromSource` opt-out — see the AAR entry below). Evidence and the remaining
 checks: D19/D20 in [`device-tests.md`](device-tests.md). Commits `df3ec64`,
-`6898f25`.
+`6898f25`, `ad51a0c`.
 
 ---
 
