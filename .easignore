@@ -1,0 +1,32 @@
+# EAS Build copies this directory tree; it does NOT use .gitignore. Anything not
+# listed here is uploaded, which is why the archive was 477 MB and why a Windows
+# artifacts/mobile/android/local.properties reached a Linux builder and killed
+# Gradle with "sdk.dir ... Directory does not exist".
+#
+# This file must live at the REPO ROOT: EAS resolves .easignore from the root of
+# the archive it builds, and for this pnpm monorepo that is here, not
+# artifacts/mobile. A copy under artifacts/mobile is silently ignored — that was
+# the original bug.
+#
+# Patterns are anchored to this directory on purpose. Do NOT replace them with
+# bare "android/" — that would also match node_modules/<pkg>/android/, which
+# every native module needs.
+
+# Reinstalled on the builder by pnpm.
+node_modules/
+/lib/*/node_modules/
+/artifacts/*/node_modules/
+
+# Continuous Native Generation: EAS runs `expo prebuild` itself. Uploading a
+# locally generated native project both bloats the archive and overrides that.
+/artifacts/mobile/android/
+/artifacts/mobile/ios/
+
+# Local caches and build output.
+.git/
+.expo/
+.gradle/
+.cxx/
+/artifacts/*/dist/
+/lib/*/dist/
+coverage/
