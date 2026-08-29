@@ -9,6 +9,55 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-29 — This app is absent from Android's "Alarms & reminders" screen, and that is correct: USE_EXACT_ALARM supersedes SCHEDULE_EXACT_ALARM
+
+**Symptom:** the new status-bar-icon explainer in Settings told users the OS
+escape hatch was *Settings > Apps > Reminders > Allow setting alarms and
+reminders*, with a button onto that screen. On device the button opened the
+right screen — but **Reminders is not in the list** (Maps, Messages, Uber,
+Zomato all are). The instruction was a dead end, and D22's revoke test could
+not be run at all.
+
+**ROOT CAUSE — our own manifest, and it is right as it stands.** `app.json`
+declares **both** exact-alarm permissions:
+
+```
+android.permission.SCHEDULE_EXACT_ALARM
+android.permission.USE_EXACT_ALARM
+```
+
+`USE_EXACT_ALARM` is a **normal** permission: auto-granted at install,
+**not user-revocable**, and reserved by Google for apps whose core function is
+alarms/clocks/reminders. On **targetSdk 34+** (we target 36) it **supersedes**
+`SCHEDULE_EXACT_ALARM`. The "Alarms & reminders" special-access screen is
+backed by the `SCHEDULE_EXACT_ALARM` appop, so apps holding `USE_EXACT_ALARM`
+are **omitted from it by design** — there is nothing there for the user to
+switch. Confirms in `dumpsys package com.curios.remindme`:
+`USE_EXACT_ALARM: granted=true`, with no granted line for
+`SCHEDULE_EXACT_ALARM`.
+
+**DO NOT "fix" this by removing `USE_EXACT_ALARM`.** It is what makes reminders
+punctual by default. Without it, exact alarms become opt-in and every new user
+is silently unpunctual until they find a settings screen — see D7/D19 for what
+inexact delivery costs on ColorOS (up to an hour on a next-day reminder). Play
+permits the permission for this app category. The permission model is correct;
+only the copy was wrong.
+
+**FIX (`caa3542`):** the escape-hatch paragraph and the
+"Open alarms & reminders settings" button are gone from
+`app/(tabs)/settings.tsx`. The explainer now states that Android offers no
+per-app switch because the app registers as an alarm app, and points at **the
+app's own Alarm toggle** — the real control, since a silent reminder never
+routes through `setAlarmClock()` and therefore shows no icon, at the cost of
+the lateness that toggle now advertises. A test asserts the old claim is
+*absent*, so it cannot creep back in.
+
+**General lesson:** Jest can prove copy *renders*; only a device can prove copy
+is *true*. This one was green in the suite and wrong on the phone — which is
+the whole premise of `device-tests.md`.
+
+---
+
 ## 2026-08-28 — Two jest state leaks that break *unrelated* tests: `jest.replaceProperty` does not auto-restore, and `scheduleNotificationAsync` is a file-wide shared mock
 
 Both hit while fixing backlog items 19/20. Same shape in each case: a test mutates
