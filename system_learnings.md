@@ -9,6 +9,48 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-29 — EAS "Failed to install pnpm. Make sure you specified the correct version in eas.json" can be transient — check config drift before changing anything
+
+**Symptom:** an EAS preview build errored **22 seconds** in, long before any
+compilation:
+
+```
+errorCode: EAS_BUILD_SYSTEM_DEPS_INSTALL_ERROR
+message:   Failed to install pnpm. Make sure you specified the correct version in eas.json.
+```
+
+The message points straight at your config, which is exactly what makes it
+expensive — the obvious response is to start editing `eas.json`,
+`packageManager`, or the corepack/node pins, all of which took real effort to
+get right (see the 2026-08-24 `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` entry).
+
+**ROOT CAUSE: nothing had changed.** Two checks settled it in under a minute:
+
+```
+git diff --stat <last-good-commit>..HEAD -- package.json artifacts/mobile/eas.json \
+    artifacts/mobile/package.json pnpm-workspace.yaml     # empty
+npm view pnpm@11.17.0 version                             # 11.17.0 — exists
+```
+
+The identical config had built successfully 3.5 hours earlier. Corepack fetches
+pnpm from the npm registry at build time on EAS's own infrastructure, so a
+registry blip or an EAS worker issue produces this error with a
+config-blaming message. **A plain retry succeeded.**
+
+**RULE: before touching build config on this failure, prove the config
+changed.** Diff the four files above against the last green build and confirm
+the pinned pnpm version still resolves on npm. If both are clean, retry once —
+you are probably looking at infrastructure, not your repo. Only if a retry
+fails the same way is the config actually suspect.
+
+**How to read the real error at all:** `eas build:view <id> --json` carries the
+structured `errorCode`/`message`; the plain `build:list` output only says
+`errored`. Note `build:view` does **not** accept `--non-interactive` (it errors
+with "Nonexistent flag"), and the CLI prints a banner before the JSON, so parse
+from the first `{`.
+
+---
+
 ## 2026-08-29 — This app is absent from Android's "Alarms & reminders" screen, and that is correct: USE_EXACT_ALARM supersedes SCHEDULE_EXACT_ALARM
 
 **Symptom:** the new status-bar-icon explainer in Settings told users the OS

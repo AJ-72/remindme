@@ -25,7 +25,7 @@ Every item, its status, what is left to do, and **whether a machine could run
 it unattended**. Last updated after the automated run of **2026-08-29**
 (OnePlus CPH2569, EAS preview build) — see that section below for evidence.
 
-**Where things stand: 4 `PASS` · 5 `PARTIAL` · 12 `PENDING` · 1 `BLOCKED`.**
+**Where things stand: 5 `PASS` · 6 `PARTIAL` · 10 `PENDING` · 1 `BLOCKED`.**
 
 | Mark | Meaning |
 | --- | --- |
@@ -55,7 +55,7 @@ it unattended**. Last updated after the automated run of **2026-08-29**
 | [D16](#D16) | Personalized snooze re-alert | `PENDING` | — | `AUTO` | Nothing blocks it — one string comparison. Needs a fire-then-snooze cycle. |
 | [D17](#D17) | Corrupt-store quarantine | `PENDING` | — | `AUTO` | **The only item that truly needs a debuggable build** (`eas build --profile development`) — it must write into private sqlite. |
 | [D18](#D18) | Backup carries the new fields | `PENDING` | — | `AUTO` | **Runnable on release** via the share sheet. Generate the data first: complete one, snooze another twice, set quiet hours. |
-| [D21](#D21) | Un-completing re-arms the reminder | `PENDING` | — | `AUTO` | **Blocked: needs a build carrying the 2026-08-28 item-19 fix.** The installed build predates it. |
+| [D21](#D21) | Un-completing re-arms the reminder | `PASS` | **2026-08-29** | `AUTO` | Nothing. Both branches verified over adb: future re-arms and rings (338 ms late, screen off); past stays overdue and silent. |
 | [D22](#D22) | Alarm copy + status-bar explainer | `PARTIAL` | **2026-08-29** | `SEMI` | Copy, expand/collapse and the intent all pass on device. **One FAIL:** the app is absent from Android's *Alarms & reminders* list, so the escape-hatch paragraph was false — copy rewritten and the button removed. Needs a re-run on a build carrying that. |
 
 **Totals: 8 `AUTO`, 13 `SEMI`, 1 `MANUAL`** (revised 2026-08-29 after D3/D15 were found not to be drivable by `input tap` on ColorOS).
@@ -1348,7 +1348,7 @@ Known and accepted: `mergeReminders` is "local always wins", so a re-typed
 reminder beats a backup copy carrying real history. Deliberate — see the spec.
 
 <a id="D21"></a>
-### D21 — Un-completing a reminder re-arms it · `PENDING`
+### D21 — Un-completing a reminder re-arms it · `PASS` (2026-08-29, OnePlus CPH2569, EAS preview `34d1f57`)
 *Added 2026-08-28 for backlog item 19.* The whole failure mode is "never
 fired", which Jest cannot see. The old bug was **masked** by the ~15-minute
 BackgroundFetch sweep re-arming the reminder, so a generous test window will
@@ -1387,6 +1387,54 @@ pending, so the notification you see is unambiguous.
 not accept the icon as proof** — the icon was never the broken part, and
 treating it as the pass criterion is exactly how this shipped. Also a fail if
 step 7 fires a notification straight away.
+
+### Result — 2026-08-29, `PASS` on both branches
+
+Run over adb on the EAS preview build of `34d1f57`, screen off, app not
+doze-whitelisted. A **4-minute** horizon was used deliberately: shorter than
+the ~15-minute BackgroundFetch sweep, so nothing could have covered for a
+broken re-arm.
+
+**Future branch.** Reminder created for 16:45, alarm on:
+
+| stage | `dumpsys alarm` | `Next alarm clock` |
+| --- | --- | --- |
+| after save | `#18 origWhen=1788002085856 window=0 flags=0x9` | 16:44:45.856 |
+| after **Mark Done** | *gone* | fell back to tomorrow 14:59 |
+| after **un-complete** | `#12 origWhen=1788002085856 window=0 flags=0x9` | **16:44:45.856 again** |
+
+The entry number changing `#18 -> #12` on the same `origWhen` shows this is a
+**fresh registration**, not a leftover that was never cancelled.
+
+Then the part that actually matters — **it rang**. Target 16:44:45.856,
+delivered **16:44:46.194 = 338 ms late**, screen off, on channel
+`reminders-alarm` at importance 5:
+
+```
+08-29 16:44:46.194 sysui_multi_action: ... com.curios.remindme,857,reminders-alarm,858,5
+08-29 16:44:46.207 NotifAttentionHelper: vibrateLinearmotorIfNeed,
+                   android.resource://com.curios.remindme/raw/alarm
+```
+
+The registration cleared itself after firing (`grep -c 1788002085856` -> 0), so
+no orphan was left behind.
+
+**Past branch.** The same reminder, now overdue at 16:47, was marked done and
+un-completed again:
+
+- alarm registrations **unchanged at 2** (the two unrelated future test
+  reminders) — nothing new scheduled
+- no `1788002085856` registration
+- **zero posted notifications** — nothing fired on un-completion
+- the list moved from "4 upcoming" to "5 upcoming"
+
+So it returned as **overdue and silent**, which is the documented decision: no
+notification, and no new time invented on the user's behalf.
+
+**Note on the old bug.** Under the previous code the future-branch row after
+un-complete would have been empty, and the 16:45 reminder would simply never
+have rung — the sweep could not have rescued a 4-minute horizon. This run
+discriminates between the two.
 
 <a id="D22"></a>
 ### D22 — Alarm toggle copy and the status-bar icon explainer · `PARTIAL` — copy verified 2026-08-29; one FAIL found and fixed, needs a re-run
