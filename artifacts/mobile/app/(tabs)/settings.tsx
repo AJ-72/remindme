@@ -28,6 +28,7 @@ import {
 import {
   buildBackupJson,
   importRemindersFromJson,
+  openExactAlarmSettings,
 } from "@/services/ReminderService";
 import {
   useThemePreference,
@@ -42,6 +43,7 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 
 export default function SettingsScreen() {
   const colors = useColors();
+  const [alarmIconExplained, setAlarmIconExplained] = useState(false);
   const insets = useSafeAreaInsets();
   const {
     defaultAlarmEnabled,
@@ -193,6 +195,39 @@ export default function SettingsScreen() {
     },
     descriptionCard: {
       marginTop: 12,
+    },
+    explainerCard: {
+      marginTop: 12,
+      flexDirection: "column",
+      alignItems: "stretch",
+      gap: 0,
+    },
+    explainerHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    explainerTitle: {
+      flex: 1,
+      fontSize: 13,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+    },
+    explainerBody: {
+      marginTop: 10,
+      gap: 10,
+    },
+    explainerText: {
+      fontSize: 13,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      lineHeight: 19,
+    },
+    explainerLink: {
+      fontSize: 13,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
+      marginTop: 2,
     },
     languageCard: {
       marginTop: 12,
@@ -347,11 +382,18 @@ export default function SettingsScreen() {
             color={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
           />
           <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Play alarm sound by default</Text>
+            {/* The label names punctuality, not just sound. Turning this off
+                routes the reminder through the API aggressive OEM power
+                management downgrades (see D7/D19 in device-tests.md), so a
+                silent reminder is also a late one — a behaviour the old
+                "Play alarm sound by default" wording hid completely. */}
+            <Text style={styles.alarmLabel}>
+              Alarm — rings, and arrives on time
+            </Text>
             <Text style={styles.alarmSubLabel}>
               {defaultAlarmEnabled
-                ? "Notification will play a sound"
-                : "Notification will be silent"}
+                ? "Rings out loud, and fires at exactly the time you set"
+                : "Silent, and may arrive up to 20 minutes late"}
             </Text>
           </View>
           <Switch
@@ -362,6 +404,61 @@ export default function SettingsScreen() {
             thumbColor={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
           />
         </View>
+        {/* Android-only: the persistent status-bar clock is a side effect of
+            setAlarmClock(), the one scheduling API these OEMs honour. It
+            cannot be engineered away — one pending registration is enough to
+            show it — so the honest move is to explain it rather than hide it. */}
+        {Platform.OS === "android" && (
+          <Pressable
+            testID="alarm-icon-explainer"
+            style={[styles.alarmCard, styles.explainerCard]}
+            onPress={() => setAlarmIconExplained((v) => !v)}
+          >
+            <View style={styles.explainerHeader}>
+              <Feather name="help-circle" size={16} color={colors.mutedForeground} />
+              <Text style={styles.explainerTitle}>
+                Why is there an alarm icon in my status bar?
+              </Text>
+              <Feather
+                name={alarmIconExplained ? "chevron-up" : "chevron-down"}
+                size={16}
+                color={colors.mutedForeground}
+              />
+            </View>
+            {alarmIconExplained && (
+              <View style={styles.explainerBody}>
+                <Text style={styles.explainerText}>
+                  It means at least one reminder is armed to go off at exactly
+                  its time. Android shows the icon whenever an app registers a
+                  precise alarm, and that registration is the only thing that
+                  stops your phone&apos;s battery saver from delaying the
+                  reminder by several minutes — or an hour for a next-day one.
+                </Text>
+                <Text style={styles.explainerText}>
+                  The icon does not mean anything is running in the background
+                  or draining your battery. It disappears once no alarm
+                  reminders are pending.
+                </Text>
+                <Text style={styles.explainerText}>
+                  If you would rather have a clean status bar, Android&apos;s
+                  own switch for this is Settings › Apps › Reminders › Allow
+                  setting alarms and reminders. Turning it off trades
+                  punctuality for the icon — your reminders will still arrive,
+                  just late.
+                </Text>
+                <Pressable
+                  testID="alarm-icon-explainer-settings"
+                  onPress={openExactAlarmSettings}
+                  hitSlop={8}
+                >
+                  <Text style={styles.explainerLink}>
+                    Open alarms &amp; reminders settings
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+          </Pressable>
+        )}
         <View style={[styles.alarmCard, styles.descriptionCard]}>
           <Feather
             name={vibrationEnabled ? "smartphone" : "slash"}

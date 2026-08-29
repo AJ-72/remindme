@@ -785,18 +785,44 @@ export async function toggleComplete(
 ): Promise<Reminder[]> {
   const target = current.find((r) => r.id === id);
   if (!target) return current;
-  if (!target.completed) {
+  const completing = !target.completed;
+  if (completing) {
     await cancelNotification(target.notificationId);
   }
+
+  // Un-completing must re-arm the notification. Without this the reminder
+  // returns to the pending list looking armed while nothing is scheduled, and
+  // only rescheduleAllFutureReminders' ~15-minute BackgroundFetch sweep would
+  // ever pick it up — which OEM power management routinely prevents, so a
+  // reminder un-completed for a time less than ~15 minutes away simply never
+  // fires. Deliberately NOT done for a reminder whose datetime has already
+  // passed: it stays overdue and unscheduled (the list already surfaces
+  // overdue items), rather than us inventing a new time on the user's behalf.
+  // scheduleNotification independently returns undefined for a past trigger,
+  // so this stays correct even if the guard below is ever relaxed.
+  let notificationId = completing ? undefined : target.notificationId;
+  if (!completing) {
+    if (new Date(target.datetime).getTime() > Date.now()) {
+      // Sweep by payload too: a reminder that picked up an orphan has a
+      // pending trigger the stored id can't reach, which would otherwise fire
+      // alongside the copy scheduled here.
+      await cancelScheduledForReminder(id);
+      await cancelNotification(target.notificationId);
+      notificationId = await scheduleNotification(target, id);
+    } else {
+      notificationId = undefined;
+    }
+  }
+
   const reminders = current.map((r) =>
     r.id === id
       ? {
           ...r,
           completed: !r.completed,
-          notificationId: !r.completed ? undefined : r.notificationId,
+          notificationId,
           // Set on completion, cleared on un-completion: a record must never
           // claim a completion time for a task that is not complete.
-          completedAt: !r.completed ? new Date().toISOString() : undefined,
+          completedAt: completing ? new Date().toISOString() : undefined,
         }
       : r
   );

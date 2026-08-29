@@ -19,6 +19,120 @@ here.
 | `BLOCKED` | Cannot be tested yet — needs a native build, a fresh install, etc. |
 | `PARTIAL` | Some sub-checks pass, others outstanding. Say which. |
 
+## All scenarios at a glance
+
+Every item, its status, what is left to do, and **whether a machine could run
+it unattended**. Last updated after the automated run of **2026-08-29**
+(OnePlus CPH2569, EAS preview build) — see that section below for evidence.
+
+**Where things stand: 4 `PASS` · 5 `PARTIAL` · 12 `PENDING` · 1 `BLOCKED`.**
+
+| Mark | Meaning |
+| --- | --- |
+| `AUTO` | Fully scriptable. Driving *and* the pass/fail assertion are machine-readable. |
+| `SEMI` | Driving and setup scriptable; the final judgement needs a human sense (sight, sound, touch) or a second party. |
+| `MANUAL` | Needs a human. No machine-readable oracle exists. |
+
+| ID | Scenario | Status | Last run | Auto? | What is still outstanding |
+| --- | --- | --- | --- | --- | --- |
+| [D19](#D19) | `setAlarmClock()` exact delivery | `PASS` | 2026-08-24 | `AUTO` | Nothing blocking. Open questions only: `FLAG_WAKE_FROM_IDLE` unset yet delivery exact; `ALARM_EARLY_OFFSET_MS` now needs revisiting. |
+| [D20](#D20) | EAS re-verify after setAlarmClock | `PASS` | **2026-08-29** | `SEMI` | Lock screen with a **real Clock-app alarm set alongside** — the slot logic is proven, the lock-screen text has not been looked at. |
+| [D12](#D12) | Vague-task hint | `PASS` | **2026-08-29** | `AUTO` | Nothing. All five sub-checks verified. |
+| [D8](#D8) | Dark mode, visually | `PASS` | 2026-08-24 | `SEMI` | Re-walk needed: Smart Alerts, Why tasks slip, quiet-hours and name sheets all landed **after** this passed. |
+| [D2](#D2) | Vibration setting, 4 combinations | `PARTIAL` | **2026-08-29** | `SEMI` | Config half done (all four channels correct, legacy channel gone). Outstanding: does it actually **buzz** in rows 2 and 3 — phone on a table, not in hand. |
+| [D7](#D7) | OEM battery-killer survival | `PARTIAL` | 2026-08-24 | `SEMI` | The one run that closes it: alarm + silent pair, overnight, **unplugged**, lateness recorded to the minute. |
+| [D9](#D9) | Remind-someone-else Tier 1 | `PARTIAL` | **2026-08-29** | `SEMI` | `wa.me: verified` — but on the *safe* install ordering. Still open: WhatsApp installed **after** the app, the not-on-WhatsApp path, `sms:` across OEMs, permission denied→re-granted, 1000+ contacts, cold-start tap. |
+| [D10](#D10) | Name capture and personalization | `PARTIAL` | 2026-08-24 | `SEMI` | Needs `pm clear` (destructive — export first): sheet-vs-permission ordering, Skip persistence, Malayalam name glyphs. |
+| [D14](#D14) | Seven 2026-08-24 device fixes | `PARTIAL` | **2026-08-29** | `SEMI` | #1 scroll and #3 greeting verified. Outstanding: #2 status bar (both theme crossings), #4 quick-add fold, #5 recipient chip, #6 picker above keyboard, #7 send→edit. |
+| [D1](#D1) | Android Auto Backup restores reminders | `PENDING` | — | `AUTO` | **Runnable on the installed release build** — the pass criterion is read off the screen. Destructive (uninstall) — export first. Highest value: could close backlog item 1. |
+| [D3](#D3) | Mark Done / Snooze, app fully closed | `PENDING` | **2026-08-29** (inconclusive) | `SEMI` | Attempted; `input tap` cannot press a notification action on ColorOS. Needs a human thumb or an instrumented runner. |
+| [D15](#D15) | Body tap, then Mark Done | `PENDING` | — | `SEMI` | Same ColorOS limitation as D3. |
+| [D4](#D4) | Duplicate notifications | `PENDING` | — | `AUTO` | Needs a ~20-minute horizon so a BackgroundFetch sweep runs before firing. Nothing blocks it. |
+| [D5](#D5) | Large notification icon | `BLOCKED` | — | `SEMI` | Needs a native/EAS build **and** an eye on the expanded tray. |
+| [D6](#D6) | Malayalam dictation end to end | `PENDING` | — | `MANUAL` | A human speaking Malayalam. No substitute. |
+| [D11](#D11) | Quiet hours incl. midnight wrap | `PENDING` | — | `AUTO` | Nothing blocks it — **best remaining automation candidate**, and the midnight wrap is the classic off-by-one. |
+| [D13](#D13) | "Why tasks slip" explainer | `PENDING` | — | `SEMI` | Both themes, largest font, citation-line wrap. |
+| [D16](#D16) | Personalized snooze re-alert | `PENDING` | — | `AUTO` | Nothing blocks it — one string comparison. Needs a fire-then-snooze cycle. |
+| [D17](#D17) | Corrupt-store quarantine | `PENDING` | — | `AUTO` | **The only item that truly needs a debuggable build** (`eas build --profile development`) — it must write into private sqlite. |
+| [D18](#D18) | Backup carries the new fields | `PENDING` | — | `AUTO` | **Runnable on release** via the share sheet. Generate the data first: complete one, snooze another twice, set quiet hours. |
+| [D21](#D21) | Un-completing re-arms the reminder | `PENDING` | — | `AUTO` | **Blocked: needs a build carrying the 2026-08-28 item-19 fix.** The installed build predates it. |
+| [D22](#D22) | Alarm copy + status-bar explainer | `PENDING` | — | `SEMI` | **Blocked: needs a build carrying the 2026-08-28 item-20 fix.** Installed build still reads "Play alarm sound by default". |
+
+**Totals: 8 `AUTO`, 13 `SEMI`, 1 `MANUAL`** (revised 2026-08-29 after D3/D15 were found not to be drivable by `input tap` on ColorOS).
+
+### What blocks what, right now
+
+- **Needs a new build** (carrying the uncommitted 2026-08-28 fixes): D21, D22.
+- **Needs a debuggable build**: **D17 only.** Build one with
+  `pnpm --filter @workspace/mobile run build:android:dev` (the `development`
+  profile — `developmentClient: true`, so the Gradle *debug* variant, hence
+  `android:debuggable="true"` and a working `run-as`). Note a dev client
+  carries no JS bundle: it needs Metro (`npx expo start --dev-client`) or an
+  EAS Update, so it is not an unattended artifact and not the shipping one.
+  **Corrected 2026-08-29** — D1 and D18 were previously listed here in error;
+  both are runnable on the release build (D1's oracle is on screen, D18's
+  export goes through the share sheet). `run-as` is only a convenience there.
+- **Needs a human present**: D2 (buzz), D3/D15 (tray press), D5, D6, D8, D13,
+  and most of D14.
+- **Nothing blocking, just not run yet**: D4, D11, D16. These three are the
+  cheapest wins left.
+
+### Machine-readable oracles
+
+How each item would be asserted without a person, kept here so the table above
+stays about status:
+
+| ID | Oracle |
+| --- | --- |
+| D1 | `bmgr backupnow`, reinstall, read `RKStorage` via `run-as` |
+| D2 | Channel config from `dumpsys notification`; buzz events from `dumpsys vibrator_manager` |
+| D3 / D15 | `pidof` for the kill, storage read for the result (the *press* is the un-automatable part) |
+| D4 | Posted-notification count == 1; `dumpsys alarm` registration count |
+| D5 | Drawable present in the APK |
+| D7 | `AlarmManager` delivery log gives lateness to the ms |
+| D8 / D13 / D14 | Navigation + `screencap`; `uiautomator` bounds for overlap and ellipsis |
+| D9 | `pm get-app-links`, permission grant/revoke, notification body text |
+| D10 | `pm clear`, then `uiautomator` for sheet ordering and skip-persistence |
+| D11 | Stored datetime after each choice; sheet presence via `uiautomator` |
+| D12 | Hint node present/absent; save succeeds |
+| D16 | Notification **title string** from `dumpsys notification` |
+| D17 | sqlite write, relaunch, key list |
+| D18 | JSON field assertions |
+| D19 / D20 / D21 | `dumpsys alarm` `windowLength`/`flags`, `Next alarm clock` slot, `AlarmManager` delivery log |
+| D22 | Label strings via `uiautomator`; delivery lateness with the permission revoked |
+
+### What automation would actually take
+
+**None of this exists today.** There is no UI automation harness in the repo —
+`pnpm test` is Jest only, which is precisely why this file exists. Read the
+column above as "could be automated", not "is".
+
+The gap is narrower than it looks, because the `AUTO` rows mostly do not need
+UI driving at all. D17 is pure sqlite. D18 is pure JSON. D19, D21 and much of
+D20 are `dumpsys alarm` and `logcat -s AlarmManager`. D16 is one string
+comparison against `dumpsys notification`. Those are shell scripts, not a
+framework.
+
+What needs a real harness (Maestro is the usual fit for Expo) is anything that
+must *create a reminder through the UI* or *press a notification action*:
+D3, D11, D12, D15. Worth it — D11's midnight wrap is exactly the kind of
+off-by-one a machine should be catching on every build, not a person at 02:00.
+
+**Two limits worth being honest about.**
+
+1. **A machine cannot tell you the app feels right.** Every `SEMI` row bottoms
+   out in a human sense, and the four that matter most — D8 contrast, D14's
+   status bar, D2's buzz, D5's icon — are exactly the ones that shipped broken
+   before, because Jest could not see them either. Automating the other rows
+   buys time to look harder at these, it does not replace them.
+2. **This file's `PASS` rule still stands.** "A `PASS` must come from a human
+   who actually watched it happen" was written against the failure mode of
+   trusting green tests. An automated device check is much stronger evidence
+   than a Jest run — it exercises the real OS — but it is still a script
+   asserting what someone *expected* to matter. Suggested convention if this
+   gets built: automated runs report `AUTO-PASS`/`FAIL` and are excellent
+   regression alarms, but promoting an item to `PASS` stays a human act.
+
 ## How this file is maintained
 
 - **After any feature lands, add its device-only checks here** in the same
@@ -36,6 +150,98 @@ here.
   `system_learnings.md`; new items continue from the highest number.
 - When an item passes, keep the row and record the date and device. A `PASS` on
   a Pixel does not carry over to a Xiaomi (see the OEM note below).
+
+## How each item is written
+
+Every item gives **Setup → Steps → Pass → Fails if**, so it can be run by
+someone who did not write the feature and without reading the source.
+
+- **Setup** — build type, install state and any settings that must be set
+  *before* step 1. Getting this wrong is the most common cause of a false
+  negative in this file.
+- **Steps** — numbered and literal. Tap targets by their on-screen label, adb
+  commands in full. If a step needs a wait, say how long.
+- **Pass** — what you must *observe*. Written so the answer is yes or no, never
+  "looks fine".
+- **Fails if** — the specific failure signatures worth naming, especially ones
+  that look like something else. A test you cannot fail is not a test.
+
+Prose above those headings is the *why* — the root cause, the prior bug, the
+reason the check exists. Keep it; it is what stops a future reader from
+"simplifying" a step that is load-bearing.
+
+## Automated run — 2026-08-29, OnePlus CPH2569 (EAS preview build, installed 2026-08-25)
+
+Driven over adb (`dumpsys alarm` / `dumpsys notification` / `logcat` /
+`uiautomator`). **The build under test predates the 2026-08-28 fixes for
+backlog items 19 and 20** — Settings still reads "Play alarm sound by default",
+so [D21](#D21) and [D22](#D22) could not be exercised at all and stay `PENDING`.
+
+The app was **not** doze-whitelisted (standby bucket 10 / ACTIVE), which is the
+condition these results should be read under.
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| [D20](#D20) | **`PASS`** (release build, both halves) | Alarm reminder: `windowLength 0`, `flags 0x9`, `exactAllowReason=policy_permission`, holds the `Next alarm clock` slot. Silent reminder created for **5 h earlier** registered `windowLength 3600000`, `flags 0x4` and **did not take the slot** — the discriminating case. Delivery watched: target 12:44:47 − 60 s offset → fired **12:43:47**, app closed. |
+| [D2](#D2) | config half **`PASS`**, perception outstanding | All four channels exist and differ correctly: `reminders-silent` (imp 4, vib off, no sound), `reminders-vibrate` (imp 4, **vib on**, no sound), `reminders-alarm-novibrate` (imp 5, **vib off**, alarm sound), `reminders-alarm` (imp 5, vib on, alarm sound). The legacy `reminders` channel is gone — migration worked. No `pm clear` was needed. |
+| [D12](#D12) | **`PASS`** | "Sort out the insurance" → hint; **Use as is** dismissed it and it did **not** return on retyping the same text; "Deal with the taxes" still hinted (dismissal is per-text, not global); "Call Dr Menon at 4pm" → no hint; Malayalam (`ശരിയാക്കണം`) → no hint. |
+| [D14](#D14) #1 | **`PASS`** | Settings scrolls to **Debug logs**. |
+| [D14](#D14) #3 | **`PASS`** (partial) | Header renders "Good afternoon, Anand" complete, with "Anand Jayaram" stored. Long and Malayalam names still untested. |
+| [D9](#D9) | one sub-check **`PASS`** | `pm get-app-links com.whatsapp` → `wa.me: verified`. **Caveat:** WhatsApp here was installed 2024-06-26, the app 2026-08-25, so this is the *safe* ordering — D9's actual worry (WhatsApp installed *after* the app) is still untested. |
+| [D3](#D3) / [D15](#D15) | **INCONCLUSIVE — not automatable on this ROM** | See below. |
+
+**Incidental confirmations** (not formal items): natural-language parsing
+resolved "tomorrow at 3pm" → `Tomorrow · 15:00` and "in 3 minutes" → `12:44`,
+stripping the time words from the title each time; the fired notification used
+channel `reminders-alarm` at importance 5 with all three actions present
+(`Snooze 15 min` / `More…` / `Mark Done`); and all three pending alarms
+survived the app being swiped from recents (`pidof` empty, registrations
+intact).
+
+### Two findings from this run
+
+**1. `input tap` cannot press notification action buttons on ColorOS.** Tapping
+the exact bounds of **Mark Done** is swallowed by SystemUI as a row click that
+never triggers:
+
+```
+SystemUi--Notification: clickRow = 0|com.curios.remindme|... triggerClick = false,
+  click reason = REASON_NORMAL_ROW_OR_CHILD_ROW_IN_GROUP
+```
+
+The notification stayed posted, no activity started, the reminder stayed
+pending. **This is a harness limitation, not evidence of an app bug** — do not
+record it as a D3/D15 failure. It does mean the `AUTO` rating given to D3 and
+D15 in the table above was wrong; they are `SEMI` at best on this ROM, and a
+real press needs a human thumb or an instrumented (UiAutomator/Maestro) runner
+rather than raw `input tap`.
+
+**2. ColorOS actively freezes the app process.** Visible throughout the run:
+
+```
+OplusHansManager: unfreeze uid: 10266 com.curios.remindme ... reason: Broadcast
+OplusHansManager: freeze   uid: 10266 com.curios.remindme ... scene: LcdOn
+```
+
+The process is thawed to receive a broadcast and re-frozen ~5 s later. This is
+a layer *above* AOSP Doze and is the mechanism behind D7's "ColorOS's own
+battery layer sits on top and may defer further". Worth keeping in mind for
+[D3](#D3) and any future background work: the alarm itself is unaffected
+(delivery was exact), but anything expecting to keep running is not.
+
+### Test data left on the device
+
+Three reminders were created and **could not be deleted through the UI** — no
+delete affordance was found on the edit screen, on swipe, or on long-press.
+Please remove them by hand:
+
+- `D3 tray test` — today 12:44, already fired, notification may still be in the
+  tray
+- `Silent routing check` — tomorrow 10:00
+- `Sort out the insurance` — tomorrow 15:00
+
+Nothing else was changed. No `pm clear`, no uninstall, no settings edits; the
+Gboard language was switched with the ordinary globe key and left on English.
 
 ## Test environment
 
@@ -75,7 +281,8 @@ local builds then fail with the Ninja long-path error.
 
 ## A. Cross-cutting risks
 
-### D20 — Re-verify on an EAS build after the setAlarmClock change · `PENDING`
+<a id="D20"></a>
+### D20 — Re-verify on an EAS build after the setAlarmClock change · `PASS` (2026-08-29, OnePlus CPH2569, EAS preview)
 *Added 2026-08-24.* Everything measured for D19 was on a **local debug APK**,
 which is not the shipping artifact. Re-run on an EAS build
 (`eas build --platform android --profile preview`, see CLAUDE.md):
@@ -104,10 +311,36 @@ which is not the shipping artifact. Re-run on an EAS build
   This also clears the "uncompiled" risk — the EAS build compiling proves
   `request.content?.body?.optBoolean("alarm", false)` typechecks.
 
-  Still to observe: **actual delivery** of an alarm reminder on the EAS build
-  (registration is correct; a firing has not been watched), and the lock screen
-  with a **real clock alarm set alongside** a pending silent reminder — the slot
-  logic implies it is safe, but it has not been seen.
+  **Still to observe — two runs, both on the EAS build.**
+
+  *Run 1: actual delivery.* Registration is correct; a firing has never been
+  watched on this artifact.
+  1. Create an **alarm** reminder 10 minutes out.
+  2. `adb shell dumpsys battery unplug` then `adb shell input keyevent 26`
+     (screen off), then `adb shell dumpsys deviceidle force-idle`.
+  3. Watch the delivery log and record lateness to the millisecond:
+     ```
+     adb logcat -s AlarmManager | grep curios
+     ```
+  4. **Always restore:** `adb shell dumpsys deviceidle unforce` and
+     `adb shell dumpsys battery reset`.
+  *Pass:* delivered within a second of target, `late by` effectively 0.
+
+  *Run 2: the shared alarm slot.* Android has exactly **one** "next alarm
+  clock" slot, and the risk is this app evicting the user's real morning alarm.
+  1. Set a genuine alarm in the phone's **Clock** app for tomorrow morning.
+  2. Create a **silent** reminder for sooner than that alarm.
+  3. Check the lock screen, and:
+     ```
+     adb shell dumpsys alarm | grep -A2 "Next alarm clock"
+     ```
+  4. Now create an **alarm** reminder for *before* the clock alarm and repeat.
+  *Pass:* at step 3 the slot and the lock screen still show the **Clock app's**
+  alarm — a silent reminder must never take the slot. At step 4 the reminder
+  does take it, which is the documented trade-off, not a bug.
+  *Fails if:* step 3 shows the reminder in the slot, or the lock screen's
+  "next alarm" text is replaced. That would mean the app silently hides the
+  user's real alarm, which is the worst outcome in this whole file.
 
 **LIMITATION this makes explicit — silent reminders stay inexact on ColorOS.**
 The 21m43s window above is the D7 downgrade, still fully in force for anything
@@ -118,8 +351,14 @@ the accepted cost of not hijacking the system alarm slot — but it is a real
 product decision, not a technicality, and it deserves revisiting (default the
 alarm toggle on? say so in the UI?).
 - Confirm the release build still shows `window=0` — release and debug can
-  differ in OEM battery treatment.
+  differ in OEM battery treatment. With an alarm reminder pending:
+  ```
+  adb shell dumpsys alarm | grep -A4 curios.remindme
+  ```
+  *Pass:* `windowLength 0` and `flags 0x9` on the alarm-type reminder.
+  *Fails if:* the release build shows a non-zero window where debug showed 0.
 
+<a id="D19"></a>
 ### D19 — setAlarmClock() fixes exact delivery · `PASS` (2026-08-24, OnePlus CPH2569, Android 15)
 *Added 2026-08-24. Read D7 first — this is the fix for it.* Measured on a
 **local debug APK**, not the shipping artifact — see D20 for the EAS re-verify.
@@ -168,6 +407,7 @@ system_learnings.md). Three-tier fallback with distinct log lines:
 - Overnight unplugged run, and after-reboot re-arm (the boot path goes through
   the same `setupAlarm`, so it should inherit the fix).
 
+<a id="D7"></a>
 ### D7 — OEM battery-killer survival · `PARTIAL`
 Do scheduled alarms fire at all with battery optimization at its default
 aggressive setting? Flagged as a listing blocker in the 2026-08-09 adoption
@@ -245,6 +485,41 @@ and awake.
 **Any timing measurement for D7 must be taken UNPLUGGED**, screen off, phone
 left alone. A reminder set for the next morning, with the actual delivery time
 noted to the minute, is the single measurement that settles this.
+
+**The one run that closes this item.**
+
+*Setup.* Unplugged, battery optimization at its default aggressive setting, app
+**not** doze-whitelisted. Do this in the evening.
+
+*Steps.*
+1. Create **two** reminders for the next morning at the same time: one
+   **alarm**, one **silent**. The pair is the point — it measures the two
+   routes under identical conditions.
+2. Record what was registered before you put the phone down:
+   ```
+   adb shell dumpsys alarm | grep -B2 -A6 curios.remindme
+   ```
+   Note `windowLength` and `flags` for each.
+3. **Unplug.** Screen off. Leave the phone alone all night — no charger, no
+   picking it up.
+4. In the morning, note the delivery time of each **to the minute, from the
+   notification itself**, before touching anything.
+5. Plug in and recover the ground truth:
+   ```
+   adb logcat -b all -d -s AlarmManager | grep curios
+   ```
+
+*Pass.* The **alarm** reminder arrives within seconds of its target. The
+**silent** one is expected to be late — record *how* late; that number is the
+honest figure for the limitation documented in D20, and right now the file
+only has a theoretical one-hour upper bound.
+
+*Fails if.* The alarm reminder is more than a minute late, or does not arrive
+at all. That would mean `setAlarmClock()` does not survive real overnight Doze
+on this ROM, and D19's forced-Doze pass was optimistic.
+
+**Record lateness, never arrival.** "It fired" is the weak evidence that made
+the original Phase 4 pass misleading.
 
 **Phase 3 (forced Doze) — RUN 2026-08-24, and it reproduces deterministically.**
 You do not need to unplug: `dumpsys battery unplug` makes the OS believe it is
@@ -443,6 +718,7 @@ late each delivery was, not just that it happened.**
 Note for Windows: `adb` is not on PATH; use the full path recorded above, and
 `Select-String` in place of `grep` when running from PowerShell.
 
+<a id="D1"></a>
 ### D1 — Does Android Auto Backup actually restore reminders? · `PENDING`
 *Highest value: could close backlog item 1 on Android.*
 
@@ -454,6 +730,19 @@ next to Expo Go at 12 MB is the tell). What matters is whether `RKStorage` (the
 SQLite DB behind AsyncStorage) is included, and a settings screen only shows
 the sending half.
 
+**Setup.** The standalone build, **not Expo Go**. A few reminders in the app.
+
+**Do not change build type mid-test.** Auto Backup restore requires the **same
+signing key**. Both EAS profiles use the project's managed keystore, so
+preview -> development is fine, but a local `npx expo run:android` APK is signed
+with the *debug* keystore. Backing up from an EAS build and restoring onto a
+locally-built one fails on signature — and looks exactly like Auto Backup being
+broken. Stay on one artifact for the whole run.
+
+A debuggable build is **not** required here: the pass criterion is read off the
+screen. `run-as` below only diagnoses the failure case.
+
+**Steps.**
 1. **Export first** via Settings → Back up reminders. If the restore fails, the
    reminders on that phone are gone.
 2. `adb shell pm list packages | grep curios` → must print
@@ -467,9 +756,17 @@ the sending half.
    before first launch; opening it early is the most common false negative.
 6. `adb shell dumpsys backup | grep -i "restore\|com.curios"`, then open the app.
 
-Reminders present → Auto Backup works end to end. App empty → the 11 MB is
-cache; confirm with `adb shell run-as com.curios.remindme ls -la databases/`
-(debuggable builds only). Must be the standalone build, **not Expo Go**.
+**Pass.** The reminders are present after the reinstall, without restoring from
+your own backup. That is Auto Backup working end to end, and it closes backlog
+item 1 on Android.
+
+**Fails if.** The app opens empty — the 11 MB is cache, not our data. Confirm
+before recording it:
+```
+adb shell run-as com.curios.remindme ls -la databases/    # debuggable only
+```
+`RKStorage` absent or empty means AsyncStorage was never in the backup set.
+
 **Do not ship Settings copy claiming automatic backup until this passes** — a
 wrong promise about data safety is worse than saying nothing.
 
@@ -477,54 +774,245 @@ wrong promise about data safety is worse than saying nothing.
 
 ## B. Notifications
 
+<a id="D3"></a>
 ### D3 — Mark Done / Snooze with the app fully closed · `PENDING`
 The headless TaskManager path (`tasks/notificationResponseTask.ts`). Jest
-covers the foreground listener only. Kill the app from recents, wait for a
-reminder to fire, press the action from the tray.
+covers the foreground listener only, so the case that matters most — the app
+not running at all — is entirely unproven.
 
+**Setup.** Any build. Notifications granted. Note your snooze preset
+(Settings → Smart Alerts) so you know what to expect in step 7.
+
+**Steps.**
+1. Create a reminder **2 minutes** out, alarm on, titled `D3 mark done`.
+2. Swipe the app away from recents.
+3. Confirm the process is actually dead — this is the whole point of the test:
+   ```
+   adb shell pidof com.curios.remindme     # must print NOTHING
+   ```
+4. Screen off. Wait for the notification.
+5. Pull down the tray and press **Mark Done**. **Do not open the app.**
+6. Now open the app and look at the list.
+7. Repeat steps 1–5 with a second reminder, pressing **Snooze** instead, and
+   wait out the snooze interval.
+
+**Pass.**
+- The notification disappears from the tray when Mark Done is pressed.
+- On opening the app the reminder is under **Completed**, not pending.
+- The snoozed one re-fires after the preset interval, and its notification
+  title reads "Still waiting, &lt;name&gt; — …" if a name is set (that is D16).
+
+**Fails if.**
+- Pressing the action does nothing, or the notification stays in the tray.
+- The reminder is still pending when you open the app — meaning the action was
+  handled by the *foreground* listener on launch, not headlessly, which is
+  exactly the bug this test exists to catch.
+- The app's UI visibly launches when you press the action. The headless task
+  may start the process (fine, `pidof` will print after step 5), but no screen
+  should appear.
+
+<a id="D15"></a>
 ### D15 — Tap the notification body, then press Mark Done on it · `PENDING`
 *Added 2026-08-23 for the `53bc7b9` fix.* The dedupe key used to be the
 notification id alone, so one notification could be acted on **once ever** —
 tapping the body burned the key and the action button was then silently
 dropped. Send reminders could never be completed from the tray at all.
 
-Sequence that must now work: notification fires → tap the **body** (app opens)
-→ go back → pull down the tray → press **Mark Done** on that same
-notification → reminder is completed. Repeat for **Snooze**.
+**Setup.** Any build. At least one reminder able to fire while you watch.
+Because the bug was *one action per notification, ever*, the body tap in step 2
+is the load-bearing step — skipping it makes the test pass vacuously.
 
+**Steps.**
+1. Create a reminder 2 minutes out, titled `D15 dedupe`. Wait for it to fire.
+2. Tap the notification **body**. The app opens on the reminder detail.
+3. Press back / home to leave the app. **Do not** dismiss the notification.
+4. Pull down the tray. The same notification must still be there.
+5. Press **Mark Done** on it.
+6. Repeat steps 1–5 with a fresh reminder, pressing **Snooze** at step 5.
+7. Repeat once more with a **send reminder** (one with a recipient) — these
+   could never be completed from the tray at all under the old key.
+
+**Pass.** In all three runs the action at step 5 takes effect: the reminder is
+completed (or re-scheduled for snooze) and the notification clears.
+
+**Fails if.** The action is silently dropped after the body tap — nothing
+happens, no error, and the reminder stays pending. That silence is the
+signature of the old dedupe key being burned by the tap.
+
+<a id="D4"></a>
 ### D4 — Duplicate notifications · `PENDING`
-The `ALARM_EARLY_OFFSET_MS` fix. Needs a reminder left to fire naturally,
-ideally across a background-fetch cycle.
+The `ALARM_EARLY_OFFSET_MS` fix. The failure needs the ~15-minute
+BackgroundFetch sweep to run *while* a reminder is inside the 60-second early
+window, so a reminder that fires two minutes after you create it will never
+reproduce it. **The horizon is the test.**
 
-### D2 — Vibration setting · `BLOCKED` — needs a fresh install or cleared app data
+**Setup.** Fresh app start. Nothing else pending, so a second notification is
+unambiguous.
+
+**Steps.**
+1. Create a reminder **~20 minutes** out — long enough that at least one
+   BackgroundFetch cycle runs before it fires.
+2. Confirm exactly one registration exists:
+   ```
+   adb shell dumpsys alarm | grep -c curios.remindme
+   ```
+3. Background the app (home, do not swipe away). Leave the phone alone.
+4. Optionally force the sweep rather than waiting:
+   ```
+   adb shell cmd jobscheduler run -f com.curios.remindme 999
+   ```
+   then re-run the count in step 2.
+5. When it fires, **count the notifications in the tray**.
+6. Re-run step 2's command after delivery.
+
+**Pass.** Exactly **one** notification in the tray. The count in step 2 stays
+at 1 across the sweep, and drops to 0 after delivery.
+
+**Fails if.** Two notifications with the same title, typically ~60 s apart —
+the delivered copy plus a re-armed duplicate. Also a fail if step 6 still shows
+a pending registration after delivery: that is an orphan no id can cancel, and
+it will fire again later.
+
+<a id="D2"></a>
+### D2 — Vibration setting · `PARTIAL` — channel config verified 2026-08-29; perception outstanding
 Android creates a notification channel once and never updates it, so the
 `reminders-alarm-novibrate` channel will not exist on an existing install and
 the fix will look like it failed. See the 2026-08-09 ledger entry.
 
-### D5 — Large notification icon · `BLOCKED` — needs a native build
-The `withLargeNotificationIcon` config plugin.
+**Setup — this is what unblocks the item.** Export first (Settings → Back up
+reminders; the next command destroys all data), then:
+```
+adb shell pm clear com.curios.remindme
+```
+Confirm the channels were recreated before testing anything:
+```
+adb shell dumpsys notification --noredact | grep -A3 "reminders-alarm"
+```
+All four channels must be listed, including `reminders-alarm-novibrate`. If
+that one is missing, the clear did not take and every result below is void.
 
+**Steps.** Run all four combinations, one reminder each, ~2 minutes out, phone
+**on the table not in hand** (you cannot feel a buzz you are holding through a
+case):
+
+| # | Alarm toggle | Vibrate toggle | Expect |
+| --- | --- | --- | --- |
+| 1 | on | on | sound **and** buzz |
+| 2 | on | off | sound, **no buzz** |
+| 3 | off | on | **buzz, no sound** |
+| 4 | off | off | silent, no buzz |
+
+**Pass.** All four behave as tabled. Row 3 is the one the original bug broke —
+turning sound off also killed the buzz with no way back.
+
+**Fails if.** Rows 2 and 3 behave identically to row 1 or row 4, i.e. the two
+settings are still coupled. Also a fail if the phone's own Do Not Disturb or
+ring mode is confounding it — check that before recording a result.
+
+<a id="D5"></a>
+### D5 — Large notification icon · `BLOCKED` — needs a native build
+The `withLargeNotificationIcon` config plugin. A config plugin only takes
+effect through prebuild, so an OTA update can never carry this — and a *local*
+build is not evidence either (see Test environment).
+
+**Setup.** An **EAS** build:
+`eas build --platform android --profile preview`.
+
+**Steps.**
+1. Confirm the drawable actually made it into the artifact before testing by
+   eye:
+   ```
+   adb shell run-as com.curios.remindme ls res/drawable* | grep -i notification
+   ```
+   (debuggable builds only — otherwise unzip the APK and look under `res/`.)
+2. Fire any reminder.
+3. **Expand** the notification in the tray — the large icon only appears in the
+   expanded form.
+4. Check the collapsed form's small icon too, against both a light and a dark
+   system theme.
+
+**Pass.** The expanded notification shows the app's large icon, in colour and
+not clipped. The small status-bar icon is a recognisable silhouette.
+
+**Fails if.** The large icon is absent (plugin did not run), shows as a white
+or grey square (Android's fallback when the drawable is the wrong type), or the
+small icon renders as a solid blob — the classic symptom of shipping a full
+colour bitmap where a transparent-background silhouette is required.
+
+<a id="D16"></a>
 ### D16 — Personalized snooze re-alert · `PENDING`
 *Added 2026-08-23.* With a name set, snoozing a reminder should produce a
-notification titled "Still waiting, <name> — <title>". With no name set it must
-read as the plain title, with no dangling greeting.
+notification titled "Still waiting, &lt;name&gt; — &lt;title&gt;". With no name set it
+must read as the plain title, with no dangling greeting.
+
+**Setup.** Set a name via Settings → Your name. Set the snooze preset to
+**5 minutes** (Settings → Smart Alerts) so the wait is short.
+
+**Steps.**
+1. Create a reminder 2 minutes out titled `Call the plumber`.
+2. When it fires, press **Snooze**.
+3. Wait out the snooze interval and read the new notification's **title**.
+4. Now go to Settings → Your name and **clear** it (empty name).
+5. Repeat steps 1–3.
+6. Repeat once with a **Malayalam** name set.
+
+**Pass.**
+- With a name: `Still waiting, Anand — Call the plumber`.
+- With no name: `Call the plumber`, with no leading comma, dash or greeting.
+- The Malayalam name renders in script, not as boxes.
+
+**Fails if.** You see a dangling `Still waiting,  — Call the plumber`, or the
+literal string `undefined` / `null` where the name goes. That is the empty-name
+branch, and it is the entire reason step 4 exists.
 
 ---
 
 ## C. Feature end-to-end
 
+<a id="D9"></a>
 ### D9 — Remind-someone-else Tier 1 · `PARTIAL`
 **Passing** (2026-08-24, user's OEM device): the send screen opens with the
 message pre-filled, the signature and invite line render, and WhatsApp receives
 the pre-filled text.
 
-**Still outstanding** (needs a native build — `expo-contacts` has no OTA path):
-the full loop end to end. Create a reminder with a recipient a minute
-out → lock the phone → tap the notification when it fires (body must read
-"Message &lt;name&gt;", not "Reminder!") → send screen opens with the message and
-invite line → toggle the invite off and watch the preview update → send on
-WhatsApp → return → reminder still under "Remind Someone" → mark done → moves
-to Completed.
+**Still outstanding** (needs a native build — `expo-contacts` has no OTA path).
+
+**Setup.** EAS build. Contacts permission not yet granted, so step 1 exercises
+the prompt. Have a contact who **is** on WhatsApp and one who is **not**.
+
+**Steps — the full loop.**
+1. Add a reminder, pick a recipient from the contact picker (grant the
+   permission when asked), set it **1 minute** out, save.
+2. **Lock the phone.** Wait for the notification.
+3. Read the notification **body** on the lock screen before tapping.
+4. Tap it — from a **cold start** at least once (swipe the app from recents
+   first), since that is the untested path.
+5. On the send screen, toggle the **invite line off** and watch the preview.
+6. Send on WhatsApp, then come back to the app.
+7. Mark the reminder done.
+
+**Pass.**
+- Step 3's body reads **"Message &lt;name&gt;"**, not "Reminder!".
+- Step 4 lands on the send screen with the message pre-filled, both cold and
+  warm.
+- Step 5's preview updates immediately and the sent message omits the invite.
+- Step 6 opens **WhatsApp**, not a browser.
+- Step 7 moves it out of "Remind Someone" into Completed.
+
+**Specifically unproven, each worth its own run.**
+- `wa.me` opening WhatsApp rather than a browser **on a device where WhatsApp
+  was installed after this app** — App Links verification is a real failure
+  mode and the confirmed pass above does not cover it. Check with:
+  ```
+  adb shell pm get-app-links com.whatsapp
+  ```
+  `wa.me` must show `verified`.
+- The **"number not on WhatsApp"** path — use the second contact.
+- `sms:` pre-fill across Samsung Messages, Google Messages and iOS Messages.
+- The contacts permission **denied, then re-granted** path
+  (`adb shell pm revoke com.curios.remindme android.permission.READ_CONTACTS`).
+- Contacts list scrolling at **1000+ contacts**.
+- Whether READ_CONTACTS trips Play Store review.
 
 Specifically unproven: `wa.me` opening WhatsApp rather than a browser **on a
 device where WhatsApp was installed after this app** — App Links verification
@@ -535,10 +1023,41 @@ denied-then-re-granted path; contacts list scrolling at 1000+ contacts; and the
 notification tap from a **cold start**. Also confirm READ_CONTACTS does not
 trip Play Store review.
 
+<a id="D6"></a>
 ### D6 — Malayalam dictation end-to-end · `PENDING`
-Parser tests use *typed* text; the speech recognizer's actual output is
-unverified. Settings → Debug logs shows the raw transcription.
+Parser tests use *typed* text. Every Malayalam parser test in the suite feeds
+in a clean string, so the one unknown is what the **recognizer actually emits**
+— spacing, numerals, and whether it returns Malayalam script at all. The parser
+could be perfect and the feature still broken here.
 
+**Setup.** Settings → Dictation language → **Malayalam**. First use triggers an
+offline model download ("Preparing voice recognition") — let it finish on wifi
+before timing anything.
+
+**Steps.**
+1. Open add-reminder, press the mic, and say a phrase with a time in it —
+   e.g. *"നാളെ രാവിലെ പത്ത് മണിക്ക് ഡോക്ടറെ വിളിക്കണം"* (call the doctor
+   tomorrow at 10am).
+2. Read the **title** that lands in the box and the **parsed date/time preview**
+   underneath it.
+3. Open Settings → **Debug logs** and find the raw transcription string.
+4. Repeat with: a relative duration ("രണ്ട് മണിക്കൂർ കഴിഞ്ഞ്"), a weekday, and
+   a half-past time — these are separate branches in `malayalamDateParser.ts`.
+5. Switch dictation language back to English and dictate an English phrase, to
+   confirm the setting actually routes.
+
+**Pass.** The raw transcription in Debug logs is Malayalam script, the title
+keeps the task words, and the preview resolves to the right date and time. The
+time words must **not** be left stranded in the title.
+
+**Fails if.** The transcription comes back transliterated into Latin script
+(that is item 17, Manglish, and is *not* supported — record it as a finding,
+not a pass), comes back empty, or the date is right while the title still
+contains the time words. Note which of the four phrasings in step 4 failed —
+"Malayalam dictation is broken" is not actionable, "half-past does not parse
+from speech but does when typed" is.
+
+<a id="D10"></a>
 ### D10 — Name capture and personalization · `PARTIAL`
 *Added 2026-08-23.*
 
@@ -549,43 +1068,122 @@ outgoing messages carry the "— &lt;name&gt;" signature.
 One defect found and fixed during this pass: a full name truncated the header
 to "Good morn.." (`4a2c522`). Not re-verified — see D14.
 
-**Still outstanding** (needs a **fresh install** for the prompt itself):
+**Still outstanding.**
 
-- The sheet appears **after** the permission flow, never stacked behind the
-  system permission dialog. (Ordering unconfirmed — the prompt was seen, but
-  not whether it could ever race the permission dialog.)
-- **Skip** it → prompt never returns on later launches → header still offers
-  "Hi there" as a tap target to set a name.
-- A **Malayalam** name renders in Noto Sans Malayalam, not as blank boxes.
-- Settings → Your name edits it; Cancel leaves it unchanged.
+**Setup.** The prompt only shows once ever, so each run below needs a **fresh
+install state**. Export your reminders first, then between runs:
+```
+adb shell pm clear com.curios.remindme
+```
 
+**Steps.**
+1. Clear data, launch, and **watch the very first seconds** — specifically
+   whether the name sheet can appear *underneath* the system notification
+   permission dialog. Record the order you actually see.
+2. Press **Skip**. Force-stop and relaunch twice.
+3. Tap the header greeting ("Hi there").
+4. Clear data again, relaunch, and enter a **Malayalam** name.
+5. Go to Settings → Your name, edit it, press **Cancel**. Then edit again and
+   confirm.
+
+**Pass.**
+- Step 1: the name sheet comes **after** the permission flow, never stacked
+  behind or beneath the system dialog.
+- Step 2: the prompt never returns, and the header reads "Hi there".
+- Step 3: the greeting is a working tap target that opens the name sheet.
+- Step 4: the name renders in Noto Sans Malayalam, not as blank boxes — check
+  the header, the avatar initials, and an outgoing message signature.
+- Step 5: Cancel leaves the old name; confirm changes it everywhere.
+
+**Fails if.** The sheet is visible but untappable behind the permission dialog
+(the race in step 1), or a Malayalam name shows as boxes anywhere — the avatar
+initials are the most likely place, since they take a substring and can split a
+grapheme cluster.
+
+<a id="D11"></a>
 ### D11 — Quiet hours · `PENDING`
 *Added 2026-08-23.*
 
-- Settings → Smart Alerts opens; the two time pickers set start and end.
-- Create a reminder inside quiet hours → the confirm sheet appears →
-  **Keep it** stores the chosen time unchanged.
-- Repeat → **Move to &lt;end&gt;** stores the window's end instead.
-- Create one outside quiet hours → **no sheet at all**.
-- **Midnight wrap:** with 22:00–08:00, both 23:30 and 02:00 must count as
-  inside. This is the classic off-by-one.
-- Set start == end → treated as *no* quiet hours, i.e. nothing is suppressed.
-  Getting this backwards would silence every notification the app sends.
+**Setup.** Settings → Smart Alerts. Set quiet hours to **22:00-08:00** — a
+window that crosses midnight, because the wrap is where this breaks.
 
-### D12 — Vague-task hint · `PENDING`
-*Added 2026-08-23.* Type "Sort out the insurance" → hint appears suggesting a
-first step. "Use as is" dismisses it and it must not return for that text.
-Saving is never blocked. Typing Malayalam must never trigger it.
+**Steps.**
+1. Confirm both time pickers actually set start and end, and that the values
+   survive leaving and re-entering the screen.
+2. Create a reminder for **23:30**. The confirm sheet must appear. Press
+   **Keep it**.
+3. Create another for **02:00**. Sheet must appear again. Press
+   **Move to 08:00**.
+4. Create one for **14:00**. No sheet.
+5. Now set start **and** end to the same value (e.g. 22:00-22:00) and create a
+   reminder for 23:30.
 
+**Pass.**
+- Steps 2 and 3 both show the sheet — that is the midnight wrap, and 02:00 is
+  the case a naive `start <= t && t <= end` comparison gets wrong.
+- Step 2 stores **23:30** unchanged; step 3 stores **08:00**.
+- Step 4 shows no sheet at all.
+- Step 5 shows **no sheet**: start == end means quiet hours are *off*.
+
+**Fails if.** Step 3 shows no sheet (the wrap is inverted), or step 5 shows one
+— getting that backwards means every notification the app sends is treated as
+quiet and suppressed, which is the worst available failure here.
+
+<a id="D12"></a>
+### D12 — Vague-task hint · `PASS` (2026-08-29, OnePlus CPH2569, automated)
+*Added 2026-08-23.* The hint is advisory — the failure that matters is it
+becoming a **blocker**, or firing on Malayalam where it has no basis.
+
+**Setup.** Add-reminder screen.
+
+**Steps.**
+1. Type `Sort out the insurance`. Watch for the hint.
+2. Press **Use as is**. Keep typing, then clear the field and retype the same
+   text.
+3. On a fresh vague title, without dismissing the hint, press **Save**.
+4. Type a specific task — `Call Dr Menon at 4pm` — and check no hint appears.
+5. Type a Malayalam phrase, vague or not.
+
+**Pass.**
+- Step 1 shows a hint suggesting a concrete first step.
+- Step 2: dismissed, and it does **not** come back for that same text.
+- Step 3: **saving is never blocked** — the reminder saves with the hint on
+  screen.
+- Steps 4 and 5: no hint. Malayalam must never trigger it.
+
+**Fails if.** Save is disabled or swallowed while the hint is up, or the hint
+reappears after "Use as is" — both turn an optional nudge into an obstacle.
+
+<a id="D13"></a>
 ### D13 — "Why tasks slip" explainer · `PENDING`
-*Added 2026-08-23.* Smart Alerts → Why tasks slip shows four cards; "Read more"
-expands the article and its five citations. Check readability in **both**
-themes and that long citation lines wrap rather than overflow.
+*Added 2026-08-23.* Pure content screen, so the risks are all layout: overflow,
+contrast, and long unbroken citation URLs.
+
+**Setup.** Nothing. Run it twice, once per theme (Settings → Appearance).
+
+**Steps.**
+1. Smart Alerts → **Why tasks slip**.
+2. Count the cards, then press **Read more**.
+3. Scroll to the very bottom, through all five citations.
+4. Switch the theme and repeat 1-3.
+5. Raise the system font size to its largest setting and scroll through once
+   more.
+
+**Pass.** Four cards; Read more expands the full article and five citations;
+everything scrolls to the end with nothing cut off; citation lines **wrap**
+rather than running off the right edge; text is readable against the background
+in both themes and at the largest font size.
+
+**Fails if.** A citation URL pushes the layout wider than the screen (the whole
+page then scrolls sideways), the article cannot be scrolled to its end, or body
+text drops to near-invisible contrast in one theme — the usual cause is a
+hardcoded colour that only suits the other.
 
 ---
 
 ## D. Visual and layout
 
+<a id="D8"></a>
 ### D8 — Dark mode, visually · `PASS` (2026-08-24, user's OEM device)
 One defect found and fixed during this pass: the status-bar icons were
 invisible with the app set to Light on a dark-mode phone (`017b785`). That fix
@@ -594,42 +1192,89 @@ is **not** re-verified — see D14.
 Re-run this whole walk after any new screen lands. The screens added since
 this passed (Smart Alerts, Why tasks slip, the quiet-hours and name sheets)
 were **not** part of it.
-Jest asserts *token values*, not pixels. Walk every screen with the system
-theme dark: home list (incl. an overdue card and a completed one), add/edit,
-reminder detail, settings (incl. both modals), about, smart alerts, why tasks
-slip, the snooze sheet, the confirm sheet, the quiet-hours sheet, the name
-sheet, the exact-alarm banner, and the error fallback. Watch for text that
-vanishes into its background, the status bar, and modal overlays.
+Jest asserts *token values*, not pixels.
 
-Toggle the system theme **while the app is open** — the switch should be
-immediate. Then exercise Settings → Appearance: Light on a dark device and Dark
-on a light device should both win; System hands control back to the OS; the
-choice survives a restart; and a forced crash should show the error screen in
-the chosen theme.
+**Setup.** System theme **dark**. Have one overdue reminder and one completed
+reminder in the list before starting, so the destructive and muted states are
+on screen.
 
-### D14 — 2026-08-24 device-feedback fixes · `PENDING`
+**Steps — walk every screen, in this order.**
+1. Home list (with the overdue card and the completed one visible).
+2. Add/edit reminder.
+3. Reminder detail.
+4. Settings, including **both** modals.
+5. About.
+6. Smart Alerts.
+7. Why tasks slip.
+8. The sheets: snooze, confirm, quiet-hours, name.
+9. The exact-alarm banner.
+10. The error fallback (force a crash to reach it).
+
+At each: look for text vanishing into its background, the **status bar**, and
+**modal overlays** — the three places contrast failures actually land.
+
+11. Toggle the **system** theme while the app is open.
+12. Settings → Appearance: set **Light** on a dark device, then **Dark** on a
+    light device, then **System**.
+13. Restart the app.
+14. Force a crash again with a non-default theme selected.
+
+**Pass.** Every screen legible in dark. Step 11 switches immediately, with no
+restart. Step 12: the explicit choice **wins** over the OS in both directions,
+and System hands control back. Step 13: the choice survives. Step 14: the error
+screen honours the chosen theme.
+
+**Fails if.** Any text matches its background; the status-bar icons disappear
+(that is D14 #2); or the error screen renders in the OS theme rather than the
+chosen one — `ThemeProvider` sits outside `ErrorBoundary` specifically so it
+does not.
+
+<a id="D14"></a>
+### D14 — 2026-08-24 device-feedback fixes · `PARTIAL` — #1 and #3 verified 2026-08-29
 Seven findings from a real device, all fixed but none re-verified. Four were
 invisible to the entire test suite.
 
-- **Settings scrolls** all the way to Debug logs. (Root was a plain `View` —
-  everything past one viewport was unreachable.)
-- **Status bar readable in both themes**, including the combination that broke
-  it: app set to **Light** on a phone in **dark mode**, and the reverse.
-- **Header greeting does not truncate**, with a short name, a long name, and a
-  Malayalam name.
-- **Quick-add**: buttons sit below the input; long text uses the full width.
-  Check how much of the list is still visible above the fold — the card is
-  taller now.
-- **Recipient chip** names the chosen contact and its × removes them.
-- **Contact picker** stays above the keyboard while typing a search,
-  *especially with only one or two matches* — that is when the sheet is
-  shortest and used to vanish entirely.
-- **Send reminder → edit** opens the editor from the send screen's header.
+**Setup.** A device with a real keyboard and a real status bar — four of these
+were invisible to the entire suite precisely because jsdom has neither. Have a
+long name and a Malayalam name ready.
+
+**Steps and pass criteria, one per finding.**
+
+1. **Settings scrolls.** Open Settings and swipe all the way down.
+   *Pass:* you reach the **Debug logs** row. *Root was a plain `View`, so
+   everything past one viewport was unreachable — if it stops early, the
+   ScrollView regressed.*
+2. **Status bar readable in both themes.** Set Settings → Appearance to
+   **Light** while the phone is in **dark mode**, then the reverse.
+   *Pass:* the clock, battery and signal icons are visible in **both**
+   combinations. This crossed pairing is the one that broke; matching
+   app-and-phone themes will not reproduce it.
+3. **Header greeting does not truncate.** View the home header with (a) a short
+   name, (b) a long full name, (c) a Malayalam name.
+   *Pass:* no `Good morn..` clipping in any of the three.
+4. **Quick-add layout.** Open the home screen and type a long title into
+   quick-add.
+   *Pass:* the buttons sit **below** the input, long text uses the full width,
+   and you can still see a useful amount of the reminder list above the fold —
+   the card is taller than it was, so judge this as a user, not a checkbox.
+5. **Recipient chip.** Add a recipient to a reminder.
+   *Pass:* the chip names the chosen contact, and its **x** removes them.
+6. **Contact picker above the keyboard.** Open the picker and type a search
+   that narrows to **one or two matches**.
+   *Pass:* the sheet stays above the keyboard. *Few matches is the failing
+   case — the sheet is shortest then and used to vanish entirely, so a search
+   returning many results proves nothing.*
+7. **Send reminder edit.** From the send screen, use the header's edit control.
+   *Pass:* the reminder editor opens.
+
+**Fails if.** Any of the seven reproduces its original symptom. Record which
+number failed — "D14 failed" is not actionable.
 
 ---
 
 ## E. Data safety
 
+<a id="D17"></a>
 ### D17 — Corrupt-store quarantine · `PENDING`
 *Added 2026-08-23 for `fe10f95`.* Hard to trigger naturally; needs a
 debuggable build. Corrupt the store deliberately:
@@ -638,16 +1283,147 @@ debuggable build. Corrupt the store deliberately:
 adb shell run-as com.curios.remindme    # debuggable builds only
 ```
 
-then damage the `@reminders_v1` value in `databases/RKStorage`. Relaunch: the
-app must open with an **empty list rather than crashing**, and a
-`@reminders_corrupt_<timestamp>` key must hold the original payload. Adding a
-new reminder afterwards must **not** destroy that quarantined copy.
+**Setup.** A **debuggable** build. Create two or three reminders first, so the
+quarantined payload has recognisable content.
 
+**Steps.**
+1. Corrupt the stored JSON deliberately:
+   ```
+   adb shell run-as com.curios.remindme \
+     sqlite3 databases/RKStorage \
+     "UPDATE catalystLocalStorage SET value='{not valid json' WHERE key='@reminders_v1';"
+   ```
+   If `sqlite3` is absent on the device, pull the DB, edit it, push it back.
+2. Force-stop and relaunch the app.
+3. Read the keys back:
+   ```
+   adb shell run-as com.curios.remindme \
+     sqlite3 databases/RKStorage \
+     "SELECT key FROM catalystLocalStorage;"
+   ```
+4. Add a **new** reminder in the app.
+5. Re-run step 3's query.
+
+**Pass.**
+- Step 2: the app opens with an **empty list** and does not crash.
+- Step 3: a `@reminders_corrupt_<timestamp>` key exists and holds the original
+  payload — check it contains your reminder titles, not the corrupt string.
+- Step 5: that quarantine key is **still there** after a normal write.
+
+**Fails if.** The app crashes on launch (the whole point of the feature), the
+quarantine key is missing, or step 5 shows it gone — a later save overwriting
+the only copy of the user's data is worse than the crash.
+
+<a id="D18"></a>
 ### D18 — Backup carries the new fields · `PENDING`
-*Added 2026-08-23.* Settings → Back up reminders after using the app for a
-while. The exported JSON should carry `createdAt`, `completedAt`, `snoozeCount`
-and `originalDatetime` on reminders, plus `quietHours` in `settings`. Restore
-on a second device and confirm quiet hours actually applies.
+*Added 2026-08-23.* An empty-ish store will not exercise this — the fields only
+appear once the events that set them have happened.
+
+**Setup — you must generate the data first.** In the app:
+- create a reminder and **complete** it (sets `completedAt`),
+- create another, let it fire, and **snooze it at least twice** (sets
+  `snoozeCount` and `originalDatetime`),
+- set non-default quiet hours in Smart Alerts.
+
+**Steps.**
+1. Settings → **Back up reminders**, share the JSON somewhere you can read it
+   (a note to self is fine).
+2. Inspect the payload for `createdAt`, `completedAt`, `snoozeCount` and
+   `originalDatetime` on the reminders, and `quietHours` under `settings`.
+3. On a **second device** (or after `pm clear`), Settings → **Restore from
+   backup** and paste it.
+4. Open Smart Alerts on that device.
+5. Check the restored reminders' snooze history survived — the snoozed one must
+   still show its history, not a reset count.
+
+**Pass.** All four reminder fields present and populated with real values (not
+`null`), `quietHours` present, and step 4 shows the **restored** window rather
+than the default.
+
+**Fails if.** `snoozeCount` restores as 0, or quiet hours read as default after
+restore — settings are the half most likely to be dropped, since the reminders
+array is the obvious part.
 
 Known and accepted: `mergeReminders` is "local always wins", so a re-typed
 reminder beats a backup copy carrying real history. Deliberate — see the spec.
+
+<a id="D21"></a>
+### D21 — Un-completing a reminder re-arms it · `PENDING`
+*Added 2026-08-28 for backlog item 19.* The whole failure mode is "never
+fired", which Jest cannot see. The old bug was **masked** by the ~15-minute
+BackgroundFetch sweep re-arming the reminder, so a generous test window will
+pass even against the broken code — the short horizon in step 1 is what makes
+this discriminating.
+
+**Setup.** Any build carrying the fix. Notifications granted. Nothing else
+pending, so the notification you see is unambiguous.
+
+**Steps — the future branch.**
+1. Create a reminder **3 minutes** out, alarm on, titled `D21 re-arm`. Three
+   minutes is deliberate: shorter than the sweep, so nothing can cover for a
+   broken re-arm.
+2. Mark it **Done** before it fires.
+3. Move it back to pending from the Done list.
+4. Confirm something is actually armed, rather than trusting the UI:
+   ```
+   adb shell dumpsys alarm | grep -A4 curios.remindme
+   ```
+5. Screen off, leave the phone alone, and **wait for it to ring** at its
+   original time.
+6. Repeat steps 1-5 once with the device left idle the whole three minutes —
+   this is where OEM power management would have stopped the sweep from
+   rescuing the old bug.
+
+**Steps — the past branch.**
+7. Let a reminder fire and go overdue. Mark it Done, then un-complete it.
+
+**Pass.**
+- Step 4 shows a pending registration.
+- Step 5: **it rings**, at its original time.
+- Step 7: the reminder returns to the list as **overdue and silent** — no
+  notification fires immediately, and no new time is invented for it.
+
+**Fails if.** The alarm icon appears on the card but nothing ever rings. **Do
+not accept the icon as proof** — the icon was never the broken part, and
+treating it as the pass criterion is exactly how this shipped. Also a fail if
+step 7 fires a notification straight away.
+
+<a id="D22"></a>
+### D22 — Alarm toggle copy and the status-bar icon explainer · `PENDING`
+*Added 2026-08-28 for backlog item 20.* Two halves: the copy must be legible,
+and — more importantly — the claim it makes must be **true on the ROM**.
+
+**Setup.** Android device. Settings screen.
+
+**Steps — copy and layout.**
+1. Read the alarm row with the toggle **on**, then **off**.
+2. Raise the system font to its **largest** setting and read both again. The
+   new label is longer than the one it replaced and shares the row with a
+   switch.
+3. Tap **"Why is there an alarm icon in my status bar?"**. Tap again.
+4. Read the expanded body in **both** themes.
+5. Press **"Open alarms & reminders settings"**.
+6. Check on an **iPhone**, or confirm by inspection, that the row is absent
+   there.
+
+**Steps — verifying the claim (the half that matters).**
+7. With an alarm reminder pending, note the status-bar clock icon.
+8. Turn **off** Android's *Allow setting alarms and reminders* for this app
+   (the screen step 5 opens).
+9. Create a new alarm reminder ~10 minutes out and check the status bar again.
+10. Measure its delivery, unplugged and idle, as in D7.
+
+**Pass.**
+- Title reads **"Alarm — rings, and arrives on time"**; sub-label switches to
+  **"Silent, and may arrive up to 20 minutes late"** when off.
+- Neither line clips or overlaps the switch at the largest font size.
+- The explainer expands and collapses, is readable in both themes, and is
+  **Android-only**.
+- Step 5 lands on Android's *Alarms & reminders* special-access screen for this
+  app — **not** the generic app-info page. Verify the fallback too, on a ROM
+  where `sendIntent` may be unavailable.
+- Steps 9-10: the clock icon **disappears** and the reminder **arrives late**.
+
+**Fails if.** Step 10 shows the reminder still punctual with the permission
+revoked. The explainer would then be telling users something false about their
+own phone, and the copy must change before this ships.

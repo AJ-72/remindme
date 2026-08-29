@@ -177,6 +177,51 @@ describe("toggleComplete", () => {
     const result = await toggleComplete([r], "unknown-id");
     expect(result).toEqual([r]);
   });
+
+  it("re-schedules the notification when un-completing a future reminder", async () => {
+    (scheduleNotificationAsync as jest.Mock).mockClear();
+    // Once, not a persistent implementation: this mock is shared file-wide and
+    // a permanent override leaks into every later scheduling assertion.
+    (scheduleNotificationAsync as jest.Mock).mockResolvedValueOnce("new-notif-id");
+    const r = makeReminder({
+      id: "r1",
+      completed: true,
+      datetime: FUTURE,
+      notificationId: undefined,
+    });
+
+    const result = await toggleComplete([r], "r1");
+
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    expect(result.find((x) => x.id === "r1")?.notificationId).toBe(
+      "new-notif-id"
+    );
+  });
+
+  it("does not schedule anything when un-completing a past reminder", async () => {
+    (scheduleNotificationAsync as jest.Mock).mockClear();
+    const r = makeReminder({
+      id: "r1",
+      completed: true,
+      datetime: PAST,
+      notificationId: undefined,
+    });
+
+    const result = await toggleComplete([r], "r1");
+
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+    expect(result.find((x) => x.id === "r1")?.completed).toBe(false);
+    expect(result.find((x) => x.id === "r1")?.notificationId).toBeUndefined();
+  });
+
+  it("does not schedule when completing a reminder", async () => {
+    (scheduleNotificationAsync as jest.Mock).mockClear();
+    const r = makeReminder({ id: "r1", completed: false, datetime: FUTURE });
+
+    await toggleComplete([r], "r1");
+
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
 });
 
 describe("notification scheduling", () => {

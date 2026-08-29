@@ -9,6 +9,62 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-28 — Two jest state leaks that break *unrelated* tests: `jest.replaceProperty` does not auto-restore, and `scheduleNotificationAsync` is a file-wide shared mock
+
+Both hit while fixing backlog items 19/20. Same shape in each case: a test mutates
+shared state, passes, and the failure surfaces in a **different test further down
+the file** — so the traceback points at innocent code.
+
+**1. `jest.replaceProperty` does NOT restore itself.**
+
+The docs' own wording is easy to misread: replaced properties are restored *only*
+if you call `jest.restoreAllMocks()`, or set `restoreMocks: true` in jest config.
+We set neither. `jest.clearAllMocks()` in a `beforeEach` — which
+`__tests__/screens/settings.test.tsx` does have — clears call records but restores
+nothing.
+
+Concretely: `jest.replaceProperty(Platform, "OS", "android")` in one test leaked
+into every later test in the file. React Native's `Switch` picks a *different
+native component* per platform, and the Android one does not expose `value` the
+same way, so five unrelated assertions started failing with
+`expect(switchEl.props.value).toBe(true)` → `Received: undefined`. Nothing about
+that error suggests a leaked platform.
+
+FIX: keep the handle `replaceProperty` returns and restore it in a scoped
+`afterEach`:
+```ts
+let replaced: { restore: () => void }[] = [];
+const setPlatform = (os: string) => {
+  replaced.push(jest.replaceProperty(Platform, "OS", os as any));
+};
+afterEach(() => { replaced.forEach((r) => r.restore()); replaced = []; });
+```
+**Do NOT reach for `jest.restoreAllMocks()` as the fix** in that file — it would
+also tear down the module-level `jest.spyOn(Share, "share")`, breaking the share
+tests instead. Restore precisely what you replaced.
+
+Related trap in the same API: `jest.replaceProperty` **throws** on a property that
+is already a function (`Cannot replace the 'sendIntent' property because it is a
+function. Use jest.spyOn instead`). For `Linking.sendIntent` and friends, use
+`jest.spyOn(...).mockRestore()`.
+
+**2. `scheduleNotificationAsync` from `__mocks__/expo-notifications.ts` is shared
+across the whole test file.**
+
+Calling `.mockResolvedValue("...")` on it installs a **permanent** implementation.
+`mockClear()` does not undo it — that resets call records only, not the
+implementation. A `mockResolvedValue("new-notif-id")` added to a new
+`toggleComplete` test broke a `snoozeReminder` assertion ~600 lines away that
+expected the default `"mock-notif-id"`.
+
+FIX: use **`mockResolvedValueOnce`** for a one-off return value. Reserve
+`mockResolvedValue` for a `beforeEach` that owns the default for the whole file.
+
+**General rule for this repo's tests:** if you must mutate module-level or
+platform state in one test, restore it in that describe's own `afterEach`.
+Jest's `clearAllMocks`/`resetAllMocks` do not cover property replacement or mock
+implementations, and this repo configures neither `restoreMocks` nor `resetMocks`.
+
 ## 2026-08-24 — EAS `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` on patchedDependencies: EAS was running a different pnpm
 
 **Symptom:** the first EAS build carrying the exact-alarm patch died in dependency install:
