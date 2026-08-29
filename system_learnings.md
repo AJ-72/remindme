@@ -9,45 +9,67 @@ Newest entries at the top.
 
 ---
 
-## 2026-08-29 — EAS "Failed to install pnpm. Make sure you specified the correct version in eas.json" can be transient — check config drift before changing anything
+## 2026-08-29 — EAS build fails at INSTALL_CUSTOM_TOOLS: `corepack: true` collides with EAS's own pnpm install (EEXIST)
 
-**Symptom:** an EAS preview build errored **22 seconds** in, long before any
-compilation:
+**Symptom:** every EAS build errors ~22 s in, before any compilation:
 
 ```
 errorCode: EAS_BUILD_SYSTEM_DEPS_INSTALL_ERROR
 message:   Failed to install pnpm. Make sure you specified the correct version in eas.json.
 ```
 
-The message points straight at your config, which is exactly what makes it
-expensive — the obvious response is to start editing `eas.json`,
-`packageManager`, or the corepack/node pins, all of which took real effort to
-get right (see the 2026-08-24 `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` entry).
+The message blames `eas.json`, which is misleading — the pinned version is
+fine.
 
-**ROOT CAUSE: nothing had changed.** Two checks settled it in under a minute:
+**ROOT CAUSE, from the build log** (`Enabling corepack` immediately followed by
+EAS installing the *image's own* pnpm, into a path corepack has already
+claimed):
 
 ```
-git diff --stat <last-good-commit>..HEAD -- package.json artifacts/mobile/eas.json \
-    artifacts/mobile/package.json pnpm-workspace.yaml     # empty
-npm view pnpm@11.17.0 version                             # 11.17.0 — exists
+Enabling corepack
+Installing pnpm@10.14.0
+npm error code EEXIST
+npm error path /home/expo/.nvm/versions/node/v22.20.0/bin/pnpm
+npm error EEXIST: file already exists
+Failed to install pnpm 10.14.0
 ```
 
-The identical config had built successfully 3.5 hours earlier. Corepack fetches
-pnpm from the npm registry at build time on EAS's own infrastructure, so a
-registry blip or an EAS worker issue produces this error with a
-config-blaming message. **A plain retry succeeded.**
+`corepack: true` in `eas.json` makes EAS run `corepack enable`, which writes a
+`pnpm` shim into the active Node's `bin/`. EAS then separately runs
+`npm i -g pnpm@<image default>` — 10.14.0, **not** our `packageManager` pin of
+11.17.0 — and that install hits the shim and dies with EEXIST. The two steps
+fight over the same path. Nothing in this repo changed: the identical config
+built successfully 3.5 hours earlier (`34d1f57`, 13:12), so this is an
+**EAS-side ordering regression**, not repo drift.
 
-**RULE: before touching build config on this failure, prove the config
-changed.** Diff the four files above against the last green build and confirm
-the pinned pnpm version still resolves on npm. If both are clean, retry once —
-you are probably looking at infrastructure, not your repo. Only if a retry
-fails the same way is the config actually suspect.
+**HOW TO READ THE REAL ERROR.** `build:list` only says `errored`, and
+`build:view <id>` prints nothing useful. Use:
 
-**How to read the real error at all:** `eas build:view <id> --json` carries the
-structured `errorCode`/`message`; the plain `build:list` output only says
-`errored`. Note `build:view` does **not** accept `--non-interactive` (it errors
-with "Nonexistent flag"), and the CLI prints a banner before the JSON, so parse
-from the first `{`.
+```
+npx eas-cli build:view <id> --json        # NOT --non-interactive; that flag does not exist here
+```
+then parse from the first `{` (the CLI prints a banner first). The full log is
+at `logFiles[0]` in that JSON — fetch it with curl; it is **newline-delimited
+JSON**, one `{"msg": ...}` per line, and is *not* gzipped despite looking like
+binary in a terminal.
+
+**Diagnosis order that would have saved time here:** get the log first. The
+errorCode alone is generic enough to send you editing config that is not
+broken. A config diff against the last green build (`git diff <last-good>..HEAD
+-- package.json artifacts/mobile/eas.json pnpm-workspace.yaml`) being empty is
+a strong hint the cause is upstream, but only the log names it.
+
+**Note on retrying:** an identical retry failed identically. This is
+deterministic, not a registry blip — do not assume transient just because the
+config is unchanged.
+
+**Compatibility fact that makes the workaround safe:** `pnpm-lock.yaml` is
+`lockfileVersion: '9.0'`, which pnpm 9, 10 and 11 all read, and
+`patchedDependencies` lives in `pnpm-workspace.yaml` where pnpm 10+ expects it
+(see the 2026-08-24 entry). So letting EAS use its image pnpm 10.14.0 instead
+of corepack-loading 11.17.0 does not invalidate the lockfile or drop the
+`expo-notifications` setAlarmClock patch — **but verify the patch applies in
+the build log**, because D19/D20 depend on it.
 
 ---
 
