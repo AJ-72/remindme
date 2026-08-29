@@ -56,7 +56,7 @@ it unattended**. Last updated after the automated run of **2026-08-29**
 | [D17](#D17) | Corrupt-store quarantine | `PENDING` | — | `AUTO` | **The only item that truly needs a debuggable build** (`eas build --profile development`) — it must write into private sqlite. |
 | [D18](#D18) | Backup carries the new fields | `PENDING` | — | `AUTO` | **Runnable on release** via the share sheet. Generate the data first: complete one, snooze another twice, set quiet hours. |
 | [D21](#D21) | Un-completing re-arms the reminder | `PENDING` | — | `AUTO` | **Blocked: needs a build carrying the 2026-08-28 item-19 fix.** The installed build predates it. |
-| [D22](#D22) | Alarm copy + status-bar explainer | `PENDING` | — | `SEMI` | **Blocked: needs a build carrying the 2026-08-28 item-20 fix.** Installed build still reads "Play alarm sound by default". |
+| [D22](#D22) | Alarm copy + status-bar explainer | `PARTIAL` | **2026-08-29** | `SEMI` | Copy, expand/collapse and the intent all pass on device. **One FAIL:** the app is absent from Android's *Alarms & reminders* list, so the escape-hatch paragraph was false — copy rewritten and the button removed. Needs a re-run on a build carrying that. |
 
 **Totals: 8 `AUTO`, 13 `SEMI`, 1 `MANUAL`** (revised 2026-08-29 after D3/D15 were found not to be drivable by `input tap` on ColorOS).
 
@@ -1389,7 +1389,7 @@ treating it as the pass criterion is exactly how this shipped. Also a fail if
 step 7 fires a notification straight away.
 
 <a id="D22"></a>
-### D22 — Alarm toggle copy and the status-bar icon explainer · `PENDING`
+### D22 — Alarm toggle copy and the status-bar icon explainer · `PARTIAL` — copy verified 2026-08-29; one FAIL found and fixed, needs a re-run
 *Added 2026-08-28 for backlog item 20.* Two halves: the copy must be legible,
 and — more importantly — the claim it makes must be **true on the ROM**.
 
@@ -1427,3 +1427,44 @@ and — more importantly — the claim it makes must be **true on the ROM**.
 **Fails if.** Step 10 shows the reminder still punctual with the permission
 revoked. The explainer would then be telling users something false about their
 own phone, and the copy must change before this ships.
+
+### Result — 2026-08-29 (OnePlus CPH2569, build carrying the item-20 fix)
+
+**Steps 1-4 and 6: `PASS`.** Confirmed by screenshot — the title reads "Alarm —
+rings, and arrives on time" over "Rings out loud, and fires at exactly the time
+you set", the explainer expands and collapses, and the body is legible.
+
+**Step 5: `FAIL`, and it invalidated steps 7-10.** The button opened Android's
+*Alarms & reminders* screen correctly, but **this app is not listed on it**, so
+the instruction was a dead end and the revoke test could not be performed at
+all.
+
+**Cause — the app's own manifest, and it is deliberate.** `app.json` declares
+both `SCHEDULE_EXACT_ALARM` and `USE_EXACT_ALARM`. `USE_EXACT_ALARM` is a
+*normal* permission: auto-granted at install, **not user-revocable**, and
+reserved for apps whose core function is alarms/clocks/reminders. Apps holding
+it are omitted from that screen by design — the screen is backed by the
+`SCHEDULE_EXACT_ALARM` appop, which `USE_EXACT_ALARM` supersedes on targetSdk
+34+ (this app targets 36). The earlier dump agrees: `USE_EXACT_ALARM:
+granted=true`, no granted line for `SCHEDULE_EXACT_ALARM`.
+
+**So the permission model is right and the copy was wrong.** Dropping
+`USE_EXACT_ALARM` to make the app appear in that list would make exact alarms
+opt-in and silently unpunctual for every new user — a bad trade for a reminder
+app, and Play allows the permission for this category. **Do not "fix" this by
+changing the manifest.**
+
+**Fixed 2026-08-29:** the escape-hatch paragraph and the
+"Open alarms & reminders settings" button are gone. The explainer now says
+Android offers no per-app switch because the app registers as an alarm app, and
+points at **the app's own Alarm toggle** — which is the real control, since a
+silent reminder never registers through `setAlarmClock()` and so shows no icon.
+Three tests lock this in, including one asserting the old claim is *absent*.
+
+**Re-run needed** on a build carrying that change: steps 1-4 and 6 again, plus
+the new step 7 below.
+
+7. Turn the **Alarm** toggle off, leave only silent reminders pending, and
+   confirm the status-bar clock icon **disappears**. Then measure a silent
+   reminder's delivery unplugged and idle, as in D7 — it should be late. That
+   is now the claim the copy makes, and it is the one to verify.

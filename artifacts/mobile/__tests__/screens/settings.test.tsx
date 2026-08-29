@@ -163,7 +163,7 @@ describe("SettingsScreen", () => {
       expect(queryByText(/armed to go off at exactly its time/)).toBeNull();
     });
 
-    it("explains the icon and names Android's own escape hatch when tapped", async () => {
+    it("explains the icon when tapped", async () => {
       setPlatform("android");
       const { findByTestId, findByText } = renderScreen();
 
@@ -172,26 +172,43 @@ describe("SettingsScreen", () => {
       expect(
         await findByText(/armed to go off at exactly its time/)
       ).toBeTruthy();
-      expect(
-        await findByText(/Allow setting alarms and reminders/)
-      ).toBeTruthy();
     });
 
-    // Asserts the real Intent the service fires, not a mock of our own module.
-    it("opens Android's alarms & reminders settings from the explainer", async () => {
+    // Verified on device 2026-08-29: the app does NOT appear in Android's
+    // "Alarms & reminders" screen, because it holds USE_EXACT_ALARM — a normal,
+    // auto-granted, non-revocable permission that supersedes
+    // SCHEDULE_EXACT_ALARM on targetSdk 34+. There is no per-app OS switch to
+    // point at, so the copy must not claim one, and must not offer a button
+    // onto a screen the app is absent from.
+    it("does not claim an Android per-app switch that does not exist", async () => {
       setPlatform("android");
-      const sendIntent = jest
-        .spyOn(Linking as any, "sendIntent")
-        .mockResolvedValue(undefined);
-      replaced.push({ restore: () => sendIntent.mockRestore() });
-      const { findByTestId } = renderScreen();
+      const { findByTestId, queryByText } = renderScreen();
+
       fireEvent.press(await findByTestId("alarm-icon-explainer"));
 
-      fireEvent.press(await findByTestId("alarm-icon-explainer-settings"));
+      expect(queryByText(/Allow setting alarms and reminders/)).toBeNull();
+      expect(queryByText(/Settings . Apps . Reminders/)).toBeNull();
+    });
 
-      expect(sendIntent).toHaveBeenCalledWith(
-        "android.settings.REQUEST_SCHEDULE_EXACT_ALARM"
-      );
+    it("points at the app's own Alarm toggle as the real escape hatch", async () => {
+      setPlatform("android");
+      const { findByTestId, findByText } = renderScreen();
+
+      fireEvent.press(await findByTestId("alarm-icon-explainer"));
+
+      expect(await findByText(/Alarm switch above/)).toBeTruthy();
+    });
+
+    // The button used to open Android's Alarms & reminders screen. Removed:
+    // this app is not listed there (see the USE_EXACT_ALARM note above), so it
+    // dropped the user onto a long list their app was absent from.
+    it("offers no button onto the alarms & reminders screen", async () => {
+      setPlatform("android");
+      const { findByTestId, queryByTestId } = renderScreen();
+
+      fireEvent.press(await findByTestId("alarm-icon-explainer"));
+
+      expect(queryByTestId("alarm-icon-explainer-settings")).toBeNull();
     });
   });
 

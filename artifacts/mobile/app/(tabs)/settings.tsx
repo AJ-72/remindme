@@ -28,7 +28,6 @@ import {
 import {
   buildBackupJson,
   importRemindersFromJson,
-  openExactAlarmSettings,
 } from "@/services/ReminderService";
 import {
   useThemePreference,
@@ -222,12 +221,6 @@ export default function SettingsScreen() {
       fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
       lineHeight: 19,
-    },
-    explainerLink: {
-      fontSize: 13,
-      fontFamily: "Inter_600SemiBold",
-      color: colors.primary,
-      marginTop: 2,
     },
     languageCard: {
       marginTop: 12,
@@ -439,22 +432,25 @@ export default function SettingsScreen() {
                   or draining your battery. It disappears once no alarm
                   reminders are pending.
                 </Text>
+                {/* Deliberately does NOT point at Android's "Alarms &
+                    reminders" screen. Verified on device 2026-08-29: this app
+                    is absent from that list, because it holds USE_EXACT_ALARM
+                    — a normal, auto-granted, non-revocable permission that
+                    supersedes SCHEDULE_EXACT_ALARM on targetSdk 34+. Sending
+                    the user there dropped them onto a long list their own app
+                    was not in. The real control is our own Alarm toggle. */}
                 <Text style={styles.explainerText}>
-                  If you would rather have a clean status bar, Android&apos;s
-                  own switch for this is Settings › Apps › Reminders › Allow
-                  setting alarms and reminders. Turning it off trades
-                  punctuality for the icon — your reminders will still arrive,
-                  just late.
+                  Android does not offer a per-app switch for this one.
+                  Reminders registers as an alarm app — the same category as
+                  your clock — so there is no OS toggle to turn off, and the
+                  icon comes with it.
                 </Text>
-                <Pressable
-                  testID="alarm-icon-explainer-settings"
-                  onPress={openExactAlarmSettings}
-                  hitSlop={8}
-                >
-                  <Text style={styles.explainerLink}>
-                    Open alarms &amp; reminders settings
-                  </Text>
-                </Pressable>
+                <Text style={styles.explainerText}>
+                  The control you do have is the Alarm switch above, and you
+                  can set it per reminder. A reminder with the alarm off is
+                  scheduled the ordinary way: no icon, but your phone may delay
+                  it by several minutes — up to an hour for a next-day one.
+                </Text>
               </View>
             )}
           </Pressable>
