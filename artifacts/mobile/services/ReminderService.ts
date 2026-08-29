@@ -17,9 +17,12 @@ import {
   parseBackup,
   serializeBackup,
 } from "@/utils/reminderBackup";
+import { PersonaType } from "@/types/persona";
+import { DEFAULT_PERSONA_TYPE, PERSONA_PROFILES } from "@/constants/personas";
 
 export type { SnoozePreset };
 export type { QuietHours };
+export type { PersonaType };
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -46,6 +49,8 @@ export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 export const QUARANTINE_KEY_PREFIX = "@reminders_corrupt_";
 export const QUIET_HOURS_KEY = "@quiet_hours_v1";
 export const USER_NAME_KEY = "@user_name_v1";
+export const USER_PERSONA_KEY = "@user_persona_v1";
+export const ONBOARDING_COMPLETED_KEY = "@onboarding_completed_v1";
 // Separate from PERMISSION_ONBOARDING_KEY on purpose: one flow completing must
 // not mark the other done, or a user who granted permissions before this
 // feature existed would never be asked their name.
@@ -197,6 +202,64 @@ export async function markNamePromptSeen(): Promise<void> {
   try {
     await AsyncStorage.setItem(NAME_PROMPT_KEY, "1");
   } catch {}
+}
+
+export async function getUserPersona(): Promise<PersonaType | null> {
+  try {
+    const raw = await AsyncStorage.getItem(USER_PERSONA_KEY);
+    if (
+      raw &&
+      (raw === "busy_juggler" ||
+        raw === "step_by_step_doer" ||
+        raw === "quick_finisher" ||
+        raw === "deep_focuser")
+    ) {
+      return raw as PersonaType;
+    }
+  } catch {}
+  return null;
+}
+
+export async function setUserPersona(persona: PersonaType): Promise<void> {
+  await AsyncStorage.setItem(USER_PERSONA_KEY, persona);
+}
+
+/**
+ * Whether the user has completed the full personalization onboarding wizard.
+ * Returns true if completed/skipped or if the legacy name prompt was already seen.
+ */
+export async function hasCompletedOnboarding(): Promise<boolean> {
+  try {
+    const onboarding = await AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY);
+    if (onboarding !== null) return true;
+    const legacyNameSeen = await AsyncStorage.getItem(NAME_PROMPT_KEY);
+    return legacyNameSeen !== null;
+  } catch {
+    return true;
+  }
+}
+
+export async function markOnboardingCompleted(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(ONBOARDING_COMPLETED_KEY, "1");
+    await AsyncStorage.setItem(NAME_PROMPT_KEY, "1");
+  } catch {}
+}
+
+/**
+ * Applies the baseline notification and snooze defaults for a given persona.
+ */
+export async function applyPersonaDefaults(
+  persona: PersonaType
+): Promise<void> {
+  const profile = PERSONA_PROFILES[persona];
+  if (!profile) return;
+  await setDefaultAlarmEnabled(profile.adaptations.alarm);
+  await setVibrationEnabled(profile.adaptations.vibration);
+  const minutes = profile.adaptations.defaultSnoozeMinutes;
+  if (minutes === 5 || minutes === 15 || minutes === 30 || minutes === 60) {
+    await setSnoozePreset({ kind: "minutes", minutes });
+  }
 }
 
 function isQuietHours(value: unknown): value is QuietHours {

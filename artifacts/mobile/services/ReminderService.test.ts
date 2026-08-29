@@ -38,6 +38,14 @@ import {
   rescheduleAllFutureReminders,
   scheduleSnoozeNotification,
   USER_NAME_KEY,
+  USER_PERSONA_KEY,
+  ONBOARDING_COMPLETED_KEY,
+  NAME_PROMPT_KEY,
+  getUserPersona,
+  setUserPersona,
+  hasCompletedOnboarding,
+  markOnboardingCompleted,
+  applyPersonaDefaults,
   setupSnoozeCategory,
   setDefaultAlarmEnabled,
   setDictationLanguage,
@@ -1421,3 +1429,63 @@ describe("quiet hours persistence", () => {
     expect(parsed.settings.quietHours).toEqual({ startMinute: 1320, endMinute: 480 });
   });
 });
+
+describe("user persona & personalization onboarding", () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  it("returns null when no persona is set", async () => {
+    expect(await getUserPersona()).toBeNull();
+  });
+
+  it("saves and retrieves valid personas", async () => {
+    await setUserPersona("busy_juggler");
+    expect(await getUserPersona()).toBe("busy_juggler");
+    expect(await AsyncStorage.getItem(USER_PERSONA_KEY)).toBe("busy_juggler");
+
+    await setUserPersona("deep_focuser");
+    expect(await getUserPersona()).toBe("deep_focuser");
+  });
+
+  it("ignores invalid stored persona strings", async () => {
+    await AsyncStorage.setItem(USER_PERSONA_KEY, "invalid_persona");
+    expect(await getUserPersona()).toBeNull();
+  });
+
+  it("detects onboarding completion from both new and legacy keys", async () => {
+    expect(await hasCompletedOnboarding()).toBe(false);
+
+    await markOnboardingCompleted();
+    expect(await hasCompletedOnboarding()).toBe(true);
+    expect(await AsyncStorage.getItem(ONBOARDING_COMPLETED_KEY)).toBe("1");
+    expect(await AsyncStorage.getItem(NAME_PROMPT_KEY)).toBe("1");
+  });
+
+  it("treats legacy users who already saw name prompt as completed onboarding", async () => {
+    await AsyncStorage.setItem(NAME_PROMPT_KEY, "1");
+    expect(await hasCompletedOnboarding()).toBe(true);
+  });
+
+  it("applies persona defaults for Quick Finisher", async () => {
+    await applyPersonaDefaults("quick_finisher");
+    expect(await getDefaultAlarmEnabled()).toBe(false);
+    expect(await getVibrationEnabled()).toBe(true);
+    expect(await getSnoozePreset()).toEqual({ kind: "minutes", minutes: 30 });
+  });
+
+  it("applies persona defaults for Step-by-Step Doer", async () => {
+    await applyPersonaDefaults("step_by_step_doer");
+    expect(await getDefaultAlarmEnabled()).toBe(true);
+    expect(await getVibrationEnabled()).toBe(true);
+    expect(await getSnoozePreset()).toEqual({ kind: "minutes", minutes: 5 });
+  });
+
+  it("applies persona defaults for Busy Juggler", async () => {
+    await applyPersonaDefaults("busy_juggler");
+    expect(await getDefaultAlarmEnabled()).toBe(true);
+    expect(await getVibrationEnabled()).toBe(true);
+    expect(await getSnoozePreset()).toEqual({ kind: "minutes", minutes: 15 });
+  });
+});
+

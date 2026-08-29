@@ -42,6 +42,9 @@ function Probe() {
     setDefaultAlarmEnabled,
     snoozePreset,
     setSnoozePreset,
+    persona,
+    personaProfile,
+    setPersona,
   } = useReminders();
   return (
     <View>
@@ -96,6 +99,20 @@ function Probe() {
         onPress={() => snoozeReminder("r1", { kind: "tomorrow" })}
       >
         snooze tomorrow
+      </Text>
+      <Text testID="persona">{persona}</Text>
+      <Text testID="persona-name">{personaProfile.name}</Text>
+      <Text
+        testID="set-persona-quick"
+        onPress={() => setPersona("quick_finisher")}
+      >
+        set persona quick
+      </Text>
+      <Text
+        testID="set-persona-juggler"
+        onPress={() => setPersona("busy_juggler")}
+      >
+        set persona juggler
       </Text>
     </View>
   );
@@ -367,6 +384,30 @@ describe("RemindersProvider", () => {
       const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
       expect(new Date(stored[0].datetime).getTime()).toBe(
         scheduled.getTime() + 24 * 60 * 60 * 1000
+      );
+    });
+  });
+
+  it("exposes default persona and updates reactively on setPersona", async () => {
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+    expect(getByTestId("persona").props.children).toBe("step_by_step_doer");
+    expect(getByTestId("persona-name").props.children).toBe("Step-by-Step Doer");
+
+    await act(async () => {
+      getByTestId("set-persona-quick").props.onPress();
+    });
+
+    await waitFor(() => {
+      expect(getByTestId("persona").props.children).toBe("quick_finisher");
+      expect(getByTestId("persona-name").props.children).toBe("Quick Finisher");
+      expect(getByTestId("default-alarm-enabled").props.children).toBe("false");
+      expect(getByTestId("snooze-preset").props.children).toBe(
+        JSON.stringify({ kind: "minutes", minutes: 30 })
       );
     });
   });

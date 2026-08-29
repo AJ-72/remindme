@@ -22,7 +22,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ExactAlarmBanner from "@/components/ExactAlarmBanner";
-import NameOnboarding from "@/components/NameOnboarding";
+import OnboardingWizard from "@/components/onboarding/OnboardingWizard";
 import ThemedStatusBar from "@/components/ThemedStatusBar";
 import NotificationResponseHandler from "@/components/NotificationResponseHandler";
 import { RemindersProvider } from "@/contexts/RemindersContext";
@@ -157,7 +157,7 @@ export default function RootLayout() {
               <KeyboardProvider>
                 <RemindersProvider>
                   <NotificationResponseHandler />
-                  <NameOnboarding enabled={readyForNamePrompt} />
+                  <OnboardingWizard enabled={readyForNamePrompt} />
                   <SharedTextProvider>
                     <View style={{ flex: 1 }}>
                       {showAlarmBanner && (

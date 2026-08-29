@@ -12,6 +12,7 @@ import {
   type Reminder,
   type NotificationData,
   type DictationLanguage,
+  type PersonaType,
   addReminder as serviceAdd,
   deleteReminder as serviceDelete,
   editReminder as serviceEdit,
@@ -24,6 +25,9 @@ import {
   setQuietHours as serviceSetQuietHours,
   getUserName,
   setUserName as serviceSetUserName,
+  getUserPersona,
+  setUserPersona as serviceSetUserPersona,
+  applyPersonaDefaults as serviceApplyPersonaDefaults,
   getVibrationEnabled,
   initNotifications,
   loadReminders,
@@ -42,8 +46,13 @@ import {
   DEFAULT_SNOOZE_PRESET,
   type SnoozePreset,
 } from "@/utils/snoozePresets";
+import {
+  DEFAULT_PERSONA_TYPE,
+  PERSONA_PROFILES,
+} from "@/constants/personas";
+import type { PersonaProfile } from "@/types/persona";
 
-export type { Reminder, NotificationData, DictationLanguage, SnoozePreset };
+export type { Reminder, NotificationData, DictationLanguage, SnoozePreset, PersonaType, PersonaProfile };
 export {
   SNOOZE_ACTION_ID,
   SNOOZE_CATEGORY_ID,
@@ -79,6 +88,12 @@ interface RemindersContextType {
   /** The user's own name, or "" when unset. Never undefined. */
   userName: string;
   setUserName: (name: string) => Promise<void>;
+  /** Active persona style. Defaults to Step-by-Step Doer. */
+  persona: PersonaType;
+  /** Active persona profile metadata and adaptations. */
+  personaProfile: PersonaProfile;
+  /** Updates the persona, optionally applying its default alarm/vibration/snooze settings. */
+  setPersona: (persona: PersonaType, applyDefaults?: boolean) => Promise<void>;
   dictationLanguage: DictationLanguage;
   setDictationLanguage: (lang: DictationLanguage) => Promise<void>;
   /**
@@ -108,6 +123,7 @@ export function RemindersProvider({
     useState<SnoozePreset>(DEFAULT_SNOOZE_PRESET);
   const [vibrationEnabled, setVibrationEnabledState] = useState(true);
   const [userName, setUserNameState] = useState("");
+  const [persona, setPersonaState] = useState<PersonaType>(DEFAULT_PERSONA_TYPE);
   const [quietHours, setQuietHoursState] = useState<QuietHours>(DEFAULT_QUIET_HOURS);
   const [inviteNudgeEnabled, setInviteNudgeEnabledState] = useState(true);
 
@@ -123,6 +139,7 @@ export function RemindersProvider({
       vibration,
       nudge,
       name,
+      storedPersona,
       quiet,
     ] =
       await Promise.all([
@@ -134,6 +151,7 @@ export function RemindersProvider({
         getVibrationEnabled(),
         getInviteNudgeEnabled(),
         getUserName(),
+        getUserPersona(),
         getQuietHours(),
       ]);
     setReminders(loadedReminders);
@@ -144,6 +162,9 @@ export function RemindersProvider({
     setVibrationEnabledState(vibration);
     setInviteNudgeEnabledState(nudge);
     setUserNameState(name);
+    if (storedPersona) {
+      setPersonaState(storedPersona);
+    }
     setQuietHoursState(quiet);
   }, []);
 
@@ -210,6 +231,32 @@ export function RemindersProvider({
     await serviceSetDictationLanguage(lang);
     setDictationLanguageState(lang);
   }, []);
+
+  const setPersona = useCallback(
+    async (newPersona: PersonaType, applyDefaults: boolean = true) => {
+      await serviceSetUserPersona(newPersona);
+      setPersonaState(newPersona);
+      if (applyDefaults) {
+        await serviceApplyPersonaDefaults(newPersona);
+        const profile = PERSONA_PROFILES[newPersona];
+        if (profile) {
+          setDefaultAlarmEnabledState(profile.adaptations.alarm);
+          setVibrationEnabledState(profile.adaptations.vibration);
+          const minutes = profile.adaptations.defaultSnoozeMinutes;
+          if (
+            minutes === 5 ||
+            minutes === 15 ||
+            minutes === 30 ||
+            minutes === 60
+          ) {
+            setSnoozePresetState({ kind: "minutes", minutes });
+            setupSnoozeCategory({ kind: "minutes", minutes });
+          }
+        }
+      }
+    },
+    []
+  );
 
   const addReminder = useCallback(
     async (data: Omit<Reminder, "id" | "completed" | "notificationId">) => {
@@ -292,6 +339,11 @@ export function RemindersProvider({
         setQuietHours,
         userName,
         setUserName,
+        persona,
+        personaProfile:
+          PERSONA_PROFILES[persona] ??
+          PERSONA_PROFILES[DEFAULT_PERSONA_TYPE],
+        setPersona,
         dictationLanguage,
         setDictationLanguage,
         refreshFromStorage,
