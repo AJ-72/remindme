@@ -210,6 +210,25 @@ Two consequences that must not be dropped in implementation:
 
 A hash only matches if both devices normalize identically. `utils/phoneNumber.ts` is therefore on the critical path for a correctness property, not just a display one. Its region-derived country-code logic needs tests specifically for cross-device agreement.
 
+
+**Implemented 2026-08-30 as `normalizeForIdentity(raw, region)`**, deliberately
+separate from `normalizePhone`:
+
+- **Region is an explicit parameter, never read from the device.** `normalizePhone`
+  reads `getLocales()` ambiently, which is correct for building a `wa.me` link on
+  the sender's own phone and wrong for identity. An NRI sender (device region
+  `US`) resolving a bare `9876543210` gets `+19876543210`, while the recipient's
+  own phone in `IN` binds `+919876543210` — hashes never match, and the recipient
+  simply appears never to have installed the app. Silent and permanent.
+- **It returns `{ e164, ambiguous }`.** `ambiguous: true` means a region had to be
+  applied, so a device elsewhere would have answered differently. International
+  forms (`+`, `00`) are region-independent and report `ambiguous: false`.
+- **A miss on an ambiguous hash must not be cached as durable.** This is the
+  hook the reachability cache reads.
+- **`normalizePhone` is unchanged.** It was device-verified on 2026-08-30 (D9)
+  for the Tier 1 send path; silently repurposing it would put that behind an
+  untested change.
+
 ### The dual-SIM gap, and the repair path
 
 Anand picks Amma's Airtel number; she registered with her Jio one. The invitation is addressed to a hash nobody owns and silently expires.

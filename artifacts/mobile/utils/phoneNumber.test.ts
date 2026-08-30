@@ -2,6 +2,7 @@ import { getLocales } from "expo-localization";
 import {
   callingCodeForRegion,
   normalizePhone,
+  normalizeForIdentity,
   toWhatsAppDigits,
 } from "@/utils/phoneNumber";
 
@@ -93,5 +94,67 @@ describe("toWhatsAppDigits", () => {
 
   it("returns null when normalization failed", () => {
     expect(toWhatsAppDigits(null)).toBeNull();
+  });
+});
+
+describe("normalizeForIdentity", () => {
+  it("derives the same identity on two devices in different regions", () => {
+    // The sender is an NRI (device region US); the recipient's phone is Indian.
+    // Both must arrive at the same string or the phone hashes never match.
+    expect(normalizeForIdentity("+91 98765 43210", "US")).toEqual({
+      e164: "+919876543210",
+      ambiguous: false,
+    });
+    expect(normalizeForIdentity("+91 98765 43210", "IN")).toEqual({
+      e164: "+919876543210",
+      ambiguous: false,
+    });
+  });
+
+  it("flags a bare national number as ambiguous, because the region decided it", () => {
+    // The same stored contact string, resolved on two devices. Both answers are
+    // defensible; that is exactly why the caller must be told it is a guess.
+    expect(normalizeForIdentity("9876543210", "IN")).toEqual({
+      e164: "+919876543210",
+      ambiguous: true,
+    });
+    expect(normalizeForIdentity("9876543210", "US")).toEqual({
+      e164: "+19876543210",
+      ambiguous: true,
+    });
+  });
+  it("treats a 00 prefix as international too, so it stays region-independent", () => {
+    expect(normalizeForIdentity("0091 98765 43210", "US")).toEqual({
+      e164: "+919876543210",
+      ambiguous: false,
+    });
+  });
+  it("resolves a national trunk 0 via the region, and says so", () => {
+    expect(normalizeForIdentity("098765 43210", "IN")).toEqual({
+      e164: "+919876543210",
+      ambiguous: true,
+    });
+  });
+  it("refuses rather than guesses when it cannot resolve the number", () => {
+    // Unknown region and no international prefix: there is no answer to give.
+    expect(normalizeForIdentity("9876543210", "ZZ").e164).toBeNull();
+    expect(normalizeForIdentity("9876543210", null).e164).toBeNull();
+    // Lengths that match no known national form.
+    expect(normalizeForIdentity("12345", "IN").e164).toBeNull();
+    expect(normalizeForIdentity("98765432109", "IN").e164).toBeNull();
+    // Nothing at all.
+    expect(normalizeForIdentity("", "IN").e164).toBeNull();
+    expect(normalizeForIdentity("   ", "IN").e164).toBeNull();
+    expect(normalizeForIdentity(null, "IN").e164).toBeNull();
+    expect(normalizeForIdentity("not a phone", "IN").e164).toBeNull();
+  });
+
+  it("never reports an unresolvable number as ambiguous", () => {
+    // ambiguous means "resolved, but a region decided it". A null e164 was not
+    // resolved at all, so a caller must not read it as a near-miss worth caching.
+    expect(normalizeForIdentity("not a phone", "IN")).toEqual({
+      e164: null,
+      ambiguous: false,
+    });
   });
 });

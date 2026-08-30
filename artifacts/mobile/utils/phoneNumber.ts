@@ -118,3 +118,63 @@ export function toWhatsAppDigits(normalized: string | null): string | null {
   const digits = normalized.replace(/\D/g, "");
   return digits || null;
 }
+
+/**
+ * A number normalized for IDENTITY - the string that gets hashed to find
+ * someone. Distinct from normalizePhone, which exists to build a wa.me link on
+ * the sender's own device and may guess freely because a wrong guess just falls
+ * back to SMS.
+ *
+ * Identity cannot guess freely. Both devices must derive the SAME string or the
+ * hashes never match, and the failure is silent and permanent: the recipient
+ * simply appears never to have installed the app.
+ */
+export interface PhoneIdentity {
+  /** E.164, or null when the input could not be resolved at all. */
+  e164: string | null;
+  /**
+   * True when a region had to be applied to resolve the number, meaning a
+   * device in a different region would have produced something else. The
+   * lookup is best-effort and a miss must not be cached as durable.
+   */
+  ambiguous: boolean;
+}
+
+/**
+ * Region is an EXPLICIT parameter, never read from the device. That is the
+ * whole point: normalizePhone reads getLocales() ambiently, which is correct
+ * for a wa.me link and wrong for identity.
+ */
+export function normalizeForIdentity(
+  raw: string | null | undefined,
+  region: string | null | undefined
+): PhoneIdentity {
+  const trimmed = (raw ?? "").trim();
+  const hasPlus = trimmed.startsWith("+") || /^\(\s*\+/.test(trimmed);
+  const digits = trimmed.replace(/\D/g, "");
+
+  // Explicit international form: region is irrelevant, so both devices agree.
+  if (hasPlus && digits.length >= 8) {
+    return { e164: `+${digits}`, ambiguous: false };
+  }
+
+  // 00 is the other unambiguous international prefix.
+  if (digits.startsWith("00") && digits.slice(2).length >= 8) {
+    return { e164: `+${digits.slice(2)}`, ambiguous: false };
+  }
+
+  // Everything below needs a region to resolve, which is precisely what makes
+  // it ambiguous - a device in another region would answer differently.
+  const cc = callingCodeForRegion(region);
+  if (cc) {
+    // National trunk prefix: 0 followed by exactly 10 digits.
+    if (digits.startsWith("0") && digits.length === 11) {
+      return { e164: `+${cc}${digits.slice(1)}`, ambiguous: true };
+    }
+    if (digits.length === 10) {
+      return { e164: `+${cc}${digits}`, ambiguous: true };
+    }
+  }
+
+  return { e164: null, ambiguous: false };
+}
