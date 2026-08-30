@@ -22,10 +22,11 @@ here.
 ## All scenarios at a glance
 
 Every item, its status, what is left to do, and **whether a machine could run
-it unattended**. Last updated after the automated run of **2026-08-29**
-(OnePlus CPH2569, EAS preview build) — see that section below for evidence.
+it unattended**. Last updated **2026-08-30**, after the user ran the M4 Tier 1
+send flow by hand on their OEM device; the automated run of **2026-08-29**
+(OnePlus CPH2569, EAS preview build) is recorded in its own section below.
 
-**Where things stand: 6 `PASS` · 6 `PARTIAL` · 10 `PENDING` · 1 `BLOCKED`.**
+**Where things stand: 7 `PASS` · 5 `PARTIAL` · 11 `PENDING` · 1 `BLOCKED`.**
 
 | Mark | Meaning |
 | --- | --- |
@@ -41,7 +42,7 @@ it unattended**. Last updated after the automated run of **2026-08-29**
 | [D8](#D8) | Dark mode, visually | `PASS` | 2026-08-24 | `SEMI` | Re-walk needed: Smart Alerts, Why tasks slip, quiet-hours and name sheets all landed **after** this passed. |
 | [D2](#D2) | Vibration setting, 4 combinations | `PARTIAL` | **2026-08-29** | `SEMI` | Config half done (all four channels correct, legacy channel gone). Outstanding: does it actually **buzz** in rows 2 and 3 — phone on a table, not in hand. |
 | [D7](#D7) | OEM battery-killer survival | `PARTIAL` | 2026-08-24 | `SEMI` | The one run that closes it: alarm + silent pair, overnight, **unplugged**, lateness recorded to the minute. |
-| [D9](#D9) | Remind-someone-else Tier 1 | `PARTIAL` | **2026-08-29** | `SEMI` | `wa.me: verified` — but on the *safe* install ordering. Still open: WhatsApp installed **after** the app, the not-on-WhatsApp path, `sms:` across OEMs, permission denied→re-granted, 1000+ contacts, cold-start tap. |
+| [D9](#D9) | Remind-someone-else Tier 1 — core loop | `PASS` | **2026-08-30** | `SEMI` | Nothing. Contact picked, WhatsApp **and** SMS both sent from a real reminder. Edge cases split out to [D24](#D24) so they are not hidden by this pass. |
 | [D10](#D10) | Name capture and personalization | `PARTIAL` | 2026-08-24 | `SEMI` | Needs `pm clear` (destructive — export first): sheet-vs-permission ordering, Skip persistence, Malayalam name glyphs. |
 | [D14](#D14) | Seven 2026-08-24 device fixes | `PARTIAL` | **2026-08-29** | `SEMI` | #1 scroll and #3 greeting verified. Outstanding: #2 status bar (both theme crossings), #4 quick-add fold, #5 recipient chip, #6 picker above keyboard, #7 send→edit. |
 | [D1](#D1) | Android Auto Backup restores reminders | `PENDING` | — | `AUTO` | **Runnable on the installed release build** — the pass criterion is read off the screen. Destructive (uninstall) — export first. Highest value: could close backlog item 1. |
@@ -58,12 +59,14 @@ it unattended**. Last updated after the automated run of **2026-08-29**
 | [D21](#D21) | Un-completing re-arms the reminder | `PASS` | **2026-08-29** | `AUTO` | Nothing. Both branches verified over adb: future re-arms and rings (338 ms late, screen off); past stays overdue and silent. |
 | [D22](#D22) | Alarm copy + status-bar explainer | `PARTIAL` | **2026-08-29** | `SEMI` | Copy, expand/collapse and the intent all pass on device. **One FAIL:** the app is absent from Android's *Alarms & reminders* list, so the escape-hatch paragraph was false — copy rewritten and the button removed. Needs a re-run on a build carrying that. |
 | [D23](#D23) | Pre-existing reminders re-arm on launch after an update | `PASS` | **2026-08-30** | `AUTO` | Nothing. Fresh install confirmed 0 alarms registered, then both pre-existing future reminders were armed correctly within 4 s of launch. |
+| [D24](#D24) | Tier 1 send-flow edge cases | `PENDING` | — | `SEMI` | All of it: WhatsApp installed **after** the app, the not-on-WhatsApp number, `sms:` on other OEMs, permission denied→re-granted, 1000+ contacts, cold-start notification tap, invite-line toggle, READ_CONTACTS vs Play review. |
 
-**Totals: 9 `AUTO`, 13 `SEMI`, 1 `MANUAL`** (revised 2026-08-30 after D23 was added as AUTO).
+**Totals: 9 `AUTO`, 14 `SEMI`, 1 `MANUAL`** (revised 2026-08-30 after D23 was added as AUTO and D24 was split out of D9).
 
 ### What blocks what, right now
 
 - **Needs a new build** (carrying the uncommitted 2026-08-28 fixes): D21, D22.
+- **Needs a native build** (`expo-contacts` has no OTA path): D24.
 - **Needs a debuggable build**: **D17 only.** Build one with
   `pnpm --filter @workspace/mobile run build:android:dev` (the `development`
   profile — `developmentClient: true`, so the Gradle *debug* variant, hence
@@ -188,7 +191,7 @@ condition these results should be read under.
 | [D12](#D12) | **`PASS`** | "Sort out the insurance" → hint; **Use as is** dismissed it and it did **not** return on retyping the same text; "Deal with the taxes" still hinted (dismissal is per-text, not global); "Call Dr Menon at 4pm" → no hint; Malayalam (`ശരിയാക്കണം`) → no hint. |
 | [D14](#D14) #1 | **`PASS`** | Settings scrolls to **Debug logs**. |
 | [D14](#D14) #3 | **`PASS`** (partial) | Header renders "Good afternoon, Anand" complete, with "Anand Jayaram" stored. Long and Malayalam names still untested. |
-| [D9](#D9) | one sub-check **`PASS`** | `pm get-app-links com.whatsapp` → `wa.me: verified`. **Caveat:** WhatsApp here was installed 2024-06-26, the app 2026-08-25, so this is the *safe* ordering — D9's actual worry (WhatsApp installed *after* the app) is still untested. |
+| [D9](#D9) | one sub-check **`PASS`** | `pm get-app-links com.whatsapp` → `wa.me: verified`. **Caveat:** WhatsApp here was installed 2024-06-26, the app 2026-08-25, so this is the *safe* ordering — the hostile ordering is still untested and now lives in [D24](#D24) step 1. *(D9 itself passed by hand on 2026-08-30; this row is the earlier partial evidence.)* |
 | [D3](#D3) / [D15](#D15) | **INCONCLUSIVE — not automatable on this ROM** | See below. |
 
 **Incidental confirmations** (not formal items): natural-language parsing
@@ -971,58 +974,67 @@ branch, and it is the entire reason step 4 exists.
 ## C. Feature end-to-end
 
 <a id="D9"></a>
-### D9 — Remind-someone-else Tier 1 · `PARTIAL`
-**Passing** (2026-08-24, user's OEM device): the send screen opens with the
-message pre-filled, the signature and invite line render, and WhatsApp receives
-the pre-filled text.
+### D9 — Remind-someone-else Tier 1, core loop · `PASS`
 
-**Still outstanding** (needs a native build — `expo-contacts` has no OTA path).
+**Verified 2026-08-30 by the user on their own OEM device**, on an EAS build
+carrying `expo-contacts`. The full Tier 1 loop works end to end: a contact is
+picked from the phone's contact list, and the pre-filled message is sent —
+**both by WhatsApp and by SMS**. That closes the two paths the feature is
+actually made of, and it retires the last real doubt about `services/messageLinks.ts`:
+`wa.me` opens WhatsApp rather than a browser, and the `sms:` body separator is
+right on Android.
 
-**Setup.** EAS build. Contacts permission not yet granted, so step 1 exercises
-the prompt. Have a contact who **is** on WhatsApp and one who is **not**.
+Earlier partial evidence, now superseded but kept for the record: 2026-08-24 the
+send screen was seen opening with the message, signature and invite line
+pre-filled; 2026-08-29 an automated run confirmed
+`pm get-app-links com.whatsapp` → `wa.me: verified`.
 
-**Steps — the full loop.**
-1. Add a reminder, pick a recipient from the contact picker (grant the
-   permission when asked), set it **1 minute** out, save.
-2. **Lock the phone.** Wait for the notification.
-3. Read the notification **body** on the lock screen before tapping.
-4. Tap it — from a **cold start** at least once (swipe the app from recents
-   first), since that is the untested path.
-5. On the send screen, toggle the **invite line off** and watch the preview.
-6. Send on WhatsApp, then come back to the app.
-7. Mark the reminder done.
+**What this pass does *not* cover** has been split into [D24](#D24) rather than
+left buried under a green mark here — every one of those is a distinct install
+state, contact, OEM or permission path that nobody has exercised. Read D9 as
+"the happy path is real", not "Tier 1 is fully proven".
 
-**Pass.**
-- Step 3's body reads **"Message &lt;name&gt;"**, not "Reminder!".
-- Step 4 lands on the send screen with the message pre-filled, both cold and
-  warm.
-- Step 5's preview updates immediately and the sent message omits the invite.
-- Step 6 opens **WhatsApp**, not a browser.
-- Step 7 moves it out of "Remind Someone" into Completed.
+<a id="D24"></a>
+### D24 — Tier 1 send-flow edge cases · `PENDING`
+Split out of [D9](#D9) on 2026-08-30 when its core loop passed. These are the
+paths the happy-path run cannot reach, each worth its own run. **Needs a native
+build — `expo-contacts` has no OTA path.**
 
-**Specifically unproven, each worth its own run.**
-- `wa.me` opening WhatsApp rather than a browser **on a device where WhatsApp
-  was installed after this app** — App Links verification is a real failure
-  mode and the confirmed pass above does not cover it. Check with:
-  ```
-  adb shell pm get-app-links com.whatsapp
-  ```
-  `wa.me` must show `verified`.
-- The **"number not on WhatsApp"** path — use the second contact.
-- `sms:` pre-fill across Samsung Messages, Google Messages and iOS Messages.
-- The contacts permission **denied, then re-granted** path
-  (`adb shell pm revoke com.curios.remindme android.permission.READ_CONTACTS`).
-- Contacts list scrolling at **1000+ contacts**.
-- Whether READ_CONTACTS trips Play Store review.
+**Setup.** EAS build. Have a contact who **is** on WhatsApp and one who is
+**not**. Export reminders before the permission steps (they are destructive).
 
-Specifically unproven: `wa.me` opening WhatsApp rather than a browser **on a
-device where WhatsApp was installed after this app** — App Links verification
-is a real failure mode, and the confirmed pass above does not cover it; the
-"number not on WhatsApp" path; `sms:` pre-fill across Samsung Messages,
-Google Messages and iOS Messages; the contacts permission dialog and the
-denied-then-re-granted path; contacts list scrolling at 1000+ contacts; and the
-notification tap from a **cold start**. Also confirm READ_CONTACTS does not
-trip Play Store review.
+**Steps and pass criteria, one per line.**
+1. **App Links under the hostile install order.** The confirmed pass had
+   WhatsApp installed 2024-06-26 and the app 2026-08-25 — the *safe* ordering.
+   Reinstall WhatsApp **after** the app, then
+   `adb shell pm get-app-links com.whatsapp`; `wa.me` must still show
+   `verified`. Fails if the link opens a browser install page instead.
+2. **Number not on WhatsApp.** Send to the second contact. There is no API to
+   check registration ahead of time (`messageLinks.ts` says so explicitly), so
+   the only mitigation is SMS being one tap away — confirm it visibly is.
+3. **`sms:` on other messaging apps.** Verified on the user's device 2026-08-30;
+   still unproven on Samsung Messages, Google Messages and iOS Messages. iOS is
+   the one with a real risk: the body separator is `&`, not `?`.
+4. **Contacts permission denied, then re-granted.**
+   `adb shell pm revoke com.curios.remindme android.permission.READ_CONTACTS`,
+   reopen the picker, deny, then grant. Pass: no crash, and the picker
+   populates after the grant without an app restart.
+5. **1000+ contacts.** Scroll the picker. Pass: no dropped frames and no
+   multi-second open.
+6. **Cold-start notification tap.** Swipe the app from recents, wait for a send
+   reminder to fire, tap it. Pass: it lands on the send screen with the message
+   pre-filled — this path reads storage rather than the payload, which is the
+   whole reason it is called out.
+7. **Notification body text.** On the lock screen, before tapping, it must read
+   **"Message &lt;name&gt;"**, not "Reminder!".
+8. **Invite-line toggle.** Toggle it off; the preview must update immediately
+   and the sent message must omit the nudge (`utils/inviteNudges.ts`).
+9. **READ_CONTACTS vs Play Store review.** Not a device test — confirm the
+   permission does not trip review when the app is submitted.
+
+**Fails if.** Any of the above, but note especially: step 1 failing is a
+shipping blocker, since it silently degrades every WhatsApp send on a whole
+class of devices. Steps 4 and 6 are the crash-shaped ones.
 
 <a id="D6"></a>
 ### D6 — Malayalam dictation end-to-end · `PENDING`
