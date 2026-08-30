@@ -26,7 +26,8 @@ let Notifications: any = null;
 try {
   // @ts-ignore
   Notifications = require("expo-notifications");
-} catch {
+} catch (e) {
+  console.warn("[DIAG] require(expo-notifications) threw:", String(e));
   Notifications = null;
 }
 
@@ -505,15 +506,20 @@ export async function setupSnoozeCategory(preset: SnoozePreset): Promise<void> {
 let permissionRequestInFlight: Promise<boolean> | null = null;
 
 export async function requestNotificationPermissions(): Promise<boolean> {
-  if (Platform.OS === "web" || !Notifications) return false;
+  if (Platform.OS === "web" || !Notifications) {
+    console.warn("[DIAG] requestNotificationPermissions: web or no Notifications module", Platform.OS, !!Notifications);
+    return false;
+  }
   if (permissionRequestInFlight) return permissionRequestInFlight;
   permissionRequestInFlight = (async () => {
     try {
       await setupNotificationChannel();
       await setupSnoozeCategory(await getSnoozePreset());
       const { status } = await Notifications.requestPermissionsAsync();
+      console.warn("[DIAG] requestPermissionsAsync status:", status);
       return status === "granted";
-    } catch {
+    } catch (e) {
+      console.warn("[DIAG] requestNotificationPermissions threw:", String(e));
       return false;
     }
   })();
@@ -543,13 +549,22 @@ export async function scheduleNotification(
   >,
   reminderId: string
 ): Promise<string | undefined> {
-  if (!Notifications) return undefined;
+  if (!Notifications) {
+    console.warn("[DIAG] scheduleNotification: no Notifications module");
+    return undefined;
+  }
   try {
     const granted = await requestNotificationPermissions();
-    if (!granted) return undefined;
+    if (!granted) {
+      console.warn("[DIAG] scheduleNotification: permission not granted");
+      return undefined;
+    }
     const trigger = new Date(reminder.datetime);
     const now = new Date();
-    if (trigger <= now) return undefined;
+    if (trigger <= now) {
+      console.warn("[DIAG] scheduleNotification: trigger in past", reminder.datetime, now.toISOString());
+      return undefined;
+    }
     const earlyTrigger = new Date(
       Math.max(now.getTime(), trigger.getTime() - ALARM_EARLY_OFFSET_MS)
     );
@@ -582,8 +597,10 @@ export async function scheduleNotification(
         ...(Platform.OS === "android" ? { channelId } : {}),
       },
     });
+    console.warn("[DIAG] scheduleNotification: scheduled ok, id=", id, "trigger=", earlyTrigger.toISOString());
     return id;
-  } catch {
+  } catch (e) {
+    console.warn("[DIAG] scheduleNotification threw:", String(e));
     return undefined;
   }
 }
