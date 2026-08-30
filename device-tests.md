@@ -25,7 +25,7 @@ Every item, its status, what is left to do, and **whether a machine could run
 it unattended**. Last updated after the automated run of **2026-08-29**
 (OnePlus CPH2569, EAS preview build) — see that section below for evidence.
 
-**Where things stand: 5 `PASS` · 6 `PARTIAL` · 10 `PENDING` · 1 `BLOCKED`.**
+**Where things stand: 6 `PASS` · 6 `PARTIAL` · 10 `PENDING` · 1 `BLOCKED`.**
 
 | Mark | Meaning |
 | --- | --- |
@@ -57,8 +57,9 @@ it unattended**. Last updated after the automated run of **2026-08-29**
 | [D18](#D18) | Backup carries the new fields | `PENDING` | — | `AUTO` | **Runnable on release** via the share sheet. Generate the data first: complete one, snooze another twice, set quiet hours. |
 | [D21](#D21) | Un-completing re-arms the reminder | `PASS` | **2026-08-29** | `AUTO` | Nothing. Both branches verified over adb: future re-arms and rings (338 ms late, screen off); past stays overdue and silent. |
 | [D22](#D22) | Alarm copy + status-bar explainer | `PARTIAL` | **2026-08-29** | `SEMI` | Copy, expand/collapse and the intent all pass on device. **One FAIL:** the app is absent from Android's *Alarms & reminders* list, so the escape-hatch paragraph was false — copy rewritten and the button removed. Needs a re-run on a build carrying that. |
+| [D23](#D23) | Pre-existing reminders re-arm on launch after an update | `PASS` | **2026-08-30** | `AUTO` | Nothing. Fresh install confirmed 0 alarms registered, then both pre-existing future reminders were armed correctly within 4 s of launch. |
 
-**Totals: 8 `AUTO`, 13 `SEMI`, 1 `MANUAL`** (revised 2026-08-29 after D3/D15 were found not to be drivable by `input tap` on ColorOS).
+**Totals: 9 `AUTO`, 13 `SEMI`, 1 `MANUAL`** (revised 2026-08-30 after D23 was added as AUTO).
 
 ### What blocks what, right now
 
@@ -1516,3 +1517,51 @@ the new step 7 below.
    confirm the status-bar clock icon **disappears**. Then measure a silent
    reminder's delivery unplugged and idle, as in D7 — it should be late. That
    is now the claim the copy makes, and it is the one to verify.
+
+<a id="D23"></a>
+### D23 — Pre-existing reminders re-arm on launch after an app update · `PASS` (2026-08-30, OnePlus CPH2569, EAS preview)
+*Added 2026-08-30 for backlog item 21.* Found while investigating a real
+report ("alarm at 8.00 didn't ring yet even though time has passed") — Android
+wipes every `AlarmManager` registration on app install/update, and nothing
+used to re-arm a reminder that already existed before the update except a
+~15-minute `BackgroundFetch` sweep that can permanently give up if it doesn't
+run in time. See `system_learnings.md` (2026-08-30) for the full root-cause
+writeup.
+
+**Setup.** Two reminders already saved and due later the same day, one with
+the Alarm toggle on and one off, on the currently installed build.
+
+**Steps.**
+1. Install a new build over the existing one (this alone wipes AlarmManager).
+2. **Before opening the app**, confirm zero alarms are registered:
+   `adb shell dumpsys alarm | grep -c "com.curios.remindme.*NotificationsService"`
+   must read `0`.
+3. Launch the app.
+4. Immediately re-check `dumpsys alarm` for the same package.
+
+**Pass.** Both pre-existing reminders show a fresh, correct alarm registration
+within a few seconds of launch — no wait for a background sweep. The
+alarm-on reminder should carry `window=0 flags=0x9` (`setAlarmClock`); the
+alarm-off one an inexact entry (`flags=0x4`).
+
+**Fails if.** Either reminder stays unregistered after launch, or only
+reappears after several minutes (meaning the sweep did the work, not the
+launch-time reschedule this item is meant to verify).
+
+### Result — 2026-08-30 (OnePlus CPH2569, build `9ca2272`/`fb84813`)
+
+Installed the fix APK over the previous build. Baseline confirmed **0**
+`NotificationsService` alarms registered immediately post-install
+(`09:23:09`). Force-launched the app at `09:23:18`; by `09:23:22` (within 4
+seconds) `dumpsys alarm` showed both pre-existing reminders re-armed:
+
+- **"Silent routing check"** (alarm off, due 10:00) → `origWhen` decoded to
+  **09:59:00**, `flags=0x4`, `windowLength=1607103` — correct inexact entry,
+  60 s early per `ALARM_EARLY_OFFSET_MS`.
+- **"Sort out the insurance"** (alarm on, due 15:00) → `origWhen` decoded to
+  **14:59:00**, `flags=0x9`, `windowLength=0` — correct `setAlarmClock()`
+  entry.
+
+Both match their reminder's actual time and alarm setting exactly, confirming
+the fix closes the reinstall-wipe window immediately on launch rather than
+depending on the 15-minute sweep.
