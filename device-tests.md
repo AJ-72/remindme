@@ -26,7 +26,7 @@ it unattended**. Last updated **2026-08-30**, after the user ran the M4 Tier 1
 send flow by hand on their OEM device; the automated run of **2026-08-29**
 (OnePlus CPH2569, EAS preview build) is recorded in its own section below.
 
-**Where things stand: 7 `PASS` · 5 `PARTIAL` · 11 `PENDING` · 8 `BLOCKED`.**
+**Where things stand: 7 `PASS` · 5 `PARTIAL` · 11 `PENDING` · 12 `BLOCKED`.**
 
 | Mark | Meaning |
 | --- | --- |
@@ -67,8 +67,12 @@ send flow by hand on their OEM device; the automated run of **2026-08-29**
 | [D29](#D29) | Expiry at the reminder's own time | `BLOCKED` | — | `SEMI` | Everything. Sender must be *told*. **Two devices.** |
 | [D30](#D30) | Concurrent cancel vs reschedule | `BLOCKED` | — | `MANUAL` | Everything. Needs two thumbs in the same minute. **Two devices.** |
 | [D31](#D31) | Tier 1 fallback for an unreachable recipient | `BLOCKED` | — | `SEMI` | Everything, in both languages. Covers decliner and never-installed alike. |
+| [D32](#D32) | Verification ladder: link rung and OTP rung | `BLOCKED` | — | `SEMI` | Everything. Rung 1 must show **no** verification screen. **Two devices.** |
+| [D33](#D33) | Invite token is single-use, and survives a link preview | `BLOCKED` | — | `SEMI` | Everything. The WhatsApp-preview burn is the trap. **Two devices.** |
+| [D34](#D34) | Rebind on a new phone, and the 45-day cliff | `BLOCKED` | — | `SEMI` | Everything. Needs clock manipulation or DB ageing. **Two devices.** |
+| [D35](#D35) | Cancel while the recipient is offline | `BLOCKED` | — | `AUTO` | Everything. Verifies the *honest* behaviour, not the old absolute claim. **Two devices.** |
 
-**Totals: 10 `AUTO`, 19 `SEMI`, 2 `MANUAL`** (revised 2026-08-30: D23 added as AUTO, D24 split out of D9, D25-D31 added for M4 Tier 2).
+**Totals: 11 `AUTO`, 22 `SEMI`, 2 `MANUAL`** (revised 2026-08-30: D23 added as AUTO, D24 split out of D9, D25-D31 added for M4 Tier 2, D32-D35 added after the Tier 2 adversarial review).
 
 **New in this set: six items need *two* devices.** Every prior item in this file is
 single-device. Tier 2 is a two-party feature, so its checks need a second handset
@@ -79,7 +83,7 @@ why most of D25-D31 are `SEMI` even where the assertion is machine-readable.
 
 - **Needs a new build** (carrying the uncommitted 2026-08-28 fixes): D21, D22.
 - **Needs a native build** (`expo-contacts` has no OTA path): D24.
-- **Needs the M4 Tier 2 backend to exist at all**: D25-D31. See
+- **Needs the M4 Tier 2 backend to exist at all**: D25-D35. See
   [`docs/superpowers/specs/2026-08-30-remind-someone-else-tier2-design.md`](docs/superpowers/specs/2026-08-30-remind-someone-else-tier2-design.md).
   These are written now, per this file's rule that a feature's device checks land
   with the feature, but none can run until step 1 of that spec's build order does.
@@ -1216,6 +1220,100 @@ the app is storing decline state it should not have), the notice reappears on
 every send to the same contact (per-contact memory), or the invite link
 disappears with the nudge at the cap — which would strand that person
 permanently.
+
+<a id="D32"></a>
+### D32 — Verification ladder: the link rung and the OTP rung · `BLOCKED`
+Rung 1 exists so the older parent never sees a verification screen. If it shows
+one, the ladder bought nothing and the feature lands back on the user least able
+to complete it.
+
+**Setup.** Two devices, two numbers. B has never bound a number. An SMS provider
+account configured.
+
+**Steps.**
+1. On A, send B a reminder. B has no app - the Tier 1 message arrives.
+2. On B, install and **tap the link in the WhatsApp message**. Watch every screen.
+3. Separately, on a third install with no invite link, bind a number from Settings.
+
+**Pass.** Step 2 shows **no OTP field and no verification screen at all** - B is
+bound and discoverable purely by having tapped the link. Step 3 *does* show an
+OTP field, and one SMS is sent and accepted.
+
+**Fails if.** Step 2 asks for a code (rung 1 is not working, and finding #8 is
+back), or step 3 binds without verification (finding #1 is back).
+
+<a id="D33"></a>
+### D33 — Invite token is single-use, and survives a link preview · `BLOCKED`
+The token is a credential. The trap is that WhatsApp fetches URLs to build link
+previews, so a token consumed on `GET` is burned before any human taps it - and
+the symptom looks like "the invite link never works", nothing like a token bug.
+
+**Setup.** Two devices. A can send to B.
+
+**Steps.**
+1. On A, send B an invite. **Watch the WhatsApp preview render** in the chat.
+2. On B, tap the link and complete the claim.
+3. On B, tap the **same link again**.
+4. On a **third** device, tap that same link.
+
+**Pass.** Step 1's preview does not consume the token. Step 2 succeeds. Step 3
+succeeds **silently and idempotently** - same account, no error, no lockout.
+Step 4 is **refused**.
+
+**Fails if.** Step 2 fails after a preview rendered (the `GET`-consumption bug),
+step 3 errors or locks B out (people really do tap twice), or step 4 succeeds -
+which is finding #1 all over again.
+
+<a id="D34"></a>
+### D34 — Rebind on a new phone, and the 45-day cliff · `BLOCKED`
+Rebind is a full account-takeover primitive gated on number control. The window
+is the only thing bounding it, and the thing a stranger would inherit is a block
+list.
+
+**Setup.** An account on B with at least one block and one accepted link. A
+second handset for the "new phone". Ability to age `last_active_at` in the
+database, or to move the device clock.
+
+**Steps.**
+1. Migrate: install on the new handset, verify B's number by OTP.
+2. Check the block list and links.
+3. Check the old handset.
+4. Age the account past **45 days** and repeat the rebind.
+
+**Pass.** Step 1-2: account recovered **with** blocks and links - this is the
+legitimate migration path and it must not lose data. Step 3: the old device's
+token is revoked and it shows "your account was recovered on a new device".
+Step 4: a **fresh, empty** account; the old row, its blocks, links and pending
+invitations are gone.
+
+**Fails if.** Step 2 loses the block list (migration punished to defend against
+recycling - the two are indistinguishable, which is what the window is for), or
+step 4 recovers the old account (a recycled number inheriting a stranger's
+blocks).
+
+<a id="D35"></a>
+### D35 — Cancel while the recipient is offline · `BLOCKED`
+This verifies the **honest** behaviour, not the absolute claim the first draft
+made. A cancelled reminder *may* fire on an offline device; what must not happen
+is that the notification then lingers, or that the alarm is delayed by a network
+call.
+
+**Setup.** Two devices. An accepted reminder on B, ~10 minutes out. B in
+aeroplane mode.
+
+**Steps.**
+1. On A, cancel.
+2. Leave B offline through the reminder time. Record delivery time to the ms via
+   `logcat -s AlarmManager`.
+3. Bring B back online.
+
+**Pass.** Step 2: it fires, **on time** - punctuality is not traded away. Step 3:
+within seconds of connectivity the notification is dismissed and the reminder is
+marked cancelled. A's copy shows cancelled throughout.
+
+**Fails if.** The alarm is **late** (a blocking network check was added at alarm
+time - the thing this design explicitly refuses), or the notification survives
+reconnection, or B's copy stays live.
 
 <a id="D6"></a>
 ### D6 — Malayalam dictation end-to-end · `PENDING`

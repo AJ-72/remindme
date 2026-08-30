@@ -1,7 +1,7 @@
 # Remind someone else, Tier 2 — design
 
 **Date:** 2026-08-30
-**Status:** approved — all open decisions resolved 2026-08-30 across an eight-round design interview; ready for an implementation plan
+**Status:** approved — resolved across an eleven-round design interview, 2026-08-30, then revised the same day after an adversarial review found three P0 defects. Two of those reopened the identity decision. See "Known defects and resolutions". Ready for an implementation plan.
 **Scope:** true app-to-app reminder delivery with acknowledgement flowing back. The recipient's own phone rings. Requires the first real backend this project has ever had: identity, consent, a device registry and a store-and-forward mailbox.
 
 ---
@@ -28,7 +28,7 @@ So this feature's cost is the cost of building a backend, an identity model and 
 ## Non-goals
 
 - **No accounts for people who don't need them.** A user who only ever reminds themselves must be able to go on never making a network call. This is a hard constraint on every decision below, not a preference.
-- **No OTP / phone verification in v1.** Accept-first consent does the work verification would otherwise do. See "Identity".
+- ~~No OTP / phone verification in v1.~~ **Reversed.** The first draft claimed accept-first made verification unnecessary. It does not: without it, numbers can be squatted (see "Known defects" #1). OTP is now the fallback rung of the verification ladder, at ~₹0.20 once per number.
 - **No compliance monitoring.** Snooze counts, completion rates and any other measure of whether the recipient *obeyed* are never reported to the sender. This is the fork between caregiving and surveillance, and it is settled in favour of caregiving.
 - **No group RSVP (M7) UI.** The schema is shaped for N recipients; the product is built for one. See "What M7 inherits".
 - **No recurring send-reminders.** Recurrence is M2 and does not exist. Anywhere this design would benefit from it is marked *blocked on M2*.
@@ -56,23 +56,135 @@ The alternative — the server pushing the notification at 8am — would make ev
 
 ## Identity
 
-### No verification
+### An account is not a bound phone number
 
-Identity is a **device-generated key**. Phone numbers are only ever a lookup index. Display names are self-asserted.
+Two things were conflated in the first draft of this spec, and separating them is
+what makes the security model work:
 
-OTP was rejected deliberately: it costs real money per SMS in India from day one, and it puts a signup wall in front of a feature whose entire appeal is being frictionless. Accept-first consent (below) means an unverified number cannot hurt anyone — the recipient still has to accept before anything is scheduled on their device.
+- **Having an account** — a device-generated key. No phone number, no
+  verification, no cost.
+- **Binding a phone number to that account** — what makes you *discoverable and
+  claimable*. This is the privileged operation, and it is the only one that
+  needs proof you control the number.
 
-### Discoverability is the registration trigger
+**Why this matters:** the first draft bound numbers on assertion alone. That was
+a complete break — an attacker could register with a target's number, self-claim
+every invitation addressed to it, and, because `phone_hash` is `UNIQUE`,
+permanently prevent the real owner from ever registering. Not interception:
+identity squatting. See "Known defects" #1.
 
-A user is registered **if and only if** they have turned on "Let people remind you". That one switch does three jobs:
+### The verification ladder
 
-1. It is the opt-in to having an account at all.
-2. It is what publishes their phone hash and makes them discoverable.
-3. It is the global "don't let anyone remind me" kill switch, from the other direction.
+Binding requires proof of number control, taken by the cheapest available rung:
 
-Off means: no row on the server, no network traffic, invisible. Which preserves the constraint that a solo user's install never phones home.
+1. **Arrived via an invite link** — possession of the link *is* the proof, since
+   the message was delivered to that number by WhatsApp or SMS. Silent, free, no
+   screen.
+2. **OTP SMS** — approximately **₹0.15-0.20** through an Indian domestic provider
+   such as MSG91 (Twilio's India route is ~₹0.45). **Once per number, per
+   lifetime**, not per session. A thousand users is roughly ₹200.
 
-**Asked once during onboarding**, alongside the existing first-launch permission and name prompts in `app/_layout.tsx`. A decline writes **nothing to the server** — the decline is remembered locally in AsyncStorage so the app can re-offer once later, at a contextually obvious moment (for instance, the first time the user creates a reminder for someone else themselves).
+**Rung 1 exists for one reason: it removes the verification step from the user
+who can least absorb it.** Amma taps Anand's WhatsApp link and is bound and
+discoverable without ever seeing an OTP field. Anand, who went looking for the
+feature, is the one who types six digits. This is also the resolution to
+"Known defects" #8.
+
+Note **OTP SMS is exempt from India's DLT registration regime** — the TRAI
+entity/header/template registration that applies to transactional and
+promotional SMS does not apply here. That removes a 2-7 day bureaucratic
+prerequisite that would otherwise sit in front of step 0.
+
+Truecaller's Verification SDK was considered and **rejected**. It is free in
+India with no usage limits and would cover most users in one tap, but it is a
+native dependency (no OTA path), and it exposes the user's number and Truecaller
+identity to a third party whose product is crowdsourced caller ID built from
+uploaded address books. Declaring that recipient in the Play Data Safety form,
+for an app that sells on-device privacy, costs more than it saves. Revisit only
+if OTP friction proves to be the binding constraint in real use.
+
+### Invite link tokens are single-use credentials
+
+Once the link is proof of number control, reuse is a takeover. Tokens are
+single-use and expire with their invitation (see "Expiry"). Three traps, each of
+which produces a bug that looks like something else:
+
+- **Consume the token on *claim by the app*, never on link resolution.** WhatsApp
+  fetches URLs to build link previews, so a token consumed on `GET` is burned
+  before the human ever taps. The symptom is "the invite link never works".
+- **Re-taps must be idempotent.** People tap, get lost in the store, and tap
+  again. Bind the token to the account it created so a second tap from the same
+  device succeeds silently rather than locking the recipient out.
+- **Single-use is not enough on its own** — an unclaimed token still needs a time
+  limit, tied to the invitation's own expiry.
+
+### Reinstall, migration, and recycled numbers
+
+**Re-verifying a number rebinds the existing account**, with its blocks, links
+and accepted state. This is what makes a new phone work: install, verify by OTP
+(there is no invite link on a migration, so it always takes rung 2), account
+recovered.
+
+It also makes rebinding a full account-takeover primitive gated on number
+control alone — which is the model, and is why the window is bounded:
+
+**N = 45 days.** A rebind within 45 days of the account's last activity recovers
+it. Past that, verification creates a **fresh** account and the old one is
+deleted along with its blocks, links and pending invitations.
+
+45 is not arbitrary. Indian carriers recycle disconnected numbers from **45 to
+90 days**; WhatsApp uses 45 for its own recycling heuristic precisely because
+that is the *floor*. A 90-day window would leave a 45-day period in which a
+number already reassigned by the carrier still reads as recoverable — and the
+thing a stranger would inherit is a **block list**, a record of who someone did
+not want to hear from. That is the most sensitive object in the database.
+
+WhatsApp can afford a longer window because its two-step verification PIN makes
+SMS possession insufficient. This app has deliberately avoided having any secret,
+so it cannot. **If 45 days proves too aggressive in practice, the escape hatch is
+a recovery PIN**, which slots in without changing the model.
+
+Note WhatsApp's documented residual failure is exactly this design's risk: a
+recycled number still inherits **group memberships**, because the wipe covers
+profile data and not the social graph. Blocks and links are this app's social
+graph.
+
+**On every rebind to a new device key**, regardless of window: revoke all
+existing device tokens, and notify any still-reachable device that the account
+was recovered elsewhere. That notice is the only signal a real owner gets.
+
+**Deleting state applies only to the fresh-account path.** A rebind inside N
+recovers everything — otherwise legitimate phone migration would be punished to
+defend against recycled numbers, and the two are indistinguishable at rebind
+time, which is what N is for.
+
+Reminder *data* on the device is a separate concern and not new to Tier 2: it is
+backlog item 1 (manual backup/restore shipped 2026-08-10, Android Auto Backup
+enabled but unverified). **D1 is now worth running** — it tests exactly this and
+two features depend on the answer.
+
+
+### Discoverability, mute, and account are three settings, not one
+
+The first draft unified them into a single switch and called it elegant. It was
+wrong in one specific way (see "Known defects" #7): switching it off
+**deregistered**, so "mute everyone for a week" and "delete my account" were the
+same button, and turning it off destroyed the block list.
+
+- **Account exists** — created at first number binding. Deleting it is the Play
+  Store deletion path, not a toggle.
+- **Discoverable** — whether a lookup by phone hash resolves to this user.
+- **Accepting reminders** — the global mute. **Keeps the row, the blocks and the
+  links.** This is the "don't let anyone remind me" switch.
+
+Per-person blocking is separate again and unchanged (see "Consent").
+
+A user who has never bound a number has no row and makes no network calls, which
+preserves the constraint that a solo user's install never phones home. Binding is
+prompted **once during onboarding**, alongside the existing first-launch
+permission and name prompts in `app/_layout.tsx`. A decline writes **nothing to
+the server**; the decline is remembered locally in AsyncStorage so the app can
+re-offer once, later, at a contextually obvious moment.
 
 ### You cannot tell "declined" from "never installed"
 
@@ -91,7 +203,8 @@ Therefore: **the server hashes, with a secret pepper** (HMAC). The client sends 
 Two consequences that must not be dropped in implementation:
 
 - **This must be disclosed in the privacy policy.** Numbers crossing the server in transit is exactly the kind of thing this app's positioning obliges it to state plainly rather than bury.
-- **The lookup endpoint must be hard rate-limited per account.** Without it, anyone can ask "is this number registered?" a million times and reconstruct the user base. The contact picker makes bulk lookups tempting — resist checking the whole address book at once.
+- **The lookup endpoint must be hard rate-limited — and not per account.** Accounts are cheap, so a per-account cap alone is bypassed by making more accounts (see "Known defects" #5). Cap per **account**, per **device**, per **IP**, and **globally**, with a daily contact-lookup ceiling and logging of high-volume callers. Note this weakens considerably once binding costs an OTP, since accounts stop being free to create. The contact picker makes bulk lookups tempting — resist checking the whole address book at once.
+- **The claim query cannot be protected by ordinary RLS.** "Give me every invitation matching my phone hash" runs against rows that are not yet owned by anyone, so no row-ownership policy covers it. It needs a `SECURITY DEFINER` function with its own explicit checks — and it is the most attack-exposed endpoint in the design, because it is the one #1 abused. It deserves more scrutiny than anything else here.
 
 ### Normalization is load-bearing on both devices
 
@@ -127,7 +240,8 @@ Silent blocking is correct on a platform of strangers, where the blocker's safet
 - The block list is itself sensitive (a list of hashed numbers someone doesn't want to hear from) and lives under an RLS policy.
 - **Unblock deletes the row.** This is why blocks are rows and not flags.
 - **Unblocking re-delivers nothing.** Anything sent during the block stays undelivered. A surprise volley of previously-rejected reminders is how you get re-blocked and uninstalled. There is also no "you have been unblocked" push — the sender simply finds their next send works.
-- A **global** "don't let anyone remind me" exists alongside the per-person list. It is the same switch as discoverability.
+- A **global** "don't let anyone remind me" exists alongside the per-person list. It is the *mute* switch (see "Discoverability, mute, and account"), and it keeps the account and the block list intact.
+- **The block confirmation must not overclaim.** Blocking stops app delivery. It cannot stop the sender opening WhatsApp and messaging directly, because Tier 1 runs entirely on the sender's own phone and is outside this system's control (see "Known defects" #10). Say so in the copy — backlog item 20 is a whole item about a label that promised more than the system delivered.
 
 ---
 
@@ -173,7 +287,24 @@ The principle: **nobody can silently alter another person's device.** The sender
 
 Anand cancels at 07:59; Amma reschedules to 09:00 in the same minute.
 
-**Cancel wins. Always.** A cancelled appointment ringing anyway is the actively harmful outcome, and last-write-wins produces it. Amma is then told her edit was discarded because the sender cancelled.
+**Cancel wins whenever it reaches the device.** A cancelled appointment ringing anyway is the actively harmful outcome, and last-write-wins produces it. Amma is then told her edit was discarded because the sender cancelled.
+
+**But cancel is not absolute, and the spec must not claim it is.** The reminder is armed locally — that is the whole point of the mailbox architecture — so a cancel needs a push to reach the device. An offline or dozing phone will not get it. D27 tests that an accepted reminder fires correctly *in aeroplane mode*, so the first draft of this spec shipped a device test verifying the exact condition under which its strongest promise fails (see "Known defects" #2).
+
+**Mechanism.** The alarm **fires immediately and is never blocked on the
+network.** In parallel the device checks the server; if the reminder was
+cancelled, the notification is dismissed and the row marked. A briefly-appearing
+notification is a far smaller harm than a late one — and putting a network
+round-trip inside the `ALARM_EARLY_OFFSET_MS` window would trade away the exact
+punctuality that backlog items 19-23 and five device tests were spent securing.
+Cancels are also pushed best-effort at high priority, and reconciled on next
+connectivity.
+
+**Honest copy, stated once here and enforced in the UI:** *"Cancel wins whenever
+it reaches the device. While the recipient is offline it is best-effort, and a
+cancelled reminder may still fire."* The sender's cancel confirmation must say
+so. This is the same class of problem as backlog item 20's alarm-toggle label —
+a promise the copy made that the system could not keep.
 
 **Order by server receive-time, never by device timestamp.** These are two phones; a skewed clock must not decide the outcome.
 
@@ -244,7 +375,11 @@ Every table gets an RLS policy. RLS was a primary reason for choosing Supabase o
 
 Reminder text is not neutral — *"Take your BP tablets"*, *"Call the oncologist"*, *"Court date"*. A Supabase table full of other people's health reminders is a materially different proposition from an on-device app, and would have to be declared as such in the Play Data Safety form.
 
-**Policy: store plainly, delete on accept or expiry.** The server is a mailbox, not an archive; retention is measured in days. Combined with expiry-at-reminder-time, the mailbox is self-cleaning.
+**Policy: store plainly, delete on accept or expiry.** The server is a mailbox, not an archive.
+
+**Plus an absolute maximum age of 30 days, independent of the reminder's datetime.** Expiry-at-reminder-time alone does not make the mailbox self-cleaning: "remind Amma about the anniversary next June" would hold content for nine months (see "Known defects" #6). The absolute cap is what makes the stated retention policy true.
+
+The invitation **row** survives accept with its status and timestamps — only `title`/`description` are nulled — so "it never arrived" stays debuggable. Rows are purged 30 days after reaching a terminal state.
 
 **E2E encryption is the honest ideal and is deferred, not dismissed.** The reason is concrete: key management is where E2E projects die, and *this app's users already lose device state* — the backup story in backlog item 1 is paste-a-JSON-blob, so reinstalls are common and lossy. A lost key would mean undecryptable reminders and no recovery path.
 
@@ -318,8 +453,14 @@ But the *product* does not generalise, and this is the important part. This desi
 
 ## Build order
 
-1. **Supabase project + schema + RLS.** New project in the existing org (`letsplan` is dropped). Region `ap-south-1`. Nothing else can be tested until tables exist.
-2. **Registration and discoverability** — the onboarding question, the Settings switch, device/token registration, deregistration on switch-off.
+0. **Identity and authentication.** Device key generation and storage in
+   `expo-secure-store`, session handling, the OTP provider account, and deciding
+   what RLS policies are even keyed on. The first draft folded this into step 1
+   and called it "schema", which understated a whole subsystem (see "Known
+   defects" #9). The repo has zero tables and, per `threat_model.md`, no
+   authentication boundary of any kind — this is built from nothing.
+1. **Supabase project + schema + RLS.** New project in the existing org (`letsplan` is dropped). Region `ap-south-1`. Nothing else can be tested until tables exist. Includes the `SECURITY DEFINER` claim function, which is the highest-risk single piece of code in the build.
+2. **Number binding and the verification ladder** — the onboarding prompt, invite-link token claim (rung 1), OTP (rung 2), the three separated settings, rebind semantics and the 45-day window.
 3. **Lookup** — server-side HMAC, rate limiting, the contact-picker integration, the derived-not-stored reachability cache.
 4. **Invitation send and claim** — including the self-claiming registration path.
 5. **Accept → local schedule.** The point at which the feature does its actual job; everything before this is plumbing.
@@ -338,7 +479,8 @@ Steps 1–5 are the walking skeleton. Anything after step 6 could ship in a foll
 - **$25/month for Supabase Pro, from the first real user.** The free tier pauses after a week of inactivity, and a paused project means invitations silently fail to deliver — the exact failure class of backlog items 19, 21 and 23. Free tier is for development only.
 - **A privacy policy and a Data Safety declaration**, covering phone numbers in transit, reminder content at rest, and the retention window.
 - **A deployed web page** for account deletion.
-- **An operational commitment**: uptime, FCM credential rotation, and backups, indefinitely, for a free app with no monetisation in the backlog.
+- **An SMS provider account and ~₹0.15-0.20 per OTP**, once per number per lifetime, and only for users who bind without an invite link. Roughly ₹200 per thousand users — negligible beside the Supabase bill, and the reason the first draft rejected OTP was a miscalculation, not a trade-off. Check whether the chosen Indian provider is one Supabase Auth supports natively; if not, verification goes in a custom Edge Function.
+- **An operational commitment**: uptime, FCM credential rotation, and backups, indefinitely, for a free app with no monetisation in the backlog. This is the item most likely to fail in year two; name a minimum service level rather than leaving it implicit.
 
 ---
 
@@ -347,13 +489,56 @@ Steps 1–5 are the walking skeleton. Anything after step 6 could ship in a foll
 | Item | Why not now |
 |---|---|
 | E2E encryption | Key recovery unsolved while device state is routinely lost. Schema shaped for it. |
-| Phone verification (OTP) | Costs money per SMS from day one; accept-first makes it unnecessary. |
+| ~~Phone verification (OTP)~~ | **No longer deferred** — see above. The original reasoning was a miscalculation: ~₹0.20 once per number, and OTP is DLT-exempt in India. |
+| Truecaller one-tap verification | Free and covers most Indian users, but a native dependency and a third-party data recipient in the Data Safety form. Revisit only if OTP friction binds. |
+| A recovery PIN | Would allow a longer rebind window than 45 days. Adds a secret to an app that has none, and a support burden. The escape hatch if 45 days proves too aggressive. |
 | Multiple numbers per account | Unverified second numbers would let anyone claim someone else's number — the one real attack this design otherwise avoids. |
 | Per-series "no app" notice | Blocked on M2 (recurring reminders). Per-contact memory ships now. |
 | Recurring send-reminders | Blocked on M2. |
 | Malayalam personality copy | Needs a native speaker, not a translator. |
 | iOS | Android-first. Nothing here is Android-specific except Play compliance. |
 | M7 group UI | Schema ready, product deliberately not. |
+
+---
+
+## Known defects and resolutions
+
+An adversarial review of the first draft ([`docs/reviews/tier2-adversarial-review.md`](../../reviews/tier2-adversarial-review.md), 2026-08-30) raised fourteen findings. Three were P0. Two of those were design-breaking and forced a settled decision to be reopened. Every row is resolved or explicitly rejected below; a rejection with a stated reason is a resolution, and re-raising one should require new information rather than a fresh reading.
+
+### P0 — broke the design
+
+**#1 Number takeover.** *Valid, and worse than reported.* Unverified binding meant an attacker could claim any number, self-claim its pending invitations, receive **all future sends** to it, and — since `phone_hash` is `UNIQUE` — permanently lock the real owner out. Note the review's second proposed fix does **not** work: requiring a separate accept for claimed invitations just means the *attacker* taps accept. **Resolved** by reopening the identity decision and adding the verification ladder. See "Identity".
+
+**#3 No identity recovery.** *Valid, and the same bug as #1.* Root cause in one sentence: **without number verification you cannot distinguish "Amma reinstalling" from "an attacker claiming Amma's number."** The review listed these separately; seeing them as one made both resolvable. Also a fair hit on inconsistent reasoning — the first draft rejected E2E *because* device state is routinely lost, then built identity on a device key anyway. **Resolved** by rebind-on-reverify, bounded at 45 days. See "Reinstall, migration, and recycled numbers".
+
+**#2 Cancel unenforceable offline.** *Valid.* The review did not notice how explicit the contradiction already was: **D27 tests the exact failing condition.** **Resolved** by fire-first-check-in-parallel plus honest copy — but *not* by the review's proposed blocking server check, which would put a network round-trip inside the alarm window and trade away this app's hardest-won property. See "Concurrent edits".
+
+### P1/P2 — accepted
+
+| # | Resolution |
+|---|---|
+| **#4** Abusive content inside the invitation | **Accepted, re-prioritised to P2.** The proposed fix — hide the text until accept — means accepting blind, a real cost to the common case for a rare threat. Instead: **block is one tap from the invitation itself**, and first contacts are rate-limited. |
+| **#5** Rate limit is per-account, accounts are free | **Accepted.** Now capped per account, device, IP and globally, with a daily ceiling and high-volume logging. Weakens once binding costs an OTP. |
+| **#6** Far-future datetime defeats retention | **Accepted.** Absolute 30-day maximum age added, independent of datetime. |
+| **#7** One switch, three jobs | **Accepted, for a different reason than given.** "Hide from one person" was already served by per-person blocking, so that part of the finding is wrong. The real defect: switching off **deregistered**, destroying the block list — so mute and account-deletion were the same button. Now three separate settings. |
+| **#8** The core user must find a settings switch | **Accepted, and resolved without the proposed fix.** Defaulting discoverability on would undo the opt-in position. Instead, **rung 1 of the verification ladder removes the step entirely** for anyone arriving via an invite link — which is exactly the older-parent case. The review's cheapest suggestion stands and should be done: **test onboarding with a real target user before building.** |
+| **#9** Step 1 hides a subsystem | **Accepted.** Step 0 added. |
+| **#10** A block does not stop Tier 1 contact | **Accepted.** Copy must state the limit. |
+| **#14** Operations has no named owner | **Partially accepted.** The owner of a solo project is its author; naming a minimum service level is worth doing, and is now in "Costs". Not a spec defect. |
+
+### Rejected, with reasons
+
+**#11 Content deletion leaves no debugging trail.** *Largely already the design.* The finding appears to read "delete content on accept" as deleting the row. It is not: `title`/`description` are **nullable**, and the invitation row survives with status, datetime and timestamps. Metadata retention was already specified. The one genuine gap — how long the row itself lives — is now fixed at 30 days post-terminal.
+
+**#12 Tier 2 does not feed the adaptive-reminder differentiator.** *Premise is wrong.* Tier 2 withholds behaviour data **from the sender**, not from the adaptive engine. Amma's own app still sees her own snoozes and adapts normally; that is precisely the caregiving-not-surveillance line. The build-time competition point is fair and is a scheduling question, not a defect.
+
+**#13 Tier 1 already solves this; validate demand first.** *A settled decision, re-raised by a reviewer without the design context.* The no-backend option was put explicitly during the design interview and rejected: this is Tier 2. The finding also understates the delta — Tier 1 does not merely cost a tap, it **requires the sender to be awake, free and holding their phone at the reminder time.** For the medication case that is most of the value. The reviewer's concrete suggestion — validate with ~10 target users before step 1 — is cheap, sensible, and should be done regardless; it is not a reason to redesign.
+
+### Raised by neither the spec nor the review
+
+**The claim query cannot be protected by ordinary RLS.** Matching invitations to a newly-registered phone hash reads rows nobody owns yet, so no row-ownership policy applies. It needs a `SECURITY DEFINER` function with explicit checks, and it is the endpoint #1 abused. Highest-scrutiny code in the build.
+
+**The two-way sync was never attacked.** Recipient-edits-and-sender-is-notified is the largest complexity increase in the design and no finding touched it. Read the review's silence there as untested, not as a clean bill.
 
 ---
 
