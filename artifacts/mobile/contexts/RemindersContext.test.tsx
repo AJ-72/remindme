@@ -2,6 +2,7 @@ import React from "react";
 import { AppState, Text, View } from "react-native";
 import { render, waitFor, act } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { scheduleNotificationAsync } from "expo-notifications";
 import {
   RemindersProvider,
   useReminders,
@@ -124,6 +125,28 @@ describe("RemindersProvider", () => {
     });
     expect(getByTestId("count").props.children).toBe(1);
     expect(getByTestId("reminder-r1").props.children.join("")).toBe("Seeded|false");
+  });
+
+  // Android wipes AlarmManager on every app install/update, so a stored
+  // notificationId from before the update is no longer armed even though the
+  // reminder is still upcoming. Before this, only the ~15-minute
+  // BackgroundFetch sweep would re-arm it - too slow for anything due sooner,
+  // and it gives up for good the moment the reminder's time passes. Mount
+  // must re-arm every future reminder itself, immediately.
+  it("re-arms every future reminder on mount, not just on the background sweep", async () => {
+    const seeded = [makeReminder({ id: "r1", title: "Stale after update" })];
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+
+    await waitFor(() => {
+      expect(scheduleNotificationAsync).toHaveBeenCalled();
+    });
   });
 
   it("addReminder appends a new reminder to state", async () => {

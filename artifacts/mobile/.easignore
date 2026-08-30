@@ -1,6 +1,0 @@
-# This project uses Continuous Native Generation (no committed native projects) —
-# EAS Build runs `expo prebuild` on its own servers. Exclude the locally
-# prebuild-generated /android (and /ios) so machine-specific Gradle caches,
-# local.properties, and stale autolinking metadata never get uploaded.
-/android
-/ios

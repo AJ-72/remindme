@@ -27,6 +27,7 @@ import {
   getVibrationEnabled,
   initNotifications,
   loadReminders,
+  rescheduleAllFutureReminders,
   setDefaultAlarmEnabled as serviceSetDefaultAlarmEnabled,
   setDictationLanguage as serviceSetDictationLanguage,
   setShowDescriptionEnabled as serviceSetShowDescriptionEnabled,
@@ -157,6 +158,21 @@ export function RemindersProvider({
     loadFromStorage()
       .catch(() => {})
       .finally(() => setLoading(false));
+
+    // Android wipes every AlarmManager registration on app install/update
+    // (and some OEMs do the same on reboot), so a stored notificationId is
+    // no proof anything is actually armed. The only other re-arm path is
+    // rescheduleTask's ~15-minute BackgroundFetch sweep, which is too slow
+    // to save a reminder due sooner than that, and which gives up for good
+    // once a reminder's delivery time has passed (it assumes "past" means
+    // "already delivered", not "was never armed"). Doing it here closes that
+    // window the moment the user opens the app, before that assumption can
+    // ever kick in. Fire-and-forget: must not delay first paint, and a
+    // failure here is silent by design, same as the sweep it backs up.
+    rescheduleAllFutureReminders()
+      .then(() => loadReminders())
+      .then(setReminders)
+      .catch(() => {});
   }, [loadFromStorage]);
 
   useEffect(() => {

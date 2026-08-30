@@ -17,7 +17,6 @@
       "android": {
         "buildType": "apk"
       },
-      "corepack": true,
       "node": "22.20.0"
     },
     "production": {
