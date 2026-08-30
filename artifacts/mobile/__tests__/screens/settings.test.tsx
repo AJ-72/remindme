@@ -1,5 +1,5 @@
 import React from "react";
-import { Share, StyleSheet, useColorScheme } from "react-native";
+import { Linking, Platform, Share, StyleSheet, useColorScheme } from "react-native";
 import { router } from "expo-router";
 import { APP_SHARE_BLURB, buildAppShareMessage } from "@/utils/appShare";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
@@ -49,17 +49,25 @@ beforeEach(async () => {
 });
 
 describe("SettingsScreen", () => {
-  it("shows the alarm switch on, with 'plays a sound' copy, when no default is stored", async () => {
+  it("shows the alarm switch on, with 'on time' copy, when no default is stored", async () => {
     const { findByText, findByTestId } = renderScreen();
-    expect(await findByText("Notification will play a sound")).toBeTruthy();
+    expect(
+      await findByText("Rings out loud, and fires at exactly the time you set")
+    ).toBeTruthy();
     const switchEl = await findByTestId("default-alarm-switch");
     expect(switchEl.props.value).toBe(true);
   });
 
-  it("shows the alarm switch off, with 'silent' copy, when the stored default is false", async () => {
+  // The toggle reads as a sound setting but also decides punctuality: a silent
+  // reminder goes through the API aggressive OEM power management downgrades,
+  // so it can land ~20 minutes late. The copy has to say so or the trade-off
+  // is invisible (backlog item 20).
+  it("shows the alarm switch off, with copy warning the reminder may be late", async () => {
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
     const { findByText, findByTestId } = renderScreen();
-    expect(await findByText("Notification will be silent")).toBeTruthy();
+    expect(
+      await findByText("Silent, and may arrive up to 20 minutes late")
+    ).toBeTruthy();
     const switchEl = await findByTestId("default-alarm-switch");
     expect(switchEl.props.value).toBe(false);
   });
@@ -115,7 +123,7 @@ describe("SettingsScreen", () => {
   // sub-label, and flex:1 in a column collapses it to zero height. A text query
   // alone can't catch that, so assert the style too.
   it.each([
-    ["Play alarm sound by default"],
+    ["Alarm — rings, and arrives on time"],
     ["Vibrate"],
     ["Show description in notifications"],
     ["Debug logs"],
@@ -124,6 +132,84 @@ describe("SettingsScreen", () => {
     const label = await findByText(title);
     const style = StyleSheet.flatten(label.props.style);
     expect(style.flex).toBeUndefined();
+  });
+
+  describe("status-bar alarm icon explainer (Android only)", () => {
+    // jest.replaceProperty does NOT auto-restore without restoreMocks, and a
+    // leaked Platform.OS changes which native Switch renders, breaking every
+    // later test in this file. Restore the handle explicitly rather than
+    // calling restoreAllMocks, which would also kill the module-level
+    // Share.share spy.
+    let replaced: { restore: () => void }[] = [];
+    const setPlatform = (os: string) => {
+      replaced.push(jest.replaceProperty(Platform, "OS", os as any));
+    };
+    afterEach(() => {
+      replaced.forEach((r) => r.restore());
+      replaced = [];
+    });
+
+    it("is not rendered on iOS, which has no such icon", async () => {
+      setPlatform("ios");
+      const { queryByTestId, findByTestId } = renderScreen();
+      await findByTestId("default-alarm-switch");
+      expect(queryByTestId("alarm-icon-explainer")).toBeNull();
+    });
+
+    it("is collapsed on Android until tapped", async () => {
+      setPlatform("android");
+      const { findByTestId, queryByText } = renderScreen();
+      await findByTestId("alarm-icon-explainer");
+      expect(queryByText(/armed to go off at exactly its time/)).toBeNull();
+    });
+
+    it("explains the icon when tapped", async () => {
+      setPlatform("android");
+      const { findByTestId, findByText } = renderScreen();
+
+      fireEvent.press(await findByTestId("alarm-icon-explainer"));
+
+      expect(
+        await findByText(/armed to go off at exactly its time/)
+      ).toBeTruthy();
+    });
+
+    // Verified on device 2026-08-29: the app does NOT appear in Android's
+    // "Alarms & reminders" screen, because it holds USE_EXACT_ALARM — a normal,
+    // auto-granted, non-revocable permission that supersedes
+    // SCHEDULE_EXACT_ALARM on targetSdk 34+. There is no per-app OS switch to
+    // point at, so the copy must not claim one, and must not offer a button
+    // onto a screen the app is absent from.
+    it("does not claim an Android per-app switch that does not exist", async () => {
+      setPlatform("android");
+      const { findByTestId, queryByText } = renderScreen();
+
+      fireEvent.press(await findByTestId("alarm-icon-explainer"));
+
+      expect(queryByText(/Allow setting alarms and reminders/)).toBeNull();
+      expect(queryByText(/Settings . Apps . Reminders/)).toBeNull();
+    });
+
+    it("points at the app's own Alarm toggle as the real escape hatch", async () => {
+      setPlatform("android");
+      const { findByTestId, findByText } = renderScreen();
+
+      fireEvent.press(await findByTestId("alarm-icon-explainer"));
+
+      expect(await findByText(/Alarm switch above/)).toBeTruthy();
+    });
+
+    // The button used to open Android's Alarms & reminders screen. Removed:
+    // this app is not listed there (see the USE_EXACT_ALARM note above), so it
+    // dropped the user onto a long list their app was absent from.
+    it("offers no button onto the alarms & reminders screen", async () => {
+      setPlatform("android");
+      const { findByTestId, queryByTestId } = renderScreen();
+
+      fireEvent.press(await findByTestId("alarm-icon-explainer"));
+
+      expect(queryByTestId("alarm-icon-explainer-settings")).toBeNull();
+    });
   });
 
   // Vibration is independent of sound: the reported bug was that turning off

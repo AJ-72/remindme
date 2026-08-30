@@ -9,6 +9,234 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-30 — Reminders silently stopped ringing overnight: nothing re-arms them on app launch, only a 15-minute sweep that can give up forever
+
+**Symptom:** two 08:00 reminders never rang. Investigation with `dumpsys
+alarm` found **zero** alarms registered for the app at all — not even a
+brand-new reminder saved 14+ hours out. Permissions, channels, quiet hours,
+and a reboot were all ruled out (`device-tests.md`/handoff notes have the
+full elimination).
+
+**ROOT CAUSE — found by temporarily instrumenting `scheduleNotification`
+with `console.warn` on a throwaway build (`debug/diagnose-scheduling`, never
+merged) and reproducing live:** a freshly-created reminder scheduled
+correctly end to end — JS got a real notification id back, and `dumpsys
+alarm` showed the native `setAlarmClock()` entry armed (`window=0
+flags=0x9`). But two *already-existing* reminders from before that app
+update sat completely unarmed. So `scheduleNotification` itself was never
+the bug.
+
+The actual gap: `initNotifications()` runs once per app start (from
+`RemindersContext`) and only sets up the notification handler + channels —
+it never calls `rescheduleAllFutureReminders()`. That function is only
+invoked by `rescheduleTask`'s ~15-minute `BackgroundFetch` sweep and by
+backup import. **Android wipes every `AlarmManager` registration on app
+install/update** (confirmed: this app was updated at 17:57 the evening
+before the miss), so a reminder's stored `notificationId` is no proof
+anything is actually armed after that — only the next sweep would notice.
+
+And the sweep has its own trap: `rescheduleAllFutureReminders` treats "this
+reminder's delivery time has already passed" as proof it must have already
+fired, and permanently stops touching it once that's true. If it was
+silently never armed in the first place (the update-wipe case above), that
+assumption is simply wrong, and the reminder goes dark forever with **no
+user-visible signal** — which is exactly the trap the 08:00 reminders fell
+into between the 17:57 update and the next sweep that could have caught
+them in time.
+
+**FIX:** call `rescheduleAllFutureReminders()` eagerly in the same mount
+effect that loads reminders from storage in `RemindersContext.tsx`,
+fire-and-forget so it never delays first paint. This closes the
+reinstall/reboot wipe window the moment the user next opens the app —
+before the "assume delivered" trap can ever apply — instead of depending on
+a background sweep that may not run in time.
+
+**Residual risk, not fixed here:** the "past delivery time == already
+delivered" assumption inside `rescheduleAllFutureReminders` is still wrong
+in the general case (e.g. the app never opened between the wipe and the
+reminder's time). Narrowed the window, did not remove it.
+
+**Diagnostic technique worth reusing:** logcat showed **zero**
+`ReactNativeJS` lines the whole time — not because logging is stripped in
+this release build, but because the real code simply had no `console.*`
+calls on these paths. Don't assume production logging is disabled; check
+whether the code logs anything at all first. Adding temporary `console.warn`
+at every point a function can silently return `undefined`, shipping one
+throwaway EAS build, and reproducing live was faster than reasoning about
+the native patch, pnpm version, or build config in the abstract — all of
+which turned out to be red herrings once real evidence came back.
+
+---
+
+## 2026-08-29 — EAS build fails at INSTALL_CUSTOM_TOOLS: `corepack: true` collides with EAS's own pnpm install (EEXIST)
+
+**Symptom:** every EAS build errors ~22 s in, before any compilation:
+
+```
+errorCode: EAS_BUILD_SYSTEM_DEPS_INSTALL_ERROR
+message:   Failed to install pnpm. Make sure you specified the correct version in eas.json.
+```
+
+The message blames `eas.json`, which is misleading — the pinned version is
+fine.
+
+**ROOT CAUSE, from the build log** (`Enabling corepack` immediately followed by
+EAS installing the *image's own* pnpm, into a path corepack has already
+claimed):
+
+```
+Enabling corepack
+Installing pnpm@10.14.0
+npm error code EEXIST
+npm error path /home/expo/.nvm/versions/node/v22.20.0/bin/pnpm
+npm error EEXIST: file already exists
+Failed to install pnpm 10.14.0
+```
+
+`corepack: true` in `eas.json` makes EAS run `corepack enable`, which writes a
+`pnpm` shim into the active Node's `bin/`. EAS then separately runs
+`npm i -g pnpm@<image default>` — 10.14.0, **not** our `packageManager` pin of
+11.17.0 — and that install hits the shim and dies with EEXIST. The two steps
+fight over the same path. Nothing in this repo changed: the identical config
+built successfully 3.5 hours earlier (`34d1f57`, 13:12), so this is an
+**EAS-side ordering regression**, not repo drift.
+
+**HOW TO READ THE REAL ERROR.** `build:list` only says `errored`, and
+`build:view <id>` prints nothing useful. Use:
+
+```
+npx eas-cli build:view <id> --json        # NOT --non-interactive; that flag does not exist here
+```
+then parse from the first `{` (the CLI prints a banner first). The full log is
+at `logFiles[0]` in that JSON — fetch it with curl; it is **newline-delimited
+JSON**, one `{"msg": ...}` per line, and is *not* gzipped despite looking like
+binary in a terminal.
+
+**Diagnosis order that would have saved time here:** get the log first. The
+errorCode alone is generic enough to send you editing config that is not
+broken. A config diff against the last green build (`git diff <last-good>..HEAD
+-- package.json artifacts/mobile/eas.json pnpm-workspace.yaml`) being empty is
+a strong hint the cause is upstream, but only the log names it.
+
+**Note on retrying:** an identical retry failed identically. This is
+deterministic, not a registry blip — do not assume transient just because the
+config is unchanged.
+
+**Compatibility fact that makes the workaround safe:** `pnpm-lock.yaml` is
+`lockfileVersion: '9.0'`, which pnpm 9, 10 and 11 all read, and
+`patchedDependencies` lives in `pnpm-workspace.yaml` where pnpm 10+ expects it
+(see the 2026-08-24 entry). So letting EAS use its image pnpm 10.14.0 instead
+of corepack-loading 11.17.0 does not invalidate the lockfile or drop the
+`expo-notifications` setAlarmClock patch — **but verify the patch applies in
+the build log**, because D19/D20 depend on it.
+
+---
+
+## 2026-08-29 — This app is absent from Android's "Alarms & reminders" screen, and that is correct: USE_EXACT_ALARM supersedes SCHEDULE_EXACT_ALARM
+
+**Symptom:** the new status-bar-icon explainer in Settings told users the OS
+escape hatch was *Settings > Apps > Reminders > Allow setting alarms and
+reminders*, with a button onto that screen. On device the button opened the
+right screen — but **Reminders is not in the list** (Maps, Messages, Uber,
+Zomato all are). The instruction was a dead end, and D22's revoke test could
+not be run at all.
+
+**ROOT CAUSE — our own manifest, and it is right as it stands.** `app.json`
+declares **both** exact-alarm permissions:
+
+```
+android.permission.SCHEDULE_EXACT_ALARM
+android.permission.USE_EXACT_ALARM
+```
+
+`USE_EXACT_ALARM` is a **normal** permission: auto-granted at install,
+**not user-revocable**, and reserved by Google for apps whose core function is
+alarms/clocks/reminders. On **targetSdk 34+** (we target 36) it **supersedes**
+`SCHEDULE_EXACT_ALARM`. The "Alarms & reminders" special-access screen is
+backed by the `SCHEDULE_EXACT_ALARM` appop, so apps holding `USE_EXACT_ALARM`
+are **omitted from it by design** — there is nothing there for the user to
+switch. Confirms in `dumpsys package com.curios.remindme`:
+`USE_EXACT_ALARM: granted=true`, with no granted line for
+`SCHEDULE_EXACT_ALARM`.
+
+**DO NOT "fix" this by removing `USE_EXACT_ALARM`.** It is what makes reminders
+punctual by default. Without it, exact alarms become opt-in and every new user
+is silently unpunctual until they find a settings screen — see D7/D19 for what
+inexact delivery costs on ColorOS (up to an hour on a next-day reminder). Play
+permits the permission for this app category. The permission model is correct;
+only the copy was wrong.
+
+**FIX (`caa3542`):** the escape-hatch paragraph and the
+"Open alarms & reminders settings" button are gone from
+`app/(tabs)/settings.tsx`. The explainer now states that Android offers no
+per-app switch because the app registers as an alarm app, and points at **the
+app's own Alarm toggle** — the real control, since a silent reminder never
+routes through `setAlarmClock()` and therefore shows no icon, at the cost of
+the lateness that toggle now advertises. A test asserts the old claim is
+*absent*, so it cannot creep back in.
+
+**General lesson:** Jest can prove copy *renders*; only a device can prove copy
+is *true*. This one was green in the suite and wrong on the phone — which is
+the whole premise of `device-tests.md`.
+
+---
+
+## 2026-08-28 — Two jest state leaks that break *unrelated* tests: `jest.replaceProperty` does not auto-restore, and `scheduleNotificationAsync` is a file-wide shared mock
+
+Both hit while fixing backlog items 19/20. Same shape in each case: a test mutates
+shared state, passes, and the failure surfaces in a **different test further down
+the file** — so the traceback points at innocent code.
+
+**1. `jest.replaceProperty` does NOT restore itself.**
+
+The docs' own wording is easy to misread: replaced properties are restored *only*
+if you call `jest.restoreAllMocks()`, or set `restoreMocks: true` in jest config.
+We set neither. `jest.clearAllMocks()` in a `beforeEach` — which
+`__tests__/screens/settings.test.tsx` does have — clears call records but restores
+nothing.
+
+Concretely: `jest.replaceProperty(Platform, "OS", "android")` in one test leaked
+into every later test in the file. React Native's `Switch` picks a *different
+native component* per platform, and the Android one does not expose `value` the
+same way, so five unrelated assertions started failing with
+`expect(switchEl.props.value).toBe(true)` → `Received: undefined`. Nothing about
+that error suggests a leaked platform.
+
+FIX: keep the handle `replaceProperty` returns and restore it in a scoped
+`afterEach`:
+```ts
+let replaced: { restore: () => void }[] = [];
+const setPlatform = (os: string) => {
+  replaced.push(jest.replaceProperty(Platform, "OS", os as any));
+};
+afterEach(() => { replaced.forEach((r) => r.restore()); replaced = []; });
+```
+**Do NOT reach for `jest.restoreAllMocks()` as the fix** in that file — it would
+also tear down the module-level `jest.spyOn(Share, "share")`, breaking the share
+tests instead. Restore precisely what you replaced.
+
+Related trap in the same API: `jest.replaceProperty` **throws** on a property that
+is already a function (`Cannot replace the 'sendIntent' property because it is a
+function. Use jest.spyOn instead`). For `Linking.sendIntent` and friends, use
+`jest.spyOn(...).mockRestore()`.
+
+**2. `scheduleNotificationAsync` from `__mocks__/expo-notifications.ts` is shared
+across the whole test file.**
+
+Calling `.mockResolvedValue("...")` on it installs a **permanent** implementation.
+`mockClear()` does not undo it — that resets call records only, not the
+implementation. A `mockResolvedValue("new-notif-id")` added to a new
+`toggleComplete` test broke a `snoozeReminder` assertion ~600 lines away that
+expected the default `"mock-notif-id"`.
+
+FIX: use **`mockResolvedValueOnce`** for a one-off return value. Reserve
+`mockResolvedValue` for a `beforeEach` that owns the default for the whole file.
+
+**General rule for this repo's tests:** if you must mutate module-level or
+platform state in one test, restore it in that describe's own `afterEach`.
+Jest's `clearAllMocks`/`resetAllMocks` do not cover property replacement or mock
+implementations, and this repo configures neither `restoreMocks` nor `resetMocks`.
+
 ## 2026-08-24 — EAS `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` on patchedDependencies: EAS was running a different pnpm
 
 **Symptom:** the first EAS build carrying the exact-alarm patch died in dependency install:
