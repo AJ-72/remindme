@@ -9,6 +9,65 @@ Newest entries at the top.
 
 ---
 
+## 2026-08-30 — Reminders silently stopped ringing overnight: nothing re-arms them on app launch, only a 15-minute sweep that can give up forever
+
+**Symptom:** two 08:00 reminders never rang. Investigation with `dumpsys
+alarm` found **zero** alarms registered for the app at all — not even a
+brand-new reminder saved 14+ hours out. Permissions, channels, quiet hours,
+and a reboot were all ruled out (`device-tests.md`/handoff notes have the
+full elimination).
+
+**ROOT CAUSE — found by temporarily instrumenting `scheduleNotification`
+with `console.warn` on a throwaway build (`debug/diagnose-scheduling`, never
+merged) and reproducing live:** a freshly-created reminder scheduled
+correctly end to end — JS got a real notification id back, and `dumpsys
+alarm` showed the native `setAlarmClock()` entry armed (`window=0
+flags=0x9`). But two *already-existing* reminders from before that app
+update sat completely unarmed. So `scheduleNotification` itself was never
+the bug.
+
+The actual gap: `initNotifications()` runs once per app start (from
+`RemindersContext`) and only sets up the notification handler + channels —
+it never calls `rescheduleAllFutureReminders()`. That function is only
+invoked by `rescheduleTask`'s ~15-minute `BackgroundFetch` sweep and by
+backup import. **Android wipes every `AlarmManager` registration on app
+install/update** (confirmed: this app was updated at 17:57 the evening
+before the miss), so a reminder's stored `notificationId` is no proof
+anything is actually armed after that — only the next sweep would notice.
+
+And the sweep has its own trap: `rescheduleAllFutureReminders` treats "this
+reminder's delivery time has already passed" as proof it must have already
+fired, and permanently stops touching it once that's true. If it was
+silently never armed in the first place (the update-wipe case above), that
+assumption is simply wrong, and the reminder goes dark forever with **no
+user-visible signal** — which is exactly the trap the 08:00 reminders fell
+into between the 17:57 update and the next sweep that could have caught
+them in time.
+
+**FIX:** call `rescheduleAllFutureReminders()` eagerly in the same mount
+effect that loads reminders from storage in `RemindersContext.tsx`,
+fire-and-forget so it never delays first paint. This closes the
+reinstall/reboot wipe window the moment the user next opens the app —
+before the "assume delivered" trap can ever apply — instead of depending on
+a background sweep that may not run in time.
+
+**Residual risk, not fixed here:** the "past delivery time == already
+delivered" assumption inside `rescheduleAllFutureReminders` is still wrong
+in the general case (e.g. the app never opened between the wipe and the
+reminder's time). Narrowed the window, did not remove it.
+
+**Diagnostic technique worth reusing:** logcat showed **zero**
+`ReactNativeJS` lines the whole time — not because logging is stripped in
+this release build, but because the real code simply had no `console.*`
+calls on these paths. Don't assume production logging is disabled; check
+whether the code logs anything at all first. Adding temporary `console.warn`
+at every point a function can silently return `undefined`, shipping one
+throwaway EAS build, and reproducing live was faster than reasoning about
+the native patch, pnpm version, or build config in the abstract — all of
+which turned out to be red herrings once real evidence came back.
+
+---
+
 ## 2026-08-29 — EAS build fails at INSTALL_CUSTOM_TOOLS: `corepack: true` collides with EAS's own pnpm install (EEXIST)
 
 **Symptom:** every EAS build errors ~22 s in, before any compilation:
