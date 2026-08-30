@@ -26,7 +26,7 @@ it unattended**. Last updated **2026-08-30**, after the user ran the M4 Tier 1
 send flow by hand on their OEM device; the automated run of **2026-08-29**
 (OnePlus CPH2569, EAS preview build) is recorded in its own section below.
 
-**Where things stand: 7 `PASS` · 5 `PARTIAL` · 11 `PENDING` · 1 `BLOCKED`.**
+**Where things stand: 7 `PASS` · 5 `PARTIAL` · 11 `PENDING` · 8 `BLOCKED`.**
 
 | Mark | Meaning |
 | --- | --- |
@@ -60,13 +60,29 @@ send flow by hand on their OEM device; the automated run of **2026-08-29**
 | [D22](#D22) | Alarm copy + status-bar explainer | `PARTIAL` | **2026-08-29** | `SEMI` | Copy, expand/collapse and the intent all pass on device. **One FAIL:** the app is absent from Android's *Alarms & reminders* list, so the escape-hatch paragraph was false — copy rewritten and the button removed. Needs a re-run on a build carrying that. |
 | [D23](#D23) | Pre-existing reminders re-arm on launch after an update | `PASS` | **2026-08-30** | `AUTO` | Nothing. Fresh install confirmed 0 alarms registered, then both pre-existing future reminders were armed correctly within 4 s of launch. |
 | [D24](#D24) | Tier 1 send-flow edge cases | `PENDING` | — | `SEMI` | All of it: WhatsApp installed **after** the app, the not-on-WhatsApp number, `sms:` on other OEMs, permission denied→re-granted, 1000+ contacts, cold-start notification tap, invite-line toggle, READ_CONTACTS vs Play review. |
+| [D25](#D25) | Registration / discoverability switch | `BLOCKED` | — | `SEMI` | Everything. Needs the Tier 2 backend. **Two devices.** |
+| [D26](#D26) | Invitation arrives with the app killed | `BLOCKED` | — | `SEMI` | Everything. The push path is the whole feature. **Two devices.** |
+| [D27](#D27) | Accept → local schedule → survives a reboot | `BLOCKED` | — | `AUTO` | Everything. The claim that makes the mailbox design worth it. **Two devices.** |
+| [D28](#D28) | Block blocks; unblock re-delivers nothing | `BLOCKED` | — | `SEMI` | Everything. Server-enforced, so verify with the sender's app, not the DB. **Two devices.** |
+| [D29](#D29) | Expiry at the reminder's own time | `BLOCKED` | — | `SEMI` | Everything. Sender must be *told*. **Two devices.** |
+| [D30](#D30) | Concurrent cancel vs reschedule | `BLOCKED` | — | `MANUAL` | Everything. Needs two thumbs in the same minute. **Two devices.** |
+| [D31](#D31) | Tier 1 fallback for an unreachable recipient | `BLOCKED` | — | `SEMI` | Everything, in both languages. Covers decliner and never-installed alike. |
 
-**Totals: 9 `AUTO`, 14 `SEMI`, 1 `MANUAL`** (revised 2026-08-30 after D23 was added as AUTO and D24 was split out of D9).
+**Totals: 10 `AUTO`, 19 `SEMI`, 2 `MANUAL`** (revised 2026-08-30: D23 added as AUTO, D24 split out of D9, D25-D31 added for M4 Tier 2).
+
+**New in this set: six items need *two* devices.** Every prior item in this file is
+single-device. Tier 2 is a two-party feature, so its checks need a second handset
+with a second phone number — that is a setup cost, not an afterthought, and it is
+why most of D25-D31 are `SEMI` even where the assertion is machine-readable.
 
 ### What blocks what, right now
 
 - **Needs a new build** (carrying the uncommitted 2026-08-28 fixes): D21, D22.
 - **Needs a native build** (`expo-contacts` has no OTA path): D24.
+- **Needs the M4 Tier 2 backend to exist at all**: D25-D31. See
+  [`docs/superpowers/specs/2026-08-30-remind-someone-else-tier2-design.md`](docs/superpowers/specs/2026-08-30-remind-someone-else-tier2-design.md).
+  These are written now, per this file's rule that a feature's device checks land
+  with the feature, but none can run until step 1 of that spec's build order does.
 - **Needs a debuggable build**: **D17 only.** Build one with
   `pnpm --filter @workspace/mobile run build:android:dev` (the `development`
   profile — `developmentClient: true`, so the Gradle *debug* variant, hence
@@ -1035,6 +1051,171 @@ build — `expo-contacts` has no OTA path.**
 **Fails if.** Any of the above, but note especially: step 1 failing is a
 shipping blocker, since it silently degrades every WhatsApp send on a whole
 class of devices. Steps 4 and 6 are the crash-shaped ones.
+
+<a id="D25"></a>
+### D25 — Registration and the discoverability switch · `BLOCKED`
+The switch is the account. Off must mean **no row on the server and no network
+traffic** — that is the constraint the whole opt-in model rests on, and it is
+invisible from inside the app, so it has to be watched from outside.
+
+**Setup.** Two devices, two numbers. Tier 2 build. Phone B freshly installed,
+onboarding not yet completed.
+
+**Steps.**
+1. On B, reach the onboarding question and **decline**. Capture traffic
+   (`adb logcat` for the app's own network logging, or a proxy).
+2. On A, pick B from contacts and look at what the send screen says.
+3. On B, Settings → turn **"Let people remind you"** on.
+4. On A, pick B again.
+5. On B, turn it back **off**.
+6. On A, pick B a third time.
+
+**Pass.**
+- Step 1 sends **nothing** to the server. No user row is created.
+- Step 2 shows the no-app path (per D31), not an error.
+- Step 4 now shows B as reachable.
+- Step 6 shows the no-app path again, and B's device token is gone server-side.
+
+**Fails if.** A row appears for a user who declined — that is the single failure
+this item exists to catch, and it silently voids the app's privacy claim. Also
+fails if step 4 needs an app restart to take effect.
+
+<a id="D26"></a>
+### D26 — Invitation arrives with the app killed · `BLOCKED`
+The whole feature is a push notification reaching a phone that is not running the
+app. Jest cannot see any part of this.
+
+**Setup.** Two devices. B registered and discoverable. **Swipe the app from
+recents on B**, and leave the screen off.
+
+**Steps.**
+1. On A, create a reminder for B, one minute out, and send.
+2. Watch B's lock screen without touching it.
+3. Tap the notification on B — from cold start.
+4. Read what A's screen shows before and after.
+
+**Pass.** B's phone shows an invitation naming A within seconds, with the app
+killed. The tap lands on an accept/decline screen with the reminder text and
+time. A shows `Waiting` before and `Scheduled with them` after.
+
+**Fails if.** Nothing arrives (check the Expo push receipt and the FCM token),
+it arrives but the tap opens the home screen instead of the invitation, or the
+notification body leaks the reminder text on a lock screen set to hide sensitive
+content.
+
+<a id="D27"></a>
+### D27 — Accepted reminder fires locally, and survives a reboot · `BLOCKED`
+**This is the claim that justifies the entire architecture.** The design chose
+transfer-at-send-time specifically so an accepted reminder is a local
+`AlarmManager` registration that does not depend on the server. If this fails,
+the mailbox design bought nothing and the whole shape is wrong.
+
+**Setup.** Two devices. An invitation from A accepted on B, for ~20 minutes out.
+
+**Steps.**
+1. On B, confirm the alarm is armed: `adb shell dumpsys alarm | grep -A5 remindme`.
+2. **Put the phone in aeroplane mode.**
+3. **Reboot B.**
+4. Leave it offline and unplugged. Wait for the reminder.
+
+**Pass.** It fires, on time, with no network at all. `dumpsys alarm` shows the
+registration restored after the reboot (this is D23's launch re-arm doing its
+job on a transferred reminder).
+
+**Fails if.** It needs connectivity to fire — which would mean the reminder is
+being pushed at delivery time rather than scheduled locally, i.e. the
+architecture was not built as specified.
+
+<a id="D28"></a>
+### D28 — Block blocks, and unblock re-delivers nothing · `BLOCKED`
+Blocking is enforced server-side, so it must be verified from **the sender's
+app**, not by reading the database. A block that only the UI honours is not a
+block.
+
+**Setup.** Two devices, A and B previously linked.
+
+**Steps.**
+1. On B, block A.
+2. On A, send a reminder to B for ~30 minutes out.
+3. Watch B. Wait a few minutes.
+4. On B, unblock A.
+5. Watch B again for several minutes. Do not send anything new.
+6. On A, send a fresh reminder.
+
+**Pass.** Step 2 tells A explicitly that B is not accepting reminders from them.
+Step 3 delivers nothing to B. **Step 5 delivers nothing** — the reminder sent
+during the block stays undelivered forever. Step 6 works normally.
+
+**Fails if.** A is told the send succeeded (silent blocking was rejected by
+design), or step 5 produces a surprise volley — the outcome this rule exists to
+prevent.
+
+<a id="D29"></a>
+### D29 — Expiry at the reminder's own time · `BLOCKED`
+An unaccepted 08:00 reminder is meaningless at 08:01. The sender being *told* is
+the point: "I sent it and assumed it landed" is the failure this tier exists to
+eliminate.
+
+**Setup.** Two devices. B registered.
+
+**Steps.**
+1. On A, send B a reminder ~3 minutes out.
+2. On B, **ignore it entirely.** Do not open the app.
+3. Watch A from before the reminder time until a few minutes after.
+
+**Pass.** At the reminder's datetime the invitation moves out of `Waiting` on
+A's screen and A is told it expired unanswered. Server-side, the invitation's
+`title`/`description` are now null (the retention rule).
+
+**Fails if.** It sits in `Waiting` indefinitely, expires silently with no notice
+to A, or B receives it late after expiry.
+
+<a id="D30"></a>
+### D30 — Concurrent cancel versus reschedule · `MANUAL`, `BLOCKED`
+Two thumbs, same minute. No machine oracle — this is the one item in this file
+that genuinely needs two people.
+
+**Setup.** Two devices, an accepted reminder for ~1 hour out. Two humans, counting down together.
+
+**Steps.**
+1. On A, cancel. On B, reschedule to a different time. **Within the same few seconds.**
+2. Read both screens.
+3. Wait past both the original and the new time.
+
+**Pass.** Cancel wins. B is told her change was discarded because the sender
+cancelled. **Nothing rings on either phone at either time.**
+
+**Fails if.** Anything fires — a cancelled appointment ringing anyway is the
+harmful outcome this rule exists to prevent. Also fails if the winner depends on
+which phone's clock is ahead; set one device's clock deliberately fast and repeat.
+
+<a id="D31"></a>
+### D31 — Tier 1 fallback for an unreachable recipient · `BLOCKED`
+The recipient who declined and the recipient who never installed are
+**indistinguishable to the app by design**. One message must serve both, and it
+must work in Malayalam.
+
+**Setup.** Three contacts: one who never installed, one who installed and
+declined (from D25), and one reachable. Device language Malayalam for the second
+pass.
+
+**Steps.**
+1. On A, pick each of the three and read what the pick-time notice says.
+2. Send to the unreachable ones and read the composed message.
+3. Repeat the whole pass with the app in Malayalam.
+4. Send to the same unreachable contact four more times.
+
+**Pass.** Contacts 1 and 2 behave identically and both get the Tier 1 WhatsApp
+path. The message carries **both** the store link and the "already have it? turn
+on Let people remind you" line. Functional strings render in Malayalam with the
+Noto Sans Malayalam font, no tofu. On the 4th+ send the witty nudge is gone but
+**the invite link is still present** — the cap split.
+
+**Fails if.** The two unreachable contacts behave differently (that would mean
+the app is storing decline state it should not have), the notice reappears on
+every send to the same contact (per-contact memory), or the invite link
+disappears with the nudge at the cap — which would strand that person
+permanently.
 
 <a id="D6"></a>
 ### D6 — Malayalam dictation end-to-end · `PENDING`
