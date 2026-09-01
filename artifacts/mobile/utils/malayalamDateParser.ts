@@ -67,9 +67,20 @@ const NUMBER_PATTERN = `(?:\\d+|[൦-൯]+|${NUMBER_WORD_KEYS.join("|")})`;
 // trailing guard backtracks into a bare മണി match and lets മണിക്കൂർ through.
 const HOUR_UNIT = `മണി(?!ക്കൂ)(?:യ്)?(?:ക്ക്?)?`;
 
-// A colon clock time, e.g. "7:30", optionally followed by the temporal
-// particle ന് ("at"). 12-hour clock only — see the 1..12 validation below.
-const COLON_TIME = `(\\d{1,2}):(\\d{2})(?:\\s*ന്)?`;
+// Digit runs may be Arabic or Malayalam numerals; parseMalayalamNumber
+// normalizes either shape.
+const DIGIT = `[\\d൦-൯]`;
+
+// A written clock time, e.g. "7:30" or "7.30", optionally followed by the
+// temporal particle ന് ("at"). A dot is at least as common as a colon when
+// typing Malayalam on a phone keyboard, and speech recognizers emit it too.
+// 12-hour clock only — see the 1..12 validation below.
+const COLON_TIME = `(${DIGIT}{1,2})[:.](${DIGIT}{2})(?:\\s*ന്)?`;
+
+// English meridiem markers. Malayalam input is very often mixed-script for the
+// clock part specifically ("ഇന്ന് 10.30 am"), so am/pm has to bias the hour
+// the same way the Malayalam period words do.
+const MERIDIEM = `(a\\.?\\s?m\\.?|p\\.?\\s?m\\.?)`;
 
 // Fused fraction-of-hour words. Malayalam fuses the hour and the fraction
 // into one token — അഞ്ച് + അര becomes അഞ്ചര — so the two-token "അര മണി"
@@ -189,6 +200,14 @@ const PERIOD_WORDS: { word: string; bias: "AM" | "PM"; defaultHour: number }[] =
   { word: "രാത്രി", bias: "PM", defaultHour: 21 },
 ];
 
+// 12-hour meridiem arithmetic: 12 am is midnight, 12 pm is noon. Kept apart
+// from applyBias because the Malayalam period words never denote midnight —
+// ഉച്ചയ്ക്ക് 12 is noon — so only an explicit "am" may fold 12 down to 0.
+function applyMeridiem(hour: number, bias: "AM" | "PM"): number {
+  if (hour === 12) return bias === "AM" ? 0 : 12;
+  return bias === "PM" ? hour + 12 : hour;
+}
+
 function applyBias(hour: number, bias: "AM" | "PM"): number {
   if (hour === 12) return 12;
   if (bias === "PM") return hour + 12;
@@ -263,6 +282,29 @@ function matchFusedFraction(
 }
 
 function resolveClockTime(text: string): ClockMatch | null {
+  // An explicit am/pm wins over every other reading, so it is tried first,
+  // both with a full clock time ("10.30 am") and a bare hour ("10 am").
+  const meridiemClock = text.match(new RegExp(`${COLON_TIME}\\s*${MERIDIEM}`, "i"));
+  if (meridiemClock) {
+    const rawHour = parseMalayalamNumber(meridiemClock[1]);
+    const minute = parseMalayalamNumber(meridiemClock[2]);
+    const bias = meridiemClock[3][0].toLowerCase() === "p" ? "PM" : "AM";
+    if (rawHour !== null && minute !== null && rawHour >= 1 && rawHour <= 12 && minute <= 59) {
+      return { matchedText: meridiemClock[0], hour: applyMeridiem(rawHour, bias), minute };
+    }
+  }
+
+  const meridiemHour = text.match(
+    new RegExp(`(${DIGIT}{1,2})\\s*(?:${HOUR_UNIT})?\\s*${MERIDIEM}`, "i")
+  );
+  if (meridiemHour) {
+    const rawHour = parseMalayalamNumber(meridiemHour[1]);
+    const bias = meridiemHour[2][0].toLowerCase() === "p" ? "PM" : "AM";
+    if (rawHour !== null && rawHour >= 1 && rawHour <= 12) {
+      return { matchedText: meridiemHour[0], hour: applyMeridiem(rawHour, bias), minute: 0 };
+    }
+  }
+
   const halfPastAfter = text.match(
     new RegExp(`(${NUMBER_PATTERN})\\s*${HOUR_UNIT}\\s*കഴിഞ്ഞ്\\s*അര`)
   );
@@ -309,9 +351,9 @@ function resolveClockTime(text: string): ClockMatch | null {
     for (const regex of colonOrderedRegexes) {
       const match = text.match(regex);
       if (match) {
-        const rawHour = parseInt(match[1], 10);
-        const minute = parseInt(match[2], 10);
-        if (rawHour >= 1 && rawHour <= 12 && minute <= 59) {
+        const rawHour = parseMalayalamNumber(match[1]);
+        const minute = parseMalayalamNumber(match[2]);
+        if (rawHour !== null && minute !== null && rawHour >= 1 && rawHour <= 12 && minute <= 59) {
           return {
             matchedText: match[0],
             hour: applyBias(rawHour, period.bias),
@@ -342,6 +384,34 @@ function resolveClockTime(text: string): ClockMatch | null {
     }
   }
 
+  // A period word next to a bare numeral, with no മണി attached
+  // ("രാവിലെ 10"). Tried after every മണി-anchored branch so an explicit hour
+  // word always wins, and before the period default so it is not flattened to 9:00.
+  // Skipped entirely when an explicit മണി-anchored hour appears anywhere in the
+  // sentence: that hour is the real time, and a numeral sitting next to the
+  // period word is part of the title ("രാവിലെ 2 ഗുളിക 8 മണിക്ക്" is 8, not 2).
+  const hasExplicitHourWord = new RegExp(`(?:${NUMBER_PATTERN})\\s*${HOUR_UNIT}`).test(text);
+  for (const period of PERIOD_WORDS) {
+    if (hasExplicitHourWord) break;
+    const digitOrderedRegexes = [
+      new RegExp(`${period.word}\\s*(${DIGIT}{1,2})(?!${DIGIT}|[:.])`),
+      new RegExp(`(${DIGIT}{1,2})(?!${DIGIT}|[:.])\\s*${period.word}`),
+    ];
+    for (const regex of digitOrderedRegexes) {
+      const match = text.match(regex);
+      if (match) {
+        const rawHour = parseMalayalamNumber(match[1]);
+        if (rawHour !== null && rawHour >= 1 && rawHour <= 12) {
+          return {
+            matchedText: match[0],
+            hour: applyBias(rawHour, period.bias),
+            minute: 0,
+          };
+        }
+      }
+    }
+  }
+
   for (const period of PERIOD_WORDS) {
     if (text.includes(period.word)) {
       // Only fall back to the period's default hour when no explicit hour is
@@ -364,9 +434,9 @@ function resolveClockTime(text: string): ClockMatch | null {
 
   const colonMatch = text.match(new RegExp(COLON_TIME));
   if (colonMatch) {
-    const rawHour = parseInt(colonMatch[1], 10);
-    const minute = parseInt(colonMatch[2], 10);
-    if (rawHour >= 1 && rawHour <= 12 && minute <= 59) {
+    const rawHour = parseMalayalamNumber(colonMatch[1]);
+    const minute = parseMalayalamNumber(colonMatch[2]);
+    if (rawHour !== null && minute !== null && rawHour >= 1 && rawHour <= 12 && minute <= 59) {
       return {
         matchedText: colonMatch[0],
         hour: applyBareHourBias(rawHour),

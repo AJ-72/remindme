@@ -332,13 +332,14 @@ describe("parseMalayalamDateTime — fused fraction hour words", () => {
   });
 });
 
-describe("parseMalayalamDateTime — code-mixed input (v1 limitation)", () => {
+describe("parseMalayalamDateTime — code-mixed input", () => {
   const now = new Date("2026-07-29T10:00:00");
 
-  it("extracts the Malayalam day word and leaves embedded Latin time text untouched in the title", () => {
+  it("extracts a Malayalam day word alongside an English am/pm time", () => {
     const { title, date } = parseMalayalamDateTime("call John നാളെ 5pm", now);
     expect(date!.getDate()).toBe(30); // നാളെ recognized
-    expect(title).toBe("call John 5pm"); // "5pm" not parsed as a time
+    expect(date!.getHours()).toBe(17); // 5pm now recognized too
+    expect(title).toBe("call John");
   });
 
   it("does not recognize an English relative-date word even next to Malayalam text", () => {
@@ -458,5 +459,90 @@ describe("parseMalayalamDateTime — colon clock times", () => {
   it("ignores out-of-range clock values rather than inventing a time", () => {
     // 12-hour clock only, per product decision.
     expect(parseMalayalamDateTime("25:99 ന് മീറ്റിംഗ്", now).date).toBeNull();
+  });
+});
+
+describe("parseMalayalamDateTime — dot-separated clock times", () => {
+  const now = new Date("2026-07-29T10:00:00");
+
+  it("parses a dot-separated time the same as a colon one", () => {
+    const { title, date } = parseMalayalamDateTime("ആധാരം എഴുത്ത് ഇന്ന് 11.30", now);
+    expect(date!.getDate()).toBe(29);
+    expect(date!.getHours()).toBe(11);
+    expect(date!.getMinutes()).toBe(30);
+    expect(title).toBe("ആധാരം എഴുത്ത്");
+  });
+
+  it("applies a period word's bias to a dot time", () => {
+    const { date } = parseMalayalamDateTime("വൈകിട്ട് 6.45 ന് മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(18);
+    expect(date!.getMinutes()).toBe(45);
+  });
+
+  it("parses Malayalam-numeral clock times", () => {
+    const { date } = parseMalayalamDateTime("രാവിലെ ൭:൩൦ ന് മരുന്ന്", now);
+    expect(date!.getHours()).toBe(7);
+    expect(date!.getMinutes()).toBe(30);
+  });
+
+  it("still rejects out-of-range dot times", () => {
+    expect(parseMalayalamDateTime("25.99 ന് മീറ്റിംഗ്", now).date).toBeNull();
+  });
+});
+
+describe("parseMalayalamDateTime — English am/pm markers", () => {
+  const now = new Date("2026-07-29T10:00:00");
+
+  it("parses '10.30 am' in a Malayalam sentence", () => {
+    const { title, date } = parseMalayalamDateTime("ആധാരം എഴുത്ത് ഇന്ന് 10.30 am", now);
+    expect(date!.getHours()).toBe(10);
+    expect(date!.getMinutes()).toBe(30);
+    expect(title).toBe("ആധാരം എഴുത്ത്");
+  });
+
+  it("parses pm, overriding the bare-hour heuristic", () => {
+    const { date } = parseMalayalamDateTime("ഇന്ന് 10:30 pm മരുന്ന്", now);
+    expect(date!.getHours()).toBe(22);
+    expect(date!.getMinutes()).toBe(30);
+  });
+
+  it("parses a bare hour with am/pm", () => {
+    const { title, date } = parseMalayalamDateTime("നാളെ 4 pm മീറ്റിംഗ്", now);
+    expect(date!.getDate()).toBe(30);
+    expect(date!.getHours()).toBe(16);
+    expect(date!.getMinutes()).toBe(0);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+
+  it("treats 12 am as midnight and 12 pm as noon", () => {
+    expect(parseMalayalamDateTime("ഇന്ന് 12 am മരുന്ന്", now).date!.getHours()).toBe(0);
+    expect(parseMalayalamDateTime("ഇന്ന് 12 pm മരുന്ന്", now).date!.getHours()).toBe(12);
+  });
+
+  it("accepts the dotted A.M. spelling", () => {
+    const { date } = parseMalayalamDateTime("ഇന്ന് 8.15 A.M. മരുന്ന്", now);
+    expect(date!.getHours()).toBe(8);
+    expect(date!.getMinutes()).toBe(15);
+  });
+});
+
+describe("parseMalayalamDateTime — period word with a bare numeral", () => {
+  const now = new Date("2026-07-29T10:00:00");
+
+  it("parses a numeral hour with no മണി attached", () => {
+    const { title, date } = parseMalayalamDateTime("രാവിലെ 10 ക്ലാസ്", now);
+    expect(date!.getHours()).toBe(10);
+    expect(date!.getMinutes()).toBe(0);
+    expect(title).toBe("ക്ലാസ്");
+  });
+
+  it("applies a PM period bias to a bare numeral", () => {
+    const { date } = parseMalayalamDateTime("വൈകിട്ട് 6 മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(18);
+  });
+
+  it("still prefers an explicit മണി hour over a stray numeral", () => {
+    const { date } = parseMalayalamDateTime("രാവിലെ 2 ഗുളിക 8 മണിക്ക്", now);
+    expect(date!.getHours()).toBe(8);
   });
 });

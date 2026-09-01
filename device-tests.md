@@ -1565,3 +1565,22 @@ seconds) `dumpsys alarm` showed both pre-existing reminders re-armed:
 Both match their reminder's actual time and alarm setting exactly, confirming
 the fix closes the reinstall-wipe window immediately on launch rather than
 depending on the 15-minute sweep.
+
+## Malayalam numeral clock times (dot separator + am/pm) — PENDING
+
+Landed with the `malayalamDateParser` numeral-time fix. Jest covers the parser
+directly; what it cannot cover is the on-device keyboard actually emitting the
+characters these patterns expect.
+
+- [ ] PENDING — Type `ആധാരം എഴുത്ത് ഇന്ന് 11.30` on the Malayalam keyboard on
+      the home-screen quick-add. The chips must read `Today · 11:30`, not
+      `Today · 09:00`, and the title chip must read `ആധാരം എഴുത്ത്`.
+- [ ] PENDING — Type `ഇന്ന് 10.30 am`. Chips must read `Today · 10:30`.
+      Repeat with `pm` → `22:30`.
+- [ ] PENDING — Confirm the ML keyboard's period key emits U+002E FULL STOP
+      (what the parser matches) and not a look-alike. If a time silently fails
+      to parse on-device while the same string passes in Jest, this is why —
+      check the actual code point before touching the parser.
+- [ ] PENDING — Dictate (mic, Malayalam) a numeral time and check whether the
+      recognizer writes `11.30`, `11:30` or `11 30`. The first two now parse;
+      a space-separated form still does not.
