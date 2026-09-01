@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Reminders** — a mobile app (React Native/Expo) for scheduling reminders with local notifications. Reminders are stored locally on-device via AsyncStorage. **There is no working backend**: `artifacts/api-server` serves exactly one route (`GET /api/healthz`) and `lib/db` defines zero tables — see "The backend is empty scaffolding" below before planning anything that assumes a server. Supports voice dictation (English/Malayalam, user-selectable in Settings) and Malayalam-script text input/rendering throughout.
+**Reminders** — a mobile app (React Native/Expo) for scheduling reminders with local notifications. Reminders are stored locally on-device via AsyncStorage. **There is still no deployed backend**, though `lib/db` now defines a real schema for the in-progress "remind someone else" Tier 2 work — see "The backend is a schema with nothing behind it yet" below before planning anything that assumes a server. Supports voice dictation (English/Malayalam, user-selectable in Settings) and Malayalam-script text input/rendering throughout.
 
 ## Run & Operate
 
@@ -26,6 +26,11 @@ pnpm --filter @workspace/api-spec run codegen
 
 # Push DB schema to dev database (requires DATABASE_URL env var)
 pnpm --filter @workspace/db run push
+# ...then the grants, which drizzle-kit push does NOT manage. Both, every time.
+pnpm --filter @workspace/db run push:privileges
+
+# RLS / schema tests (real Postgres via PGlite, in-process — no Docker needed)
+pnpm --filter @workspace/db run test
 ```
 
 Mobile dev runs via Expo on Replit with specific env vars (`REPLIT_EXPO_DEV_DOMAIN`, `REPL_ID`, etc.) — local dev of the mobile app requires those to be set.
@@ -70,7 +75,15 @@ Required env: `DATABASE_URL` — Postgres connection string (for api-server and 
 
 **API codegen flow**: Edit `lib/api-spec/openapi.yaml` → run `codegen` → `lib/api-client-react` and `lib/api-zod` regenerate. Never edit files inside `generated/` directories directly. The OpenAPI `info.title` **must stay "Api"** — the orval config enforces this and import paths break if it changes. Note the spec currently declares a single path (`/healthz`), so the generated client has one hook; this is a working pipeline with nothing yet flowing through it.
 
-**DB schema source of truth**: `lib/db/src/schema/` — one file per table, each exporting a Drizzle table, `insertXSchema` (via `drizzle-zod`), and `InsertX`/`X` types. The `lib/db/src/schema/index.ts` re-exports all tables. **It currently defines no tables at all** — `index.ts` is a commented template ending in `export {}`. This describes the convention to follow, not an existing schema.
+**DB schema source of truth**: `lib/db/src/schema/` — one file per table, each exporting a Drizzle table, `insertXSchema` (via `drizzle-zod`), and `InsertX`/`X` types. `lib/db/src/schema/index.ts` re-exports all tables; a table file that is never re-exported is absent from the generated DDL, so it goes both untested and unpushed (there is a test pinning the table list for exactly this reason).
+
+Five tables exist, all for M4 Tier 2 and none yet reachable by the app: `users`, `devices`, `blocks`, `invitations`, `link_codes`.
+
+**RLS policies live in the schema too**, via `pgPolicy` — and Drizzle enables RLS on a table *only* if that table declares a policy, so **a new table with no policy is wide open to every authenticated caller** while looking perfectly ordinary in review. Two things guard that: a test asserting `tablesWithoutRls()` is empty, and `privileges.sql` starting from `revoke all`.
+
+**RLS is row-level; some rules here are column-shaped.** Whoever can write `users.phone_hash` owns that phone number, whichever row they are permitted to write. No policy can say that, so table and column privileges live in `lib/db/src/schema/privileges.sql`. **`drizzle-kit push` does not manage grants** — `push:privileges` is a second, required deploy step, not an optional one.
+
+**RLS tests** (`lib/db`, vitest + PGlite) run a real Postgres compiled to WASM, in-process: no Docker, no Supabase CLI, no daemon. Note a superuser bypasses RLS and PGlite's default connection *is* a superuser, which is why `rlsHarness.ts` exposes only `asUser`/`asAnon`/`asService` and documents `asService` as unusable for assertions. When adding a policy test, sabotage-check it: remove the protection and confirm the test fails *for the right reason*.
 
 **Mobile data layer**: `RemindersContext` (`contexts/RemindersContext.tsx`) wraps `ReminderService` (`services/ReminderService.ts`), which is the single source of truth for AsyncStorage reads/writes, all persisted settings, and `expo-notifications` scheduling/permissions/channels. All reminder CRUD and settings access goes through the context — screens never call the service directly. `RemindersProvider` must wrap `SharedTextProvider` in the provider tree (see Testing below) since `SharedTextContext` reads settings via `useReminders()`.
 
@@ -121,7 +134,9 @@ Expo Router with file-based routing under `artifacts/mobile/app/`. Screens impor
 
 ## Gotchas
 
-- **The backend is empty scaffolding.** `artifacts/api-server`, `lib/db`, `lib/api-spec` and the generated clients all exist and build, which makes it look like there is a server to develop against. There is not: the API serves one health route, `openapi.yaml` declares one path, and `lib/db` defines zero tables. The mobile app persists everything in `AsyncStorage` and calls none of it. Re-verified 2026-08-24.
+- **The backend is a schema with nothing behind it yet.** `lib/db` now defines five real tables with RLS policies and tests (M4 Tier 2), but **there is no deployed database, no Supabase project, and no server the app talks to.** `artifacts/api-server` still serves one health route, `openapi.yaml` still declares one path, and the mobile app still persists everything in `AsyncStorage` and calls none of it. Re-verified 2026-09-01.
+
+  Per `docs/adr/0001`, the app will reach the backend through Supabase Edge Functions rather than PostgREST, and `artifacts/api-server` is slated for deletion. It has not been deleted yet.
 
   This matters for planning: anything needing a server — device sync, accounts, MCP (backlog M8), remind-someone-else Tier 2 (M4), group RSVP (M7) — starts by **building that backend**, and its cost is the whole cost. Do not scope such work as "wire up the existing API".
 - `expo-notifications` is loaded via dynamic `require()` wrapped in try/catch to avoid crashes in non-native environments.

@@ -1,20 +1,23 @@
-// Export your models here. Add one export per file
-// export * from "./posts";
+// One file per table, each exporting a Drizzle table, an `insertXSchema` via
+// drizzle-zod, and `InsertX`/`X` types. See `users.ts` for the shape.
 //
-// Each model/table should ideally be split into different files.
-// Each model/table should define a Drizzle table, insert schema, and types:
+// TWO THINGS TO GET RIGHT WHEN ADDING A TABLE HERE:
 //
-//   import { pgTable, text, serial } from "drizzle-orm/pg-core";
-//   import { createInsertSchema } from "drizzle-zod";
-//   import { z } from "zod/v4";
+// 1. Re-export it below. A table file that is not re-exported is absent from
+//    the generated DDL, so its policies go untested AND unpushed, while every
+//    other test in this package still passes. `schema.test.ts` pins the table
+//    list to catch this.
 //
-//   export const postsTable = pgTable("posts", {
-//     id: serial("id").primaryKey(),
-//     title: text("title").notNull(),
-//   });
+// 2. Give it an RLS policy. Drizzle enables row level security on a table only
+//    if that table declares one, so a table with no policy is readable and
+//    writable by every authenticated caller - and looks entirely ordinary in
+//    review. `schema.test.ts` asserts no such table exists.
 //
-//   export const insertPostSchema = createInsertSchema(postsTable).omit({ id: true });
-//   export type InsertPost = z.infer<typeof insertPostSchema>;
-//   export type Post = typeof postsTable.$inferSelect;
+// Anything RLS cannot express because it is column-shaped rather than
+// row-shaped belongs in `privileges.sql`.
 
-export {}
+export * from "./blocks";
+export * from "./devices";
+export * from "./invitations";
+export * from "./linkCodes";
+export * from "./users";

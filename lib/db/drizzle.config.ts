@@ -11,4 +11,13 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL,
   },
+  // `authenticated` and `anon` are Supabase's, not ours. Without this,
+  // drizzle-kit sees roles it did not create referenced by our policies and
+  // proposes managing them - up to and including dropping them, which would
+  // take the whole project's auth down.
+  entities: {
+    roles: {
+      provider: "supabase",
+    },
+  },
 });

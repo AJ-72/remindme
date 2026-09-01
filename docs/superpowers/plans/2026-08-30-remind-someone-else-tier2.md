@@ -72,15 +72,62 @@ The spec's build-order step 0. The first draft folded this into "schema" and und
 
 | # | Task | Notes |
 |---|---|---|
-| T1.1 | Supabase project, `ap-south-1`, new (not `letsplan`) | Free tier for development. **Pro from the first real user** — a paused project silently drops invitations |
-| T1.2 | `users` table + `insertUserSchema` | Follows the `lib/db/src/schema/` convention: table, drizzle-zod schema, `InsertX`/`X` types |
-| T1.3 | `devices` table | One user, many devices. `expoPushToken`, `platform`, `lastSeenAt` |
-| T1.4 | `blocks` table | Composite PK. **Unblock is a `DELETE`** — that is why it is rows, not a flag |
-| T1.5 | `invitations` table | `recipientPhoneHash` is deliberately **not** a foreign key — that is what lets an invitation address someone who does not exist yet |
-| T1.6 | `link_codes` table | Short-lived, single-use |
-| T1.7 | RLS policies on every table | Each with a test proving a non-owner is refused. This is what T0.1 was for |
+| T1.1 | Supabase project, `ap-south-1`, new (not `letsplan`) | **Needs a human.** Free tier for development. **Pro from the first real user** — a paused project silently drops invitations |
+| T1.2 | `users` table + `insertUserSchema` | **DONE.** Adds `accepting_reminders` (the global mute, deliberately not the same switch as `discoverable`) and `last_active_at` (what the 45-day rebind window is measured from) |
+| T1.3 | `devices` table | **DONE.** `expo_push_token` is `UNIQUE` across all accounts — one handset, one home, so "forgot to clear the old row" is an error rather than a phone quietly receiving two people's reminders |
+| T1.4 | `blocks` table | **DONE.** Composite PK; unblock is a `DELETE`. Every policy keys on `blocker_id` and none on `blocked_id` — being on a list grants no sight of it |
+| T1.5 | `invitations` table | **DONE.** `recipient_phone_hash` is not a foreign key, and is indexed because the claim lookup is the one query every new registration runs. Carries `content_expires_at` = `least(datetime, created_at + 30 days)` as a column, so the 30-day cap is structural rather than a predicate a cleanup job has to compute correctly |
+| T1.6 | `link_codes` table | **DONE.** Short-lived, single-use |
+| T1.7 | RLS policies on every table | **DONE.** 41 tests. Plus two things the task did not anticipate — see below |
 | T1.8 | **`SECURITY DEFINER` claim function** | **Highest-risk code in the build.** Ordinary RLS cannot protect it — it reads rows nobody owns yet. It is the function Known defects #1 abused. Test it adversarially: wrong hash, replayed token, concurrent claims |
-| T1.9 | `drizzle-kit push` wired and documented | `pnpm --filter @workspace/db run push` against the new `DATABASE_URL` |
+| T1.9 | `drizzle-kit push` wired and documented | Blocked on T1.1. `drizzle.config.ts` now sets `entities.roles.provider = "supabase"`, without which drizzle-kit proposes managing `authenticated`/`anon` — roles it did not create — up to and including dropping them |
+
+### Two things Phase 1 turned up that the plan did not have
+
+**1. RLS is row-level, and two of the sharpest rules here are column-shaped.**
+Whoever can write `users.phone_hash` owns that phone number, whichever row they
+are allowed to write — which is Known defects #1 arriving through a second
+door. No policy can express that, so table and column privileges live in
+`lib/db/src/schema/privileges.sql` and are applied by
+`pnpm --filter @workspace/db run push:privileges`. **`drizzle-kit push` does not
+manage grants**, so this is a second deploy step, not an optional one.
+
+**2. Clients get almost no write access at all, which moves work into Phase 3.**
+The design already said sending must consult a block list the sender cannot
+read, and that transitions are asymmetric — the sender may only cancel, the
+recipient may reschedule. Enforcing the asymmetry means comparing the old row
+to the new one, which RLS cannot see. Rather than grant writes and police them
+with a trigger, `invitations` is **read-only to clients**: every mutation is a
+server function. Same for creating a `users` row, minting a `link_code`, and
+binding a number.
+
+So Phase 3 needs more Edge Functions than the task list implies — send, accept,
+decline, reschedule, cancel, complete — and each is the enforcement point for
+the rules on that transition. This is the correct trade (one place to get
+right, and RLS is default-deny behind it), but it is more surface than the plan
+costed, and each function is where a rule can be forgotten.
+
+### Also landed
+
+- **`schemaDdl`** — RLS tests generate their DDL from the Drizzle schema, so a
+  test cannot pass against a hand-copied fixture the schema has since outgrown.
+- **A structural guard.** Drizzle enables RLS only on a table that declares a
+  policy, so a new table with none is wide open and looks entirely ordinary in
+  review. `tablesWithoutRls()` must be empty, and a second test pins the exact
+  table list — a table file never re-exported from `schema/index.ts` is absent
+  from the DDL, so its policies would go untested *and* unpushed while every
+  other test still passed.
+- **`auth.uid()` returns `uuid` in the shim**, as it does on Supabase. A
+  text-returning shim would let `id = auth.uid()` pass locally and fail on
+  deploy.
+- **Snapshot-backed test databases.** Each test still gets its own Postgres;
+  the prepared schema is dumped once per run and reloaded, 2.5s → 0.6s each.
+  A security suite slow enough to irritate is one that stops being run.
+- **Every new test was sabotage-checked.** Removing a protection must make its
+  test fail *for the right reason*. This caught a weak one: the phone-rebind
+  test originally aimed at an existing user's hash, so it passed on the unique
+  index whether the privilege held or not — and squatting an *unregistered*
+  number is the actual attack.
 
 ## Phase 2 — Number binding and the verification ladder
 
