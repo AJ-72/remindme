@@ -1592,3 +1592,24 @@ characters these patterns expect.
 - [ ] PENDING — Type `ഇന്ന് 00.30 മരുന്ന്`. Chip must read `Today · 00:30`
       and the notification must actually fire after midnight, not at 09:00 —
       the 24-hour path is new and midnight was previously unreachable.
+
+## Ambiguous-numeral confirmation sheet — PENDING
+
+The parser now reports "this numeral could be an hour or could be part of the
+reminder" instead of choosing, and QuickAddInput asks before saving. Jest
+covers the branch and both outcomes; what it cannot cover is the sheet on a
+real screen.
+
+- [ ] PENDING — Type `രാവിലെ 5 ആപ്പിൾ വാങ്ങണം` and tap save. A sheet must ask
+      `Is "5" the time?` with two rows; nothing may be saved until one is
+      tapped.
+- [ ] PENDING — Both rows must render their Malayalam title in Noto Sans, not
+      tofu boxes, and must not clip on a narrow screen (the title is
+      `numberOfLines={1}`, so check a long reminder truncates with an ellipsis
+      rather than pushing the time off the row).
+- [ ] PENDING — Choose the time row. 05:00 is inside default quiet hours, so
+      the quiet-hours sheet must appear next, and the saved title must be
+      `ആപ്പിൾ വാങ്ങണം` — confirming the chosen title survived that detour.
+- [ ] PENDING — Choose the text row: saved title keeps the `5`, time is 09:00.
+- [ ] PENDING — Dismiss the sheet by tapping outside. Nothing saved, the typed
+      text still in the box, and saving again must ask again.

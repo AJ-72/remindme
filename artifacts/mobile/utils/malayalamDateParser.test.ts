@@ -567,6 +567,24 @@ describe("parseMalayalamDateTime — numbers that are not times", () => {
     expect(title).toBe(input);
   });
 
+  it("reports the ambiguity instead of assuming, for a bare count", () => {
+    // Nothing lexical separates "at 5" from "5 apples", so the parser hands
+    // both readings up and the UI asks. See QuickAddInput's confirm sheet.
+    const { ambiguity } = parseMalayalamDateTime("രാവിലെ 5 ആപ്പിൾ വാങ്ങണം", now);
+    expect(ambiguity).toBeDefined();
+    expect(ambiguity!.numberText).toBe("5");
+    expect(ambiguity!.asTime.date!.getHours()).toBe(5);
+    expect(ambiguity!.asTime.title).toBe("ആപ്പിൾ വാങ്ങണം");
+    expect(ambiguity!.asText.date!.getHours()).toBe(9); // the period default
+    expect(ambiguity!.asText.title).toBe("5 ആപ്പിൾ വാങ്ങണം"); // count preserved
+  });
+
+  it("does not flag an unambiguous hour as needing confirmation", () => {
+    expect(parseMalayalamDateTime("രാവിലെ 10 മണിക്ക് ക്ലാസ്", now).ambiguity).toBeUndefined();
+    expect(parseMalayalamDateTime("ഇന്ന് 11.30 മീറ്റിംഗ്", now).ambiguity).toBeUndefined();
+    expect(parseMalayalamDateTime("അഞ്ചരയ്ക്ക് മരുന്ന്", now).ambiguity).toBeUndefined();
+  });
+
   it("does not read a quantity next to a period word as an hour", () => {
     const { title, date } = parseMalayalamDateTime("രാവിലെ 2 കിലോ പഞ്ചസാര വാങ്ങണം", now);
     expect(date!.getHours()).toBe(9); // the period word's own default, not 02:00

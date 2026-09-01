@@ -1,9 +1,12 @@
 import * as chrono from "chrono-node";
-import { parseMalayalamDateTime } from "./malayalamDateParser";
+import { parseMalayalamDateTime, type ParsedDateTime } from "./malayalamDateParser";
 
 export const MALAYALAM_RANGE = /[ഀ-ൿ]/;
 
-export function parseNaturalLanguage(text: string): { title: string; date: Date | null } {
+// Ambiguity is reported only by the Malayalam parser today; chrono resolves
+// the equivalent English shape ("buy 5 apples in the morning") without ever
+// reading the count as an hour, so there is nothing to ask about there.
+export function parseNaturalLanguage(text: string): ParsedDateTime {
   if (!text.trim()) return { title: "", date: null };
 
   if (MALAYALAM_RANGE.test(text)) {

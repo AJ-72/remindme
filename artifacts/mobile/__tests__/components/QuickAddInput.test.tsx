@@ -176,6 +176,64 @@ describe("QuickAddInput", () => {
     expect(stored[0].title).toBe("മീറ്റിംഗ്");
   });
 
+  // A numeral next to a period word is genuinely undecidable — "രാവിലെ 5" is
+  // both "at 5 AM" and "5 <things>, in the morning". Saving on a guess quietly
+  // deletes the count from the user's own text, so the app asks once.
+  it("asks which reading is meant instead of saving an ambiguous numeral", async () => {
+    const { findByTestId, findByText, queryByText } = renderComponent();
+
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.changeText(titleInput, "രാവിലെ 5 ആപ്പിൾ വാങ്ങണം");
+
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    // Nothing is written until the user answers.
+    expect(await findByText('Is "5" the time?')).toBeTruthy();
+    expect(await AsyncStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(queryByText("ആപ്പിൾ വാങ്ങണം")).toBeTruthy(); // the "it's the hour" row
+  });
+
+  it("keeps the count in the title when the user says the numeral is not a time", async () => {
+    const { findByTestId, findByText } = renderComponent();
+
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.changeText(titleInput, "രാവിലെ 5 ആപ്പിൾ വാങ്ങണം");
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    fireEvent.press(await findByText("5 ആപ്പിൾ വാങ്ങണം"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].title).toBe("5 ആപ്പിൾ വാങ്ങണം");
+    expect(new Date(stored[0].datetime).getHours()).toBe(9);
+  });
+
+  it("uses the numeral as the hour when the user says it is a time", async () => {
+    const { findByTestId, findByText } = renderComponent();
+
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.changeText(titleInput, "രാവിലെ 5 ആപ്പിൾ വാങ്ങണം");
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    fireEvent.press(await findByText("ആപ്പിൾ വാങ്ങണം"));
+
+    // 05:00 falls inside the default quiet hours (22:00-08:00), so the save
+    // detours through that sheet. The chosen title has to survive the detour —
+    // it is held in a ref, since the parsed title is the wrong one here.
+    fireEvent.press(await findByTestId("quiet-hours-sheet-keep"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].title).toBe("ആപ്പിൾ വാങ്ങണം");
+    expect(new Date(stored[0].datetime).getHours()).toBe(5);
+  });
+
   it("parses a Malayalam speech-transcript-shaped spelled-out-number string via the mic result path", async () => {
     const { findByTestId, findByText } = renderComponent();
     const titleInput = await findByTestId("quick-add-input");

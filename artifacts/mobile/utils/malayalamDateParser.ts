@@ -235,6 +235,33 @@ interface ClockMatch {
   matchedText: string | string[];
   hour: number;
   minute: number;
+  // Set when the hour came from a bare numeral next to a period word, where
+  // "രാവിലെ 5" is equally "at 5 AM" and "5 <thing>, in the morning". Nothing
+  // lexical separates the two, so the parser reports the ambiguity upward and
+  // the UI asks rather than picking one and being silently wrong half the time.
+  ambiguous?: boolean;
+  // The numeral as the user typed it, for the confirmation prompt.
+  ambiguousNumberText?: string;
+}
+
+// A reading of the input the user can be offered when the parse is ambiguous.
+export interface ParsedReading {
+  title: string;
+  date: Date | null;
+}
+
+export interface ParsedAmbiguity {
+  // The numeral in question, e.g. "5".
+  numberText: string;
+  // Reading it as the hour: 05:00, numeral removed from the title.
+  asTime: ParsedReading;
+  // Reading it as part of the reminder: numeral kept, time from whatever else
+  // the sentence says (usually the period word's default hour, or none).
+  asText: ParsedReading;
+}
+
+export interface ParsedDateTime extends ParsedReading {
+  ambiguity?: ParsedAmbiguity;
 }
 
 const PERIOD_WORDS: { word: string; bias: "AM" | "PM"; defaultHour: number }[] = [
@@ -359,7 +386,11 @@ function resolveWrittenHour(
   return { hour: applyBareHourBias(rawHour), minute };
 }
 
-function resolveClockTime(text: string, hasDayContext: boolean): ClockMatch | null {
+function resolveClockTime(
+  text: string,
+  hasDayContext: boolean,
+  allowBareNumeralHour = true
+): ClockMatch | null {
   // Every dot-separated candidate has to clear these two guards; a colon is
   // unambiguous and skips the first.
   const acceptsClock = (match: RegExpMatchArray): boolean => {
@@ -487,7 +518,7 @@ function resolveClockTime(text: string, hasDayContext: boolean): ClockMatch | nu
   // period word is part of the title ("രാവിലെ 2 ഗുളിക 8 മണിക്ക്" is 8, not 2).
   const hasExplicitHourWord = new RegExp(`(?:${NUMBER_PATTERN})\\s*${HOUR_UNIT}`).test(text);
   for (const period of PERIOD_WORDS) {
-    if (hasExplicitHourWord) break;
+    if (hasExplicitHourWord || !allowBareNumeralHour) break;
     const digitOrderedShapes = [
       // Period word first: it is its own left boundary, and the whole match
       // (word included) is what gets stripped from the title.
@@ -512,6 +543,8 @@ function resolveClockTime(text: string, hasDayContext: boolean): ClockMatch | nu
           matchedText: hasLead ? clockText(match) : match[0],
           hour: applyBias(rawHour, period.bias),
           minute: 0,
+          ambiguous: true,
+          ambiguousNumberText: match[hourGroup],
         };
       }
     }
@@ -573,7 +606,7 @@ function resolveClockTime(text: string, hasDayContext: boolean): ClockMatch | nu
 export function parseMalayalamDateTime(
   text: string,
   now: Date = new Date()
-): { title: string; date: Date | null } {
+): ParsedDateTime {
   if (!text.trim()) return { title: "", date: null };
 
   // Normalize whitespace early (collapsing runs of whitespace to single space)
@@ -607,5 +640,39 @@ export function parseMalayalamDateTime(
     ? stripMatch(remainingAfterDay, clockMatch.matchedText)
     : remainingAfterDay;
 
-  return { title: cleanTitle(remainingAfterClock) || cleanTitle(normalizedText), date: composed };
+  const asTime: ParsedReading = {
+    title: cleanTitle(remainingAfterClock) || cleanTitle(normalizedText),
+    date: composed,
+  };
+
+  // When the hour rested on a bare numeral next to a period word, resolve the
+  // sentence a second time with that branch switched off. That second pass is
+  // the "the number is part of what I'm reminding myself about" reading, and
+  // handing both to the caller is what lets the UI ask instead of guess.
+  if (clockMatch?.ambiguous) {
+    const withoutBareHour = resolveClockTime(remainingAfterDay, dayMatch !== null, false);
+    const alternativeDay = new Date(dayMatch ? dayMatch.targetDay : startOfDay(now));
+    if (withoutBareHour) {
+      alternativeDay.setHours(withoutBareHour.hour, withoutBareHour.minute, 0, 0);
+    } else {
+      alternativeDay.setHours(9, 0, 0, 0);
+    }
+    const alternativeText = withoutBareHour
+      ? stripMatch(remainingAfterDay, withoutBareHour.matchedText)
+      : remainingAfterDay;
+
+    return {
+      ...asTime,
+      ambiguity: {
+        numberText: clockMatch.ambiguousNumberText ?? "",
+        asTime,
+        asText: {
+          title: cleanTitle(alternativeText) || cleanTitle(normalizedText),
+          date: alternativeDay,
+        },
+      },
+    };
+  }
+
+  return asTime;
 }
