@@ -30,13 +30,17 @@ Tier 1 shipped 2026-08-17 and was device-verified 2026-08-30 (D9). It is **not**
 
 ## Two decisions this plan needs before Phase 0
 
-**1. How does the mobile app talk to the backend?** The repo has an OpenAPI → orval codegen pipeline (`lib/api-spec` → `lib/api-client-react` → `lib/api-zod`) with one health route flowing through it.
+**1. ~~How does the mobile app talk to the backend?~~ Settled 2026-08-30 — see [ADR 0001](../../adr/0001-client-talks-to-edge-functions-not-postgrest.md).** Edge Functions only; PostgREST is not exposed to the client. RLS on every table underneath as defence in depth. Functions act **as the calling user**, never as the service role, except the two operations that structurally cannot (claim and lookup). `artifacts/api-server` is deleted; the OpenAPI pipeline is kept for the Edge Function endpoints. The reasoning, kept because it will otherwise be re-litigated:
 
 *Recommendation, to confirm before starting:* the mobile app uses **`supabase-js` directly** for auth and RLS-protected reads/writes, and **Edge Functions only for privileged operations** — number binding, OTP, hash lookup, and invitation claim. Those Edge Function endpoints are the only things worth describing in `openapi.yaml`.
 
 The consequence is that **`artifacts/api-server` has no remaining purpose** and should be deleted rather than left as a decoy. That is a real call and should be made deliberately, not by drift.
 
-**2. There is no server-side test harness, and this repo's whole test story is mobile Jest.** Postgres RLS policies, the `SECURITY DEFINER` claim function, and Edge Functions cannot be covered by `npx jest` in `artifacts/mobile`. Untested RLS is the same class of risk as an untested alarm — invisible until it matters. T0.1 exists to fix this and is deliberately the first task in the plan.
+**2. ~~There is no server-side test harness~~ — built 2026-08-30, and the approach changed.** The plan assumed a local Supabase stack via Docker and the Supabase CLI. It uses **PGlite** instead — real Postgres compiled to WASM, running in-process — so RLS tests run inside an ordinary `vitest run` with **no Docker daemon, no CLI, and nothing to start**. That matters beyond convenience: a harness needing infrastructure is a harness people skip, and this one is the gate on every security property in the design.
+
+**The trap it is built to prevent:** a superuser bypasses RLS entirely, and PGlite's default connection is one. A harness that forgot to switch roles would report every policy as working while enforcing nothing — false confidence, which is worse than no tests. So `rlsHarness.ts` exposes no way to run a query as the superuser; everything goes through `asUser` or `asAnon`, identity is transaction-scoped so it cannot leak between queries, and one test asserts `current_user = 'authenticated'` against a table with RLS on and no policy. All three tests were verified to fail when the role switch is deliberately removed — so they have teeth rather than merely existing.
+
+Edge Functions still need their own tests; that is not yet built.
 
 ## Scope
 
@@ -58,7 +62,7 @@ The spec's build-order step 0. The first draft folded this into "schema" and und
 
 | # | Task | Notes |
 |---|---|---|
-| T0.1 | **Server-side test harness** | Local Supabase via CLI + a runner that can execute SQL as a given role. Every later RLS task depends on this. **Do not skip to make progress feel faster.** |
+| T0.1 | **Server-side test harness** | **DONE 2026-08-30.** `lib/db/src/testing/rlsHarness.ts`, run by `pnpm --filter @workspace/db run test`. **No Docker, no Supabase CLI** — see below. Every later RLS task depends on it. |
 | T0.2 | Device key generation + `expo-secure-store` | Key generated once, never leaves the device. Assert it survives app restart and is absent on a fresh install |
 | T0.3 | Session handling in the mobile client | Anonymous-by-default; a session exists only after binding. A user who never binds must make **zero** network calls — assert this |
 | T0.4 | OTP provider account + send/verify wrapper | Behind an interface so the provider is swappable. Check whether the chosen Indian provider is natively supported by Supabase Auth; if not, this lives in an Edge Function |
@@ -178,7 +182,7 @@ The spec's build-order step 0. The first draft folded this into "schema" and und
 
 **Mobile Jest** (`npx jest` from `artifacts/mobile`) — 567 passing at Tier 1; all must stay green. Covers the client: normalization agreement, status transitions, reachability caching, UI sections, copy.
 
-**Server tests** (new, T0.1) — RLS policies, the claim function, rate limiting. **This repo has never had these.** An untested RLS policy fails the way an untested alarm fails: silently, and only in production.
+**Server tests** — `pnpm --filter @workspace/db run test` (vitest + PGlite). RLS policies, the claim function, rate limiting. **This repo had never had these.** An untested RLS policy fails the way an untested alarm fails: silently, and only in production.
 
 **Typecheck** — `pnpm run typecheck` from root.
 
@@ -194,7 +198,7 @@ Highest-value early runs: **D32** (rung 1 shows no verification screen), **D33**
 ## Risks
 
 1. **The identity model was wrong once already.** The first draft allowed permanent number squatting. The verification ladder fixes it, but T1.8 (the `SECURITY DEFINER` claim function) is where that fix lives or dies. Review it adversarially, not as ordinary code.
-2. **No server-side testing culture exists here.** T0.1 is the mitigation and it is first for that reason. Skipping it to reach visible progress is the single most likely way this ends up with an RLS hole.
+2. **No server-side testing culture exists here.** T0.1 is the mitigation and shipped first for that reason. The remaining risk is narrower but real: the harness exists, so every Phase 1 table task now has no excuse for landing without a test proving the wrong caller is refused. A table shipping without one is the single most likely way this ends up with an RLS hole.
 3. **Cancel is not absolute and the copy must never say it is.** Backlog item 20 is a whole item about a label that promised more than the system delivered. Do not repeat it.
 4. **The two-way sync is untested by anyone.** The adversarial review never attacked it. Read that silence as untested, not as approved.
 5. **Operational commitment with no end date** — uptime, FCM rotation, backups, $25/month, for a free app with no monetisation. Most likely failure mode in year two.
