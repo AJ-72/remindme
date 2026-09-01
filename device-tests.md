@@ -1584,3 +1584,11 @@ characters these patterns expect.
 - [ ] PENDING — Dictate (mic, Malayalam) a numeral time and check whether the
       recognizer writes `11.30`, `11:30` or `11 30`. The first two now parse;
       a space-separated form still does not.
+- [ ] PENDING — Type `പാൽ 2.50 രൂപ വാങ്ങണം`. No time chip may appear, the
+      title must keep `2.50`, and tapping save must open the no-time sheet
+      with a picker rather than scheduling anything.
+- [ ] PENDING — Type `ഇന്ന് 18.00 മീറ്റിംഗ്` (24-hour). Chip must read
+      `Today · 18:00`, not `09:00`.
+- [ ] PENDING — Type `ഇന്ന് 00.30 മരുന്ന്`. Chip must read `Today · 00:30`
+      and the notification must actually fire after midnight, not at 09:00 —
+      the 24-hour path is new and midnight was previously unreachable.

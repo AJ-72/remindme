@@ -71,16 +71,60 @@ const HOUR_UNIT = `മണി(?!ക്കൂ)(?:യ്)?(?:ക്ക്?)?`;
 // normalizes either shape.
 const DIGIT = `[\\d൦-൯]`;
 
+// Characters that, sitting against a clock-shaped token, prove it is really
+// part of a longer number: another digit, or a decimal/thousands separator.
+// "111.30" and "2.50.10" must not yield 11:30 and 2:50.
+const CLOCK_NEIGHBOR = `[\\d൦-൯.,]`;
+
+// Left boundary for a clock. A capturing group rather than a lookbehind:
+// Hermes (React Native's engine) has historically shipped without lookbehind,
+// and one wrong assumption there is a crash on device that no jsdom test sees.
+// The group consumes one character, so every branch using COLON_TIME must
+// strip it back off the match before using it as the text to remove — that is
+// what clockText() below is for, and why the capture indices are offset by one.
+const CLOCK_LEAD = `(^|[^\\d൦-൯.,])`;
+
 // A written clock time, e.g. "7:30" or "7.30", optionally followed by the
 // temporal particle ന് ("at"). A dot is at least as common as a colon when
-// typing Malayalam on a phone keyboard, and speech recognizers emit it too.
-// 12-hour clock only — see the 1..12 validation below.
-const COLON_TIME = `(${DIGIT}{1,2})[:.](${DIGIT}{2})(?:\\s*ന്)?`;
+// typing Malayalam on a phone keyboard, and speech recognizers emit it too —
+// but unlike a colon it is also a decimal point, so a dot time additionally
+// has to clear needsTimeContext() below.
+//
+// Captures (offset by the CLOCK_LEAD group): 1 lead, 2 hour, 3 minute.
+const COLON_TIME = `${CLOCK_LEAD}(${DIGIT}{1,2})([:.])(${DIGIT}{2})(?:\\s*${HOUR_UNIT})?(?:\\s*ന്)?(?!${CLOCK_NEIGHBOR})`;
+
+// Group offsets into a COLON_TIME match: [0] whole, [1] lead, [2] hour,
+// [3] separator, [4] minute. Named so a later edit to the pattern has one
+// place to update rather than four numeric literals per branch.
+const CLOCK_LEAD_GROUP = 1;
+const CLOCK_HOUR_GROUP = 2;
+const CLOCK_SEP_GROUP = 3;
+const CLOCK_MINUTE_GROUP = 4;
+
+// The matched text minus the boundary character CLOCK_LEAD had to consume.
+// Removing that character too would eat the space — harmless — or the last
+// letter of the preceding word — not harmless.
+function clockText(match: RegExpMatchArray, leadGroup = CLOCK_LEAD_GROUP): string {
+  return match[0].slice(match[leadGroup].length);
+}
+
+// Words that make a preceding number a quantity, not an hour: currency,
+// weights, volumes, counts. "2.50 രൂപ" and "രാവിലെ 2 കിലോ പഞ്ചസാര" are a price
+// and a weight, and reading either as a time both invents a reminder time and
+// deletes the number from the title the user typed.
+const QUANTITY_UNITS = `(?:രൂപ|കിലോ|കി\\.?ഗ്രാം|ഗ്രാം|ലിറ്റർ|മില്ലി|പാക്ക(?:റ്റ്|െറ്റ്)|കുപ്പി|ഡസൻ|എണ്ണം|ശതമാനം|%)`;
 
 // English meridiem markers. Malayalam input is very often mixed-script for the
 // clock part specifically ("ഇന്ന് 10.30 am"), so am/pm has to bias the hour
 // the same way the Malayalam period words do.
-const MERIDIEM = `(a\\.?\\s?m\\.?|p\\.?\\s?m\\.?)`;
+//
+// The trailing guard is load-bearing: without it "10 ampere" reads as 10 am
+// and leaves "pere" in the title. The internal space that once allowed "a m"
+// is gone for the same reason — it matched across "9 a moment".
+const MERIDIEM = `(a\\.?m\\.?|p\\.?m\\.?)(?![a-z])`;
+
+// Malayalam often takes a dative particle after an English time: "3 pm-ന്".
+const MERIDIEM_TAIL = `(?:\\s*-?\\s*ന്)?`;
 
 // Fused fraction-of-hour words. Malayalam fuses the hour and the fraction
 // into one token — അഞ്ച് + അര becomes അഞ്ചര — so the two-token "അര മണി"
@@ -281,27 +325,74 @@ function matchFusedFraction(
   return null;
 }
 
-function resolveClockTime(text: string): ClockMatch | null {
+// A dot is a decimal point as often as it is a clock separator, so a
+// dot-separated time is only believed when something else in the sentence says
+// "time": a day word (stripped before we get here, hence the flag), a period
+// word, മണി, the dative ന്, or an am/pm marker. Without that, "2.50 രൂപ" and
+// "ആപ്പ് 1.20" would silently become 2:50 and 13:20.
+function hasTimeContext(text: string, hasDayContext: boolean): boolean {
+  if (hasDayContext) return true;
+  if (PERIOD_WORDS.some((p) => text.includes(p.word))) return true;
+  return new RegExp(`${HOUR_UNIT}|ന്|${MERIDIEM}`, "i").test(text);
+}
+
+// True when the clock-shaped token is really a measured quantity: "2.50 രൂപ".
+// Checked even with time context present, because "ഇന്ന് പാൽ 2.50 രൂപ" has both.
+function isQuantity(text: string, matchEnd: number): boolean {
+  return new RegExp(`^\\s*${QUANTITY_UNITS}`).test(text.slice(matchEnd));
+}
+
+// Accepts a written clock time on either the 12- or the 24-hour dial. 13-23 is
+// read verbatim: someone typing 18.00 means 18:00, and the old 1..12-only
+// range silently discarded it and fell through to the 9 AM day default.
+// Returns null for a minute over 59 or an hour over 23 so the caller can keep
+// looking rather than invent a time.
+function resolveWrittenHour(
+  rawHour: number,
+  minute: number,
+  bias: "AM" | "PM" | null
+): { hour: number; minute: number } | null {
+  if (minute > 59 || rawHour > 23) return null;
+  if (rawHour > 12) return { hour: rawHour, minute };
+  if (rawHour === 0) return { hour: 0, minute };
+  if (bias) return { hour: applyBias(rawHour, bias), minute };
+  return { hour: applyBareHourBias(rawHour), minute };
+}
+
+function resolveClockTime(text: string, hasDayContext: boolean): ClockMatch | null {
+  // Every dot-separated candidate has to clear these two guards; a colon is
+  // unambiguous and skips the first.
+  const acceptsClock = (match: RegExpMatchArray): boolean => {
+    const isDot = match[CLOCK_SEP_GROUP] === ".";
+    if (isDot && !hasTimeContext(text, hasDayContext)) return false;
+    return !isQuantity(text, (match.index ?? 0) + match[0].length);
+  };
+
   // An explicit am/pm wins over every other reading, so it is tried first,
   // both with a full clock time ("10.30 am") and a bare hour ("10 am").
-  const meridiemClock = text.match(new RegExp(`${COLON_TIME}\\s*${MERIDIEM}`, "i"));
-  if (meridiemClock) {
-    const rawHour = parseMalayalamNumber(meridiemClock[1]);
-    const minute = parseMalayalamNumber(meridiemClock[2]);
-    const bias = meridiemClock[3][0].toLowerCase() === "p" ? "PM" : "AM";
+  const meridiemClock = text.match(
+    new RegExp(`${COLON_TIME}\\s*${MERIDIEM}${MERIDIEM_TAIL}`, "i")
+  );
+  if (meridiemClock && !isQuantity(text, (meridiemClock.index ?? 0) + meridiemClock[0].length)) {
+    const rawHour = parseMalayalamNumber(meridiemClock[CLOCK_HOUR_GROUP]);
+    const minute = parseMalayalamNumber(meridiemClock[CLOCK_MINUTE_GROUP]);
+    const bias = meridiemClock[CLOCK_MINUTE_GROUP + 1][0].toLowerCase() === "p" ? "PM" : "AM";
     if (rawHour !== null && minute !== null && rawHour >= 1 && rawHour <= 12 && minute <= 59) {
-      return { matchedText: meridiemClock[0], hour: applyMeridiem(rawHour, bias), minute };
+      return { matchedText: clockText(meridiemClock), hour: applyMeridiem(rawHour, bias), minute };
     }
   }
 
   const meridiemHour = text.match(
-    new RegExp(`(${DIGIT}{1,2})\\s*(?:${HOUR_UNIT})?\\s*${MERIDIEM}`, "i")
+    new RegExp(
+      `${CLOCK_LEAD}(${DIGIT}{1,2})\\s*(?:${HOUR_UNIT})?\\s*${MERIDIEM}${MERIDIEM_TAIL}`,
+      "i"
+    )
   );
-  if (meridiemHour) {
-    const rawHour = parseMalayalamNumber(meridiemHour[1]);
-    const bias = meridiemHour[2][0].toLowerCase() === "p" ? "PM" : "AM";
+  if (meridiemHour && !isQuantity(text, (meridiemHour.index ?? 0) + meridiemHour[0].length)) {
+    const rawHour = parseMalayalamNumber(meridiemHour[2]);
+    const bias = meridiemHour[3][0].toLowerCase() === "p" ? "PM" : "AM";
     if (rawHour !== null && rawHour >= 1 && rawHour <= 12) {
-      return { matchedText: meridiemHour[0], hour: applyMeridiem(rawHour, bias), minute: 0 };
+      return { matchedText: clockText(meridiemHour), hour: applyMeridiem(rawHour, bias), minute: 0 };
     }
   }
 
@@ -344,21 +435,25 @@ function resolveClockTime(text: string): ClockMatch | null {
   }
 
   for (const period of PERIOD_WORDS) {
-    const colonOrderedRegexes = [
-      new RegExp(`${period.word}\\s*${COLON_TIME}`),
-      new RegExp(`${COLON_TIME}\\s*${period.word}`),
+    // Same asymmetry as the bare-numeral shapes below: when the period word
+    // comes first it precedes CLOCK_LEAD, so the boundary character sits in the
+    // middle of the match and the whole match is what gets stripped. Slicing by
+    // the lead group there would take the period word's first letter with it.
+    const colonOrderedShapes = [
+      { regex: new RegExp(`${period.word}\\s*${COLON_TIME}`), hasLead: false },
+      { regex: new RegExp(`${COLON_TIME}\\s*${period.word}`), hasLead: true },
     ];
-    for (const regex of colonOrderedRegexes) {
+    for (const { regex, hasLead } of colonOrderedShapes) {
       const match = text.match(regex);
-      if (match) {
-        const rawHour = parseMalayalamNumber(match[1]);
-        const minute = parseMalayalamNumber(match[2]);
-        if (rawHour !== null && minute !== null && rawHour >= 1 && rawHour <= 12 && minute <= 59) {
-          return {
-            matchedText: match[0],
-            hour: applyBias(rawHour, period.bias),
-            minute,
-          };
+      if (match && acceptsClock(match)) {
+        const rawHour = parseMalayalamNumber(match[CLOCK_HOUR_GROUP]);
+        const minute = parseMalayalamNumber(match[CLOCK_MINUTE_GROUP]);
+        const resolved =
+          rawHour !== null && minute !== null
+            ? resolveWrittenHour(rawHour, minute, period.bias)
+            : null;
+        if (resolved) {
+          return { matchedText: hasLead ? clockText(match) : match[0], ...resolved };
         }
       }
     }
@@ -393,21 +488,31 @@ function resolveClockTime(text: string): ClockMatch | null {
   const hasExplicitHourWord = new RegExp(`(?:${NUMBER_PATTERN})\\s*${HOUR_UNIT}`).test(text);
   for (const period of PERIOD_WORDS) {
     if (hasExplicitHourWord) break;
-    const digitOrderedRegexes = [
-      new RegExp(`${period.word}\\s*(${DIGIT}{1,2})(?!${DIGIT}|[:.])`),
-      new RegExp(`(${DIGIT}{1,2})(?!${DIGIT}|[:.])\\s*${period.word}`),
+    const digitOrderedShapes = [
+      // Period word first: it is its own left boundary, and the whole match
+      // (word included) is what gets stripped from the title.
+      {
+        regex: new RegExp(`${period.word}\\s*(${DIGIT}{1,2})(?!${CLOCK_NEIGHBOR})`),
+        hourGroup: 1,
+        hasLead: false,
+      },
+      // Numeral first: needs the explicit boundary so it cannot start mid-number.
+      {
+        regex: new RegExp(`${CLOCK_LEAD}(${DIGIT}{1,2})(?!${CLOCK_NEIGHBOR})\\s*${period.word}`),
+        hourGroup: 2,
+        hasLead: true,
+      },
     ];
-    for (const regex of digitOrderedRegexes) {
+    for (const { regex, hourGroup, hasLead } of digitOrderedShapes) {
       const match = text.match(regex);
-      if (match) {
-        const rawHour = parseMalayalamNumber(match[1]);
-        if (rawHour !== null && rawHour >= 1 && rawHour <= 12) {
-          return {
-            matchedText: match[0],
-            hour: applyBias(rawHour, period.bias),
-            minute: 0,
-          };
-        }
+      if (!match || isQuantity(text, (match.index ?? 0) + match[0].length)) continue;
+      const rawHour = parseMalayalamNumber(match[hourGroup]);
+      if (rawHour !== null && rawHour >= 1 && rawHour <= 12) {
+        return {
+          matchedText: hasLead ? clockText(match) : match[0],
+          hour: applyBias(rawHour, period.bias),
+          minute: 0,
+        };
       }
     }
   }
@@ -433,15 +538,13 @@ function resolveClockTime(text: string): ClockMatch | null {
   }
 
   const colonMatch = text.match(new RegExp(COLON_TIME));
-  if (colonMatch) {
-    const rawHour = parseMalayalamNumber(colonMatch[1]);
-    const minute = parseMalayalamNumber(colonMatch[2]);
-    if (rawHour !== null && minute !== null && rawHour >= 1 && rawHour <= 12 && minute <= 59) {
-      return {
-        matchedText: colonMatch[0],
-        hour: applyBareHourBias(rawHour),
-        minute,
-      };
+  if (colonMatch && acceptsClock(colonMatch)) {
+    const rawHour = parseMalayalamNumber(colonMatch[CLOCK_HOUR_GROUP]);
+    const minute = parseMalayalamNumber(colonMatch[CLOCK_MINUTE_GROUP]);
+    const resolved =
+      rawHour !== null && minute !== null ? resolveWrittenHour(rawHour, minute, null) : null;
+    if (resolved) {
+      return { matchedText: clockText(colonMatch), ...resolved };
     }
   }
 
@@ -487,7 +590,7 @@ export function parseMalayalamDateTime(
   const dayMatch = resolveWeekday(normalizedText, now) ?? resolveRelativeDay(normalizedText, now);
   const remainingAfterDay = dayMatch ? stripMatch(normalizedText, dayMatch.matchedText) : normalizedText;
 
-  const clockMatch = resolveClockTime(remainingAfterDay);
+  const clockMatch = resolveClockTime(remainingAfterDay, dayMatch !== null);
 
   if (!dayMatch && !clockMatch) {
     return { title: cleanTitle(normalizedText), date: null };

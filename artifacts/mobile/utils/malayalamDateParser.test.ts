@@ -546,3 +546,89 @@ describe("parseMalayalamDateTime — period word with a bare numeral", () => {
     expect(date!.getHours()).toBe(8);
   });
 });
+
+// Adversarial cases from an exploratory sweep. Each one previously produced a
+// confidently wrong time, and most also deleted the number from the user's
+// title — the worse half of the failure, since a wrong time is visible on the
+// chip and a missing quantity is not.
+describe("parseMalayalamDateTime — numbers that are not times", () => {
+  const now = new Date("2026-09-01T10:00:00");
+
+  it.each([
+    ["a price", "പാൽ 2.50 രൂപ വാങ്ങണം"],
+    ["a weight", "അരി 5.50 കിലോ വാങ്ങണം"],
+    ["a version number", "ആപ്പ് 1.20 അപ്ഡേറ്റ് ചെയ്യണം"],
+    ["a dd.mm date", "ബിൽ 12.09 അടയ്ക്കണം"],
+    ["a longer digit run", "അക്കൗണ്ട് 111.30 നോക്കണം"],
+    ["a phone number", "വിളിക്കുക 9876.5432"],
+  ])("returns no date for %s, leaving the text intact", (_label, input) => {
+    const { title, date } = parseMalayalamDateTime(input, now);
+    expect(date).toBeNull();
+    expect(title).toBe(input);
+  });
+
+  it("does not read a quantity next to a period word as an hour", () => {
+    const { title, date } = parseMalayalamDateTime("രാവിലെ 2 കിലോ പഞ്ചസാര വാങ്ങണം", now);
+    expect(date!.getHours()).toBe(9); // the period word's own default, not 02:00
+    expect(title).toBe("2 കിലോ പഞ്ചസാര വാങ്ങണം"); // the quantity survives
+  });
+
+  it("keeps a dot time when the sentence gives time context", () => {
+    // Same shape as the price case above; ഇന്ന് is what makes it a time.
+    const { date } = parseMalayalamDateTime("ഇന്ന് 2.50 മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(14);
+    expect(date!.getMinutes()).toBe(50);
+  });
+});
+
+describe("parseMalayalamDateTime — am/pm must not match inside a word", () => {
+  const now = new Date("2026-09-01T10:00:00");
+
+  it.each([
+    ["ampere", "ഇന്ന് 10 ampere വാങ്ങണം"],
+    ["pmc", "ഇന്ന് 3 pmc ഫയൽ"],
+    ["a moment", "ഇന്ന് 9 a moment കഴിഞ്ഞ്"],
+  ])("does not treat %s as a meridiem marker", (_label, input) => {
+    const { title, date } = parseMalayalamDateTime(input, now);
+    expect(date!.getHours()).toBe(9); // day default, no time claimed
+    expect(title).toBe(input.replace("ഇന്ന് ", "")); // no letters eaten
+  });
+
+  it("accepts a meridiem with the dative particle attached", () => {
+    const { title, date } = parseMalayalamDateTime("ഇന്ന് 3 pm-ന് മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(15);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+});
+
+describe("parseMalayalamDateTime — 24-hour clock input", () => {
+  const now = new Date("2026-09-01T10:00:00");
+
+  it.each([
+    ["18.00", 18, 0],
+    ["23.45", 23, 45],
+    ["00.30", 0, 30],
+    ["13:15", 13, 15],
+  ])("reads %s verbatim rather than falling back to 9 AM", (time, hour, minute) => {
+    const { title, date } = parseMalayalamDateTime(`ഇന്ന് ${time} മീറ്റിംഗ്`, now);
+    expect(date!.getHours()).toBe(hour);
+    expect(date!.getMinutes()).toBe(minute);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+
+  it("still refuses an impossible minute instead of inventing a time", () => {
+    const { title } = parseMalayalamDateTime("ഇന്ന് 10.75 മരുന്ന്", now);
+    expect(title).toBe("10.75 മരുന്ന്"); // left visible for the user to correct
+  });
+});
+
+describe("parseMalayalamDateTime — hour unit after a written time", () => {
+  const now = new Date("2026-09-01T10:00:00");
+
+  it("swallows a trailing മണിക്ക് instead of stranding it in the title", () => {
+    const { title, date } = parseMalayalamDateTime("ഇന്ന് 11.30 മണിക്ക് മീറ്റിംഗ്", now);
+    expect(date!.getHours()).toBe(11);
+    expect(date!.getMinutes()).toBe(30);
+    expect(title).toBe("മീറ്റിംഗ്");
+  });
+});
