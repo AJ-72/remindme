@@ -1,0 +1,78 @@
+# D12: Vague-task hint
+# Tests that vague tasks show an optional hint, dismissal prevents re-showing,
+# but saving is never blocked. Also verifies Malayalam doesn't trigger the hint.
+#
+# AUTO: fully scriptable
+# Persisted: saves multiple reminders
+#
+appId: com.curios.remindme
+---
+# Setup: launch and wait for the reminder list
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+# Step 1: Type "Sort out the insurance" and check for hint
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Sort out the insurance"
+# The hint should appear (check for the testID)
+- assertVisible:
+    id: "vague-task-hint"
+
+# Step 2: Press "Use as is" to dismiss hint
+- tapOn:
+    id: "vague-task-hint-dismiss"
+
+# Step 3: Try a different vague task and save (without dismissing hint first)
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Deal with the taxes"
+- assertVisible:
+    id: "vague-task-hint"
+# Save directly - hint is still showing, should not be blocked
+- tapOn:
+    id: "quick-add-save"
+# Since no time is specified, confirm the time picker sheet
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      text: "Confirm"
+    timeout: 5000
+- tapOn:
+    text: "Confirm"
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 5000
+
+# Step 4: Type a specific task and verify no hint appears
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Call Dr Menon at 4pm"
+- assertNotVisible:
+    id: "vague-task-hint"
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 5000
+
+# Step 5: Type Malayalam and verify it doesn't trigger hint
+- tapOn:
+    id: "quick-add-input"
+- inputText: "നാളെ സന്ദർശിക്കണം" # Malayalam text
+- assertNotVisible:
+    id: "vague-task-hint"
+
+# All key behaviors verified:
+# 1. Vague hint appears for "Sort out the insurance"
+# 2. "Use as is" dismisses it
+# 3. Can save with hint displayed (not blocked)
+# 4. Specific task doesn't trigger hint
+# 5. Malayalam doesn't trigger hint

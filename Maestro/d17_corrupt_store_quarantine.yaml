@@ -1,0 +1,58 @@
+# D17: Corrupt-store quarantine
+# Tests that corrupted AsyncStorage data doesn't crash the app,
+# but instead gets quarantined and the app recovers.
+#
+# AUTO: fully scriptable via sqlite inspection with run-as
+# Requires: debuggable build (development profile with developmentClient: true)
+#
+# Note: This test is heavily dependent on file system access and
+# build configuration. The flow validates that the app launches and
+# loads, but the detailed quarantine verification requires adb + run-as
+# access to the app's files.
+#
+appId: com.curios.remindme
+---
+# Setup: launch the app
+# NOTE: clearState:true fails on this device with a SecurityException
+# (PID does not have permission CLEAR_APP_USER_DATA) - confirmed 2026-09-04.
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+# Create a valid reminder
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Test reminder before corruption"
+- tapOn:
+    id: "quick-add-save"
+# No time phrase in the text, so parsedDate stays null and handleSave
+# opens the "No time found" sheet (see QuickAddInput.tsx) instead of
+# saving immediately - confirm it to actually persist the reminder.
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      text: "Confirm"
+    timeout: 5000
+- tapOn:
+    text: "Confirm"
+- waitForAnimationToEnd
+# List accumulates across runs (no working clearState - see note above)
+# and is sorted by upcoming time, with the scroll distance growing each
+# run - scrollUntilVisible searches as far as needed.
+- scrollUntilVisible:
+    element:
+      text: "Test reminder before corruption"
+    direction: DOWN
+    timeout: 10000
+
+# At this point, the oracle is:
+# 1. Use adb + run-as to corrupt AsyncStorage data
+# 2. Kill and relaunch the app
+# 3. Verify it doesn't crash
+# 4. Verify the reminder list still loads (empty or partial)
+# 5. Check for quarantine files in app's data directory
+#
+# This test flow can only setup and verify the app's resilience;
+# actual corruption injection requires adb and build-specific access.

@@ -1,60 +1,105 @@
-P1. All project-related files/processes must stay inside the remindme project folder — no dependency on external paths. Currently local Android dev (Metro, pnpm store, build output) relies on things living outside the repo (e.g. a separate short-path junction/copy at C:\p, C:\n as a workaround for a Windows CMake/Ninja path-length bug — see system_learnings.md 2026-08-03 entries). Fix so Metro and the full local build/run flow work with everything self-contained under remindme, without requiring an external junction, copy, or relocated store.
+# Backlog
 
-1. Integrate with google drive to store the reminders to support migration of phone or reinstallation. [MANUAL BACKUP DONE 2026-08-10 — Settings now has "Back up reminders" (shares a JSON backup via the share sheet) and "Restore from backup" (paste the text back). Import **merges**: local always wins on conflict, and duplicates are dropped by content — same title at the same instant — not by id, so a reminder re-typed by hand after a reinstall isn't duplicated. `utils/reminderBackup.ts` holds the pure serialize/parse/merge logic; `buildBackupJson`/`importRemindersFromJson` in `ReminderService.ts` wrap it. Deliberately dependency-free (no `expo-document-picker`) so it ships over-the-air rather than needing a native build — this was a ship-blocker. STILL OPEN: actual Google Drive sync, and file-picker import instead of paste, both of which need a native build. **Check D1 (Device verification) FIRST** — Android Auto Backup is already enabled and appears to be running, so it may already cover phone-migration on Android and make Drive sync largely unnecessary; that test is cheap and changes the scope of this item.]
-2. Add audio support and image support [Audio half IN PROGRESS 2026-07-26 — voice-to-text via mic button + forwarded WhatsApp audio (Android only); image support still open. Fixed a real source/destination file-aliasing bug in `transcribeAudioFile()` (found via the debug modal across two rounds: `expo-share-intent` copies WhatsApp's content:// file into our own app cache dir under its original filename *before* handing us the path, so our own copy step was copying that file onto itself — "destination already exists" then "source doesn't exist" once a naive delete-before-copy was added). Real fix: the cached copy always uses a random-prefixed filename so it can never alias the source, and is deleted again after every attempt. LATEST: after that fix + rebuild, sharing now shows literally nothing — no notice, no debug modal, app just opens — meaning the failure is happening somewhere the debug-info wiring doesn't reach (e.g. before `NativeShareIntentCapture`'s effect even runs, or the effect isn't seeing a fresh `shareIntent`/`error` at all). Rather than keep guessing per-round, added a persistent `DebugLogService` (AsyncStorage-backed, survives app restarts) with `logDebug()` calls at every step of the share pipeline (provider mount, capture-component mount, every effect run with the raw `shareIntent`/`error` values, every branch taken, every `transcribeAudioFile` call/result) — plus a "Debug logs" row in Settings to view/share/clear them. Next step: reproduce the "nothing happens" share once more, then open Settings → Debug logs and send the contents — this will show exactly how far the pipeline got even with zero UI feedback]
-3. Integrate with calendars?
-4. Verify the snooze flow
-5. Show the reminder description in notification after taking user's consent [FIXED 2026-07-20]
-6. Make the textboxes cleaner. The place holder text is overflowing today. [FIXED 2026-07-20]
-7. Get a better icon for reminder app
-8. How to publish to playstore for beta
-9. Branding - Name of company should be CuriosMind Labs. Get an icon as well. Add an about tab and show an icon plus name as CuriousMind Labs [FIXED 2026-07-22 — placeholder icon only, app icon itself tracked separately in item 7]
-10. Bug - Editing and saving the description is not working. I don't see the updated text saved when i open the reminder again. [FIXED 2026-07-21]
-11. Bug - Tapping on mark as done in push notification doesn't make the push notificaiton disappear [FIXED 2026-07-21]
-12. To be triaged bug - The reminder doesn't work the first time unless I do an edit and save again. This is not always true, but noticed once or twice. Do a a systematic analysis of code to check that everyhing is correct.  [FIXED 2026-07-21 — likely cause; please re-verify on a fresh install]
-13. Feature enhancement - Its not easy to add a longer text in reminder box. Also, the ux is not intuitive to tell the user that they don't have to set the time manually and enter the reminder
-14. Feature improvement - the parsing of text to understand the time is not very strong. Research whether there is a better alternative
-15. Change the sorting of completed reminders. Sort by newest to oldest. Current reminders should be sorted by earliest reminder first in list [FIXED 2026-07-21]
-16. Bugs found after new build with speech enabled -1. Enabling the speech option always downloads the language package. 2. The content of the speech is not saved in the reminder box. The speech option remains turned on until I press the button again. 4. The language package is always US English. [FIXED 2026-07-23 — (1) check `installedLocales` via `getSupportedLocales()` before triggering a download, skip if already installed; (2)+(3) mic was using `continuous` multi-utterance mode, which segmented speech into multiple results (dropping/overwriting text) and never auto-stopped after a phrase, leaving the toggle stuck on — switched to single-utterance mode so it captures one phrase and turns off automatically; (4) added `expo-localization` and pass the device's actual locale to both the offline-model download and the recognizer's `lang` option instead of a hardcoded "en-US"]
-17. Support manglish and other regional langs typed in english but words are regional
+Open work, prioritized. Grouped by **dependency** first (independent items
+before ones that build on something else), then by **effort** within a group
+(cheapest first). Every item has a stable ID (`B#`/`M#`) — reference these in
+commits, code comments and `device-tests/`, not the row position.
 
-19. **Bug - un-completing a reminder never re-schedules its notification.** [FIXED 2026-08-28 — `toggleComplete` now re-arms on the un-complete branch: it sweeps by payload (`cancelScheduledForReminder`) plus the stored id, then calls `scheduleNotification`, and stores the returned id. Guarded on `datetime > now`, so **un-completing a past reminder leaves it overdue and unscheduled** rather than firing immediately or inventing a new time — that was the open design question and this is the answer. `markDoneById` was checked and has no equivalent gap: it only ever completes, never un-completes. Three tests added covering the future branch, the past branch, and that completing still schedules nothing. **Needs device verification — see D21**, since the failure mode is "never fired" and the old bug was masked by the 15-minute sweep.] Reported 2026-08-25 on device: moving a reminder from Done back to pending shows no alarm icon and the reminder never fires again. Confirmed in code — `toggleComplete` (`artifacts/mobile/services/ReminderService.ts:782-804`) cancels the notification when *completing*, but the un-complete branch only flips `completed`, restores `notificationId` and clears `completedAt`. It never calls `scheduleNotification`, so the reminder returns to the list looking pending while nothing is armed. `markDoneById` and the notification-action path need checking for the same gap.
+**Legacy numbers:** this file was renumbered on 2026-09-04 for scannability.
+Old plain-numbered items (referenced from code comments, tests, and other
+docs as "backlog item N") map to the new IDs in the **Legacy #** column below
+— old references still resolve via that column, do not renumber again.
 
-    **Not permanently dead, which is why it escaped notice:** `rescheduleAllFutureReminders` (BackgroundFetch, every ~15 min) skips only `completed || deliveryTime <= now`, so it re-arms the reminder on its next run. That makes the failure *intermittent* — up to 15 minutes late, and indefinitely if background fetch never runs, which is exactly what aggressive OEM power management prevents (see D7). A reminder un-completed for a time less than ~15 minutes away will usually just never fire.
+## Status legend
 
-    **Fix needs care on two points:** (a) only re-schedule when `datetime` is still in the future — un-completing a past reminder must not attempt to schedule in the past; (b) decide what un-completing a *past* reminder should mean (leave it overdue and unscheduled, or prompt for a new time). Add a test for both branches; the existing suite has no coverage of un-completion re-arming, which is how this shipped.
+| Status | Meaning |
+| --- | --- |
+| `OPEN` | Not started. |
+| `IN PROGRESS` | Partially built — see notes. |
+| `BLOCKED` | Can't proceed until a dependency or decision lands. |
+| `DEFERRED` | Deliberately postponed, not forgotten. |
+| `DONE` | Shipped. Kept here briefly for traceability, then safe to prune. |
 
-20. **Explain the permanent status-bar alarm icon, and make the alarm toggle's real meaning visible.** [FIXED 2026-08-28 — both pieces shipped. The toggle now reads **"Alarm — rings, and arrives on time"**, with the sub-label carrying the trade-off explicitly: "Rings out loud, and fires at exactly the time you set" / **"Silent, and may arrive up to 20 minutes late"**. Added an Android-only collapsible **"Why is there an alarm icon in my status bar?"** row directly beneath it — chosen over the About/"Why tasks slip" screens because the question occurs at the toggle, not in a doc. It states that the icon means a reminder is armed for its exact time, that it is not background activity or battery drain, and names Android's own escape hatch (Settings › Apps › Reminders › Allow setting alarms and reminders) along with what turning it off costs, plus a button that opens that screen via the existing `openExactAlarmSettings`. Six tests. **Needs device verification — see D22**, which includes verifying the copy's central claim is actually true on the ROM.] Since the D19 fix, an alarm-type reminder is scheduled with `AlarmManager.setAlarmClock()`, which is the only API OxygenOS/ColorOS honours (see D7/D19 in `device-tests.md`). A side effect is that the ⏰ icon sits in the status bar whenever any alarm-type reminder is pending — which, for this app, is most of the time. Confirmed on device 2026-08-25. Note the lock screen on that device does **not** show next-alarm text, so the icon is the whole cost there; **re-check on other OEMs**, where a masked clock alarm would be a much worse outcome than a persistent icon.
+## Effort legend
 
-    **The icon cannot be engineered away.** It appears if *any* `setAlarmClock()` registration is pending — one is enough. The obvious mitigation, keeping reminders inexact and "promoting" them to `setAlarmClock()` shortly before due, fails because the promotion would itself have to be triggered by an inexact alarm, which is the unreliable thing being routed around. WorkManager and foreground services are throttled by the same OEM layer. **On this ROM the icon is the price of punctuality; there is no exact-and-invisible option.**
-
-    **What other apps do** (researched 2026-08-25). Google frames the icon as a feature and offers `setExactAndAllowWhileIdle()` as the alternative "if you don't want the status bar indicator" ([docs](https://developer.android.com/develop/background-work/services/alarms)) — but that is precisely the call ColorOS downgrades, so the documented escape hatch does not work here. Real to-do apps do cause this icon and users hunt them down ([OnePlus forum](https://community.oneplus.com/threads/alarm-clock-icon-permanently-displays-in-notification-bar.1408547/), [DroidWin](https://droidwin.com/why-an-alarm-icon-is-there-on-my-status-bar/) — a Splend Apps to-do list and HealthifyMe are both named). But most reminder apps take the other path and accept lateness, pushing battery-optimization instructions onto users, which is why "my reminder was late on Xiaomi" is a standing complaint ([background](https://celestialbrain.com/why-android-notifications-not-go-off-on-time/), [tasks/tasks#603](https://github.com/tasks/tasks/issues/603)). **The split is: dedicated alarm apps accept the icon and are reliable; to-do apps avoid it and are not.**
-
-    **Two pieces of work:**
-
-    - **Relabel the toggle.** It currently reads as a sound setting but now also decides punctuality — a silent reminder stays subject to the D7 downgrade and can arrive ~20 minutes late (up to an hour for a next-day one). Say so, e.g. "Alarm — rings, and arrives on time". Cheap, no build risk, converts a hidden behaviour into a stated one.
-    - **Add a user-facing explanation** of why the ⏰ icon is always present: that it means a reminder is armed to fire at its exact time, that it is how the OS guarantees the reminder is not delayed, and that Android's own per-app escape hatch is Settings -> Apps -> *Allow setting alarms and reminders* (turning it off trades punctuality for a clean status bar). Natural home is next to the toggle in Settings, or a short entry in the "Why tasks slip"/About content — decide during implementation.
-
-18. Tech debt - `SNOOZE_ACTION_ID` is the string `"SNOOZE_10"`, but snooze durations are now user-configurable (5/15/30/60 min/tomorrow), so the name is misleading. It was deliberately left unchanged when snooze presets were added: the value is embedded in the `categoryIdentifier` of notifications already scheduled on users' devices, so changing it would orphan any notification sitting in a tray at upgrade time. Fix needs a migration story — e.g. register both the old and a new action ID for one release, then drop the old one.
-
-21. **Bug - reminders that predate an app update never re-arm until the 15-minute sweep, and can go dark forever.** [FIXED 2026-08-30 — `RemindersContext` now calls `rescheduleAllFutureReminders()` eagerly in the mount effect that loads reminders from storage, fire-and-forget so it never delays first paint. **Verified on device same day**: fresh-installed the fix APK (which itself wipes AlarmManager, confirmed 0 alarms registered immediately post-install), launched the app, and within 4 seconds both pre-existing future reminders were armed again (`dumpsys alarm` showed the correct `setAlarmClock`/inexact entries matching each reminder's alarm setting) — no wait for the sweep.] Reported 2026-08-30: two 08:00 reminders never rang. Root cause, found by instrumenting `scheduleNotification` with temporary `console.warn` logging on a throwaway build and reproducing live: scheduling itself works fine end to end (JS returns a real id, native `setAlarmClock()` arms correctly) — but Android wipes every `AlarmManager` registration on app install/update, and nothing ever re-armed the reminders that already existed before an update. `initNotifications()` (run once per app start) only sets up channels/handler, never `rescheduleAllFutureReminders()`; that only ran via `rescheduleTask`'s ~15-minute `BackgroundFetch` sweep or backup import. Worse, that sweep treats "delivery time already passed" as proof a reminder must have already fired and permanently gives up on it once true — so if it was silently never armed (the update-wipe case), it goes dark forever with no user-visible signal. Full writeup in `system_learnings.md` (2026-08-30). **Residual, not fixed here:** that "past == delivered" assumption inside `rescheduleAllFutureReminders` is still wrong in the general case (e.g. app never opened between the wipe and the reminder's time) — this fix narrows the window it can bite in, it doesn't remove it.
-
-22. **Persona-based personalization onboarding.** Plan: [`C:\Users\anand\.gemini\antigravity\brain\a09f2cdd-23cf-461e-b10c-cce7da152001\implementation_plan.md`](file:///C:/Users/anand/.gemini/antigravity/brain/a09f2cdd-23cf-461e-b10c-cce7da152001/implementation_plan.md) (written by Gemini/Antigravity). A first-run 3-question quiz maps the user to one of 4 profiles (Busy Juggler, Step-by-Step Doer, Quick Finisher, Deep Focuser) and is meant to tailor lead time, alarm/vibration, snooze length and notification tone per profile. Lives on branch `feature/persona-onboarding` (tip `ae47295`), explicitly tagged in its own commit message **`[NOT REVIEWED — do not ship as-is]`**. Not merged into `main`. Not in a single EAS build (checked full build history 2026-08-30). **Deferred — take up later.**
-
-    **Status as of 2026-08-30, checked against the plan doc:** roughly half-built.
-    - **Done:** `types/persona.ts`, `constants/personas.ts`, `utils/personaScoring.ts`, `components/onboarding/OnboardingWizard.tsx`, `components/PersonaComparisonSheet.tsx` all exist; `ReminderService.ts` has `getUserPersona`/`setUserPersona`/`hasCompletedOnboarding`/`markOnboardingCompleted`; `app/_layout.tsx` wires `OnboardingWizard` in place of the old `NameOnboarding`. Tests exist for the wizard, the comparison sheet, and the scoring util; full suite (730 tests) passes and typecheck is clean on that branch.
-    - **Not started:** `app/(tabs)/settings.tsx` has no "Reminder Style" section at all (no persona badge, no comparison-sheet entry point, no re-take-quiz control, no per-setting overrides — zero matches for "persona" in that file). `app/smart-alerts.tsx` has no persona-tuning explanation card. `getPersonaSettings()`/`savePersonaSettings()` (the plan's per-setting override storage, distinct from the persona type itself) were never written. Scheduling doesn't apply persona lead time anywhere — `scheduleNotification` still uses one hardcoded `ALARM_EARLY_OFFSET_MS` (60s) for everyone, so the plan's headline mechanism (personas changing actual reminder *behavior*, not just onboarding copy) isn't wired up. No manual/device verification has happened, since it's never been built.
+| Effort | Meaning |
+| --- | --- |
+| S | Small — hours, single file/area, no new native module. |
+| M | Medium — a day or more, several files, may need tests across layers. |
+| L | Large — needs its own spec/plan, touches architecture, or needs a native build/backend. |
 
 ---
 
-## Device verification
+## Tier 0 — independent, no prerequisites
 
-**Moved to [`device-tests.md`](device-tests.md)** (2026-08-24), which is now the
-canonical list and tracks a pass/fail/pending status per item. D1-D9 kept their
-IDs, so existing references still resolve.
+Ordered cheapest-first within the tier.
 
-Anything written and green in Jest but unproven on hardware belongs there, not
-here. Add new items in the same change that ships the feature.
+| # | Legacy # | Item | Effort | Status | Notes |
+| --- | --- | --- | --- | --- | --- |
+| B1 | 3 | Calendar integration | S (scope only) | `OPEN` | "Integrate with calendars?" — still just a question. Needs scoping: read-events vs. create-reminder-from-event. Folds into [M5](#m5-forward-to-remind) rather than standing alone. |
+| B2 | 4 | Verify the snooze flow | S | `OPEN` | Manual verification only — see [device-tests/notifications.md](device-tests/notifications.md) D3/D15/D16 for the device-level checks this maps to. |
+| B3 | 1 | Google Drive backup / migration | M (pending D1), else L | `BLOCKED` | Manual JSON export/import shipped 2026-08-10 (Settings → Back up/Restore, merge is local-wins, dedupes by content not id). **Check [device-tests/cross-cutting.md#d1](device-tests/cross-cutting.md#d1) first** — Android Auto Backup may already cover phone migration and make Drive sync unnecessary; that test is cheap and changes this item's scope entirely. |
+| B4 | 17 | Manglish support (regional language typed in English) | M | `OPEN` | Support for reminders typed in English letters but Malayalam words/grammar. Not started; no research done yet. |
+| B5 | 18 | Rename `SNOOZE_ACTION_ID` tech debt | M | `OPEN` | String is `"SNOOZE_10"` but snooze durations are now user-configurable (5/15/30/60 min/tomorrow) — misleading name, left as-is deliberately because it's embedded in the `categoryIdentifier` of notifications already scheduled on devices. Needs a migration story (e.g. register both old and new action IDs for one release, then drop the old one). |
+| B6 | 2 | Image support in shared/dictated input | M | `OPEN` | Audio half done (mic + WhatsApp voice-note forwarding, Android only — see B7). Image support not started. Part of the [M5](#m5-forward-to-remind) "forward-to-remind" area. |
+| M2 | — | Recurring reminders ("every day at 8", "every Monday") | L | `OPEN` | See [Major features](#major-features) below — highest-value missing feature, needs its own spec. |
+| M9 | — | Smart re-nudge (re-alert ladder) | L | `OPEN` | See [Major features](#major-features) below — prerequisite (real `snoozeCount` data) is now met; ready to spec. |
+| M3 | — | Location-based reminders | L | `OPEN` | See [Major features](#major-features) below. |
+
+---
+
+## Tier 1 — needs a native build (blocked only on that, otherwise ready)
+
+| # | Legacy # | Item | Effort | Status | Notes |
+| --- | --- | --- | --- | --- | --- |
+| B7 | 2 | Ship next native build with current audio-transcription fixes | S (build only) | `BLOCKED` | Voice-to-text via mic + WhatsApp-audio forwarding is code-complete (Android only). Needs a native/EAS build to reach devices — see CLAUDE.md's Android build instructions. |
+| B8 | — | M4 Tier 1 device sign-off | M | `BLOCKED` | M4 Tier 1 ("remind someone else", send-only) is fully built (14 tasks, 567 tests green) but **not device-verified** — needs a native build (`expo-contacts` has no OTA path) then a full pass of [device-tests/feature-e2e.md#d9](device-tests/feature-e2e.md#d9). See [M4](#m4-remind-someone-else) below. |
+
+---
+
+## Tier 2 — needs the backend built (shared prerequisite)
+
+**The backend is empty scaffolding today** — see CLAUDE.md. Each of these
+needs device→server sync, an identity model, and auth; whoever builds that
+first pays for all three. None should be scoped as "wire up the existing
+API" — see each item's notes in [Major features](#major-features).
+
+| # | Legacy # | Item | Effort | Status | Notes |
+| --- | --- | --- | --- | --- | --- |
+| M4-T2 | — | Remind someone else, Tier 2 (app-to-app + acknowledgement) | L | `DEFERRED` | See [M4](#m4-remind-someone-else). |
+| M7 | — | Group reminders with RSVP | L | `OPEN` (needs spec) | Shares M4 Tier 2's backend. See [M7](#m7-group-reminders-with-rsvp) — the strategic reframe of Tier 2's read from the 2026-08-09 adoption assessment. |
+| M8 | — | MCP server for the app | L, or S for read-only variant | `DEFERRED` | See [M8](#m8-mcp-server) — a cheap read-only variant (query an exported backup JSON) exists and doesn't need the backend, but privacy trade-offs need a decision first. |
+| M6 | — | Remind a contact from natural language | M (after M4 T1 ships) | `DEFERRED` | Builds on M4 Tier 1's contact picker — resolves recipients from free text instead. See [M6](#m6-remind-a-contact-from-natural-language). |
+
+---
+
+## Recently shipped (kept for traceability — prune once stale)
+
+| # | Legacy # | Item | Shipped | Notes |
+| --- | --- | --- | --- | --- |
+| — | 22 | Persona-based personalization onboarding | *not merged* | `DEFERRED` — see [M-persona](#persona-based-personalization-onboarding) below; ~half-built on an unreviewed branch, not in any build. |
+| — | 21 | Un-completing a reminder never re-schedules its notification | 2026-08-28 | `toggleComplete` re-arms on un-complete (future branch only; past stays overdue/silent by design). Device-verified: [device-tests/data-safety.md#d21](device-tests/data-safety.md#d21). |
+| — | 20 | Explain the permanent status-bar alarm icon | 2026-08-28 | Toggle relabeled, explainer added. Device-verified with one fix needed: [device-tests/cross-cutting.md#d22](device-tests/cross-cutting.md#d22). |
+| — | 21 (second) | Pre-existing reminders never re-arm until the 15-min sweep after an app update | 2026-08-30 | `RemindersContext` now calls `rescheduleAllFutureReminders()` eagerly on mount. Device-verified: [device-tests/data-safety.md#d23](device-tests/data-safety.md#d23). |
+| — | — | 12-hour AM/PM time display | 2026-09-03 | `hour12: true` forced everywhere times render. Jest green; device run blocked on Metro connectivity — [device-tests/malayalam-parsing.md#d24](device-tests/malayalam-parsing.md#d24). |
+| — | 15 | Sort completed reminders newest-first, pending earliest-first | 2026-07-21 | |
+| — | 16 | Speech-to-text bugs (language always downloaded/English, content not saved, toggle stuck) | 2026-07-23 | |
+| — | 11 | "Mark as done" push notification doesn't dismiss | 2026-07-21 | |
+| — | 10 | Description edits not saving | 2026-07-21 | |
+| — | 12 | Reminder doesn't fire the first time without an edit+save | 2026-07-21 | Likely cause fixed; flagged for re-verification at the time. |
+| — | 9 | Branding — CuriosMind Labs name + About tab | 2026-07-22 | Placeholder icon only; real icon tracked as B-icon below. |
+| — | 6 | Textbox placeholder overflow | 2026-07-20 | |
+| — | 5 | Show description in notification (with consent) | 2026-07-20 | |
+| — | Malayalam numeral clock times | Landed | Parser-side; device checklist still open — [device-tests/malayalam-parsing.md#numeral-clock-times](device-tests/malayalam-parsing.md#numeral-clock-times). |
+| — | Ambiguous-numeral confirmation sheet | Landed | Parser-side; device checklist still open — [device-tests/malayalam-parsing.md#ambiguous-numeral-sheet](device-tests/malayalam-parsing.md#ambiguous-numeral-sheet). |
+
+## Unscoped / needs a decision before it's an item
+
+| Legacy # | Item | Notes |
+| --- | --- | --- |
+| 7 | Better app icon | "How to publish to Play Store for beta" (item 8) is related packaging work — bundle these when picked up. |
+| 13 | Longer-text UX in reminder box + discoverability that time is auto-parsed | Needs a brainstorm — not yet scoped into a concrete change. |
+| 14 | Stronger natural-language time parsing | Ongoing direction rather than a single item — most recent work under this heading is the Malayalam numeral/ambiguous-numeral work above. Re-scope if picked up again as a distinct research task. |
 
 ---
 
@@ -64,63 +109,277 @@ The headline features, tracked together so they don't get lost among bugs
 and tech debt. Each needs its own brainstorm → spec → plan cycle; none is a
 drop-in change.
 
-Strategic context: the 2026-08-09 adoption assessment found the app's real moat
-is on-device Malayalam parsing (no account, no network) rather than the reminder
-list itself, and that M4 — reminding other people — is the roadmap item with no
-incumbent. M7 was added later the same day and revises that report's read of M4
-Tier 2. Prefer features that deepen those two things over ones that widen the
-app's surface.
+**Strategic context** (2026-08-09 adoption assessment): the app's real moat
+is on-device Malayalam parsing (no account, no network), not the reminder
+list itself, and M4 ("remind someone else") is the roadmap item with no
+incumbent. M7 revises that report's read of M4 Tier 2. **Prefer features that
+deepen those two things over ones that widen the app's surface.**
 
-M1. **Dark mode** - [DONE 2026-08-10 — follows the system setting.] Both original causes fixed: `app.json` now sets `"userInterfaceStyle": "automatic"` (was `"light"`), and `constants/colors.ts` has a full `dark` palette so `useColors()` switches on `useColorScheme()`. Derived from the light tokens rather than inverted — the indigo brand hue is lightened (`#6366f1` -> `#818cf8`) because the original is too low-contrast on near-black, and surfaces step *up* in lightness with elevation since shadows are invisible on a dark ground. Also fixed `<StatusBar style="dark" />` in `app/_layout.tsx`, which would have rendered dark icons on a dark bar (invisible clock/battery). All 15 hardcoded hex colours in UI files replaced with tokens; two token pairs added for cases that had none (`destructiveBorder` for the overdue card border, `warningSurface`/`warningSurfaceForeground` for the exact-alarm banner). The single remaining literal is `shadowColor: "#000"` in `ErrorFallback`, which is correct in both schemes. Covered by `hooks/useColors.test.ts` (palette parity, valid hex, luminance direction) plus dark/light render tests on the settings screen. In-app **Light/Dark/System override** added the same day (Settings -> Appearance, persisted at `@theme_preference_v1`, default "system"). It lives in its own `contexts/ThemeContext.tsx` rather than `RemindersContext` because `ErrorFallback` renders *inside* `ErrorBoundary`, which wraps the providers — so `useColors()` can be called with no provider above it. `useThemePreference()` therefore returns the "system" default instead of throwing; a throwing context would turn any caught error into a crash-on-crash. `ThemeProvider` sits outside `ErrorBoundary` in `app/_layout.tsx` so a crash screen still honours the chosen theme. **NEEDS DEVICE CHECK (see D8)** — Jest asserts tokens, not pixels.
+| ID | Feature | Status | Effort |
+| --- | --- | --- | --- |
+| [M1](#m1-dark-mode) | Dark mode | `DONE` 2026-08-10 | — |
+| [M2](#m2-recurring-reminders) | Recurring reminders | `OPEN` | L |
+| [M3](#m3-location-based-reminders) | Location-based reminders | `OPEN` | L |
+| [M4](#m4-remind-someone-else) Tier 1 | Remind someone else (send-only) | `BUILT`, not device-verified (B8) | — |
+| [M4](#m4-remind-someone-else) Tier 2 | Remind someone else (app-to-app + ack) | `DEFERRED` | L |
+| [M5](#m5-forward-to-remind) | Forward-to-remind (share intents) | `IN PROGRESS` | M |
+| [M6](#m6-remind-a-contact-from-natural-language) | Remind a contact from natural language | `DEFERRED` | M |
+| [M7](#m7-group-reminders-with-rsvp) | Group reminders with RSVP | `OPEN` (needs spec) | L |
+| [M8](#m8-mcp-server) | MCP server for the app | `DEFERRED` | L |
+| [M9](#m9-smart-re-nudge) | Smart re-nudge | `OPEN`, ready to spec | L |
 
-M2. **Recurring reminders** - "every day at 8", "every Monday", "monthly on the 1st". Repeatedly identified as the highest-value missing feature. Known constraints from earlier analysis (2026-08-07): (a) `chrono-node` does NOT return recurrence info — it silently drops "every day"/"daily" and the word is left stranded in the reminder title, so recurrence parsing must be built, not configured; (b) `malayalamDateParser.ts` has no recurrence support either; (c) the codebase schedules only one-shot `SchedulableTriggerInputTypes.DATE` triggers, so either a repeating trigger type or a rolling re-schedule-on-fire scheme is needed — the latter interacts with the boot-reschedule task and the ALARM_EARLY_OFFSET_MS window (see system_learnings 2026-08-09 duplicate-notification entry); (d) UI surface is larger than it first appears — `add-reminder.tsx` (~630 lines) and `QuickAddInput.tsx` (~810 lines) both need changes; (e) the `Reminder` interface and its AsyncStorage records need a migration.
+### M1. Dark mode
 
-M3. **Location-based reminders** - "remind me when I reach home / leave office / am near a pharmacy". Needs geofencing (`expo-location` + `expo-task-manager`, the latter already a dependency and already used for the boot-reschedule and notification-response tasks). Significant new surface: background location permission is a separate, more heavily-scrutinized Android/iOS permission than notifications and requires Play Store justification; geofence limits are per-OS (Android ~100 per app); battery impact needs review; the `Reminder` model gains a location trigger alongside the datetime one, so "when does this fire" stops being a single timestamp. Also decide whether time and location triggers can combine ("at 6pm only if I'm home").
+`DONE` 2026-08-10 — follows the system setting, plus an in-app
+Light/Dark/System override (Settings → Appearance). Full palette in
+`constants/colors.ts`, `useColors()` switches on `useColorScheme()`.
+`ThemeProvider` sits outside `ErrorBoundary` so a crash screen still honours
+the chosen theme. Covered by `hooks/useColors.test.ts` plus render tests.
+**Needs a fresh device walk** — several screens (Smart Alerts, Why tasks
+slip, quiet-hours/name sheets) shipped after the last pass. See
+[device-tests/visual-layout.md#d8](device-tests/visual-layout.md#d8).
 
-M4. **Remind someone else** - remind another person/contact, or a group ("remind my husband/kids/parents"). Split into two tiers after a design interview on 2026-08-09:
+### M2. Recurring reminders
 
-- **Tier 1 — BUILT 2026-08-17, NOT YET DEVICE-VERIFIED (see D9).** All 14 tasks done; 567 tests green, typecheck clean. Ships a `recipient?` on `Reminder` (+ `isSendReminder`), send-time phone normalization (`utils/phoneNumber.ts`, region-derived country code), three-stage capped invite nudges (`utils/inviteNudges.ts`), `services/messageLinks.ts` (wa.me + `sms:`), a contact picker, a "Sending" home section, a recipient chip, `app/send-reminder.tsx`, and notification routing that reads storage rather than the payload. **Needs a native build — `expo-contacts` is not OTA-able.** Plan: [`docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md`](docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md). At reminder time the *sender's* phone rings; they tap and send a pre-filled WhatsApp/SMS message. Entirely on-device — no backend, no accounts, no push tokens. Recipient picked from phone contacts; outgoing messages carry a witty app invite (capped at 3 per person) which is what makes Tier 2 viable later. **Honest framing that constrains all copy: this is "remind me to message someone", not "remind someone else" — the recipient's phone never rings.** 14 TDD tasks; adding `expo-contacts` needs a new native build (no OTA).
-- **Tier 2 — deferred, needs its own design.** True app-to-app delivery with acknowledgement flowing back, for recipients who install the app. This is the part that cannot be built on-device: it needs push tokens, an account/identity model, auth, and a deployed server. None exist today — verified 2026-08-09 that the API server has exactly one endpoint (`GET /api/healthz`) and `lib/db/src/schema/index.ts` defines zero tables. So this is also the feature that would finally wire up the API server and `lib/db` (see CLAUDE.md). Tier 1's data model deliberately keeps `recipient` an *object* so `appUserId`/`deliveryStatus`/`acknowledgedAt` can be added as purely additive optional fields.
+"every day at 8", "every Monday", "monthly on the 1st". Repeatedly
+identified as the highest-value missing feature. Known constraints
+(2026-08-07 analysis):
+(a) `chrono-node` does NOT return recurrence info — it silently drops "every
+day"/"daily", stranding the word in the title, so recurrence parsing must be
+built, not configured;
+(b) `malayalamDateParser.ts` has no recurrence support either;
+(c) the codebase schedules only one-shot `SchedulableTriggerInputTypes.DATE`
+triggers, so either a repeating trigger type or a rolling
+re-schedule-on-fire scheme is needed — the latter interacts with the
+boot-reschedule task and `ALARM_EARLY_OFFSET_MS` (see
+[device-tests/cross-cutting.md#d19](device-tests/cross-cutting.md#d19));
+(d) UI surface is larger than it looks — `add-reminder.tsx` (~630 lines) and
+`QuickAddInput.tsx` (~810 lines) both need changes;
+(e) the `Reminder` interface and its AsyncStorage records need a migration.
 
-M5. **Integrate with other apps / forward-to-remind** - create a reminder by forwarding or sharing from WhatsApp, Google Calendar, email, etc. Partially built: `expo-share-intent` already handles shared text, URLs, and audio (WhatsApp voice notes → transcription), see `contexts/SharedTextContext.tsx` and backlog item 2. Still open: images (item 2), calendar integration (item 3 — "Integrate with calendars?", which should be folded in here or explicitly split into read-events vs. create-reminder-from-event), and a general review of which apps' share payloads are worth first-class handling. Consolidates items 2 and 3 rather than replacing them.
+### M3. Location-based reminders
 
-- **Sub-item: "leave now" reminders that deep-link to a cab app.** Considered and deliberately deprioritized 2026-08-09. Fire at *leave* time ("Leave now for Dr. Menon") with a button opening Uber/Ola with the destination pre-filled. **Deep link only — do not attempt the ride-request API or an Uber MCP server.** Requesting a ride is a privileged Uber scope requiring approval via a business-development contact; the community MCP servers on GitHub are unofficial wrappers over that same gated API (one ships a *mock* interface with deep-link fallback precisely because access is usually unavailable). MCP is a protocol for calling APIs, not for being authorized to call them, and it needs a model in the loop — which would spend the app's "on-device, no account, no network" differentiator to buy a commodity feature. Also note Uber is not the Indian default: Ola, Rapido and Namma Yatri hold serious share, and Rapido's bike taxis dominate exactly the short hops a reminder would trigger. Honest gap: a deep link cannot compute travel time, so *when to fire* is guesswork without a maps lookup. Reuses M4 Tier 1's `Linking.openURL` + fallback pattern almost verbatim. Low priority — competes with opening Uber directly, which takes about four seconds.
+"remind me when I reach home / leave office / am near a pharmacy". Needs
+geofencing (`expo-location` + `expo-task-manager`, the latter already a
+dependency, already used for boot-reschedule and notification-response
+tasks). Significant new surface: background location permission is a
+separate, more heavily-scrutinized Android/iOS permission than
+notifications and requires Play Store justification; geofence limits are
+per-OS (Android ~100/app); battery impact needs review; the `Reminder` model
+gains a location trigger alongside the datetime one, so "when does this
+fire" stops being a single timestamp. Also decide whether time and location
+triggers can combine ("at 6pm only if I'm home").
 
-M6. **Remind a contact from natural language** *(builds on M4 Tier 1)* - "Remind my husband to pick up milk" — resolving the recipient from the reminder text instead of tapping through a picker. M4 Tier 1 deliberately uses an explicit contact picker, so this is a later refinement on top of it: it needs contact resolution from free text, relationship aliases ("my husband" → a specific contact), and disambiguation ("which David?"). Note it would also need to work in Malayalam, where the parser is hand-written (`utils/malayalamDateParser.ts`).
+### M4. Remind someone else
 
-M7. **Group reminders with RSVP** *(shares M4 Tier 2's backend)* - raised 2026-08-09 as "book turfs or movie tickets via the group reminder". The booking is **not** the feature; the coordination around it is, and that reframing is the whole item.
+Remind another person/contact, or a group. Split into two tiers after a
+design interview on 2026-08-09:
 
-**The problem nobody owns.** Nine people in a WhatsApp group, "who's in for Saturday 6am football?", three confirm, two go silent, someone books anyway, two don't show, the payment split never resolves. Booking the turf itself is already easy (Hudle/Playo, ~30 seconds). The coordination dies in WhatsApp.
+**Tier 1 — `BUILT` 2026-08-17, `BLOCKED` on device sign-off (B8).** All 14
+tasks done; 567 tests green, typecheck clean. Ships a `recipient?` on
+`Reminder` (+ `isSendReminder`), send-time phone normalization
+(`utils/phoneNumber.ts`), three-stage capped invite nudges
+(`utils/inviteNudges.ts`), `services/messageLinks.ts` (wa.me + `sms:`), a
+contact picker, a "Sending" home section, a recipient chip,
+`app/send-reminder.tsx`, and notification routing that reads storage rather
+than the payload. **Needs a native build — `expo-contacts` is not OTA-able.**
+Plan: [`docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md`](docs/superpowers/plans/2026-08-09-remind-someone-else-tier1.md).
+At reminder time the *sender's* phone rings; they tap and send a pre-filled
+WhatsApp/SMS message. Entirely on-device — no backend, no accounts, no push
+tokens. Outgoing messages carry a witty app invite (capped at 3/person),
+which is what makes Tier 2 viable later. **Honest framing that constrains
+all copy: this is "remind me to message someone", not "remind someone
+else"** — the recipient's phone never rings. Device checklist:
+[device-tests/feature-e2e.md#d9](device-tests/feature-e2e.md#d9).
 
-**Why this is M4 Tier 2, not a new backend.** Tier 2 is defined as app-to-app delivery *with acknowledgement flowing back*. Acknowledgement **is** RSVP. A group reminder that tracks who confirmed is Tier 2 aimed at a group rather than one person — same push tokens, same identity model, same server, all of which have to be built either way.
+**Tier 2 — `DEFERRED`, needs its own design and the backend (Tier 2 of
+[dependency table](#tier-2--needs-the-backend-built-shared-prerequisite)
+above).** True app-to-app delivery with acknowledgement flowing back, for
+recipients who install the app. Needs push tokens, an account/identity
+model, auth, and a deployed server — none exist today (verified 2026-08-09:
+API server has exactly one endpoint, `lib/db` defines zero tables). This is
+the feature that would finally wire up the API server and `lib/db` — see
+CLAUDE.md. Tier 1's data model deliberately keeps `recipient` an *object* so
+`appUserId`/`deliveryStatus`/`acknowledgedAt` can be added as purely
+additive optional fields later.
 
-**Why it matters strategically.** The 2026-08-09 adoption assessment priced Tier 2 as a caregiving feature (diaspora child checking whether a parent took medication) — real but narrow, and it retains only one persona. Group coordination is a materially larger market on the *same* infrastructure, and it's the first roadmap item that gives the young-urban-professional persona a reason to stay rather than churn in week one. **This is a correction to that report's read of Tier 2, not a new feature area.**
+### M5. Forward-to-remind
 
-**Booking is the last tap, not the product.** Once N people confirm, deep-link out to Hudle / Playo / BookMyShow. Verified 2026-08-09: **BookMyShow publishes no official public API and runs no partner program** — everything available is scraping (Apify, Parse.bot) or reverse-engineered GitHub projects, which is ToS-violating and breaks without notice. Hudle and Playo document integration only for *venue partners*, not consumer apps. So the division is forced and also correct: we own coordination, they own the transaction. Same `Linking.openURL` pattern as M4 Tier 1. **Do not build a booking integration.**
+Create a reminder by forwarding/sharing from WhatsApp, Google Calendar,
+email, etc. **`IN PROGRESS`.** `expo-share-intent` already handles shared
+text, URLs, and audio (WhatsApp voice notes → transcription) — see
+`contexts/SharedTextContext.tsx` and [B6](#tier-0--independent-no-prerequisites)/[B7](#tier-1--needs-a-native-build-blocked-only-on-that-otherwise-ready).
+Still open: images ([B6](#tier-0--independent-no-prerequisites)), calendar
+integration ([B1](#tier-0--independent-no-prerequisites) — read-events vs.
+create-reminder-from-event needs deciding), and a general review of which
+apps' share payloads are worth first-class handling.
 
-**Open questions before this gets a spec.** (a) It is arguably a *different app* — group RSVP for weekend football shares almost nothing with a Malayalam-parsing personal reminder list, and two products in one binary usually means neither gets good. (b) It forks with M4 Tier 2's caregiving use case: same infrastructure, different audience, and the audience choice drives the UI. (c) Group identity without accounts is unsolved — Tier 1's phone-number-as-key approach may or may not stretch to groups. (d) Malayalam support for group flows is unexamined.
-M8. **MCP server for the app** *(raised 2026-08-24)* - expose reminders to an AI assistant: "what have I got tomorrow", "remind me to call the plumber at 3", asked from a desktop chat rather than the phone.
+**Sub-item — "leave now" reminders that deep-link to a cab app.**
+`DEFERRED` 2026-08-09. Fire at *leave* time ("Leave now for Dr. Menon") with
+a button opening Uber/Ola pre-filled. **Deep link only — do not attempt a
+ride-request API or an Uber MCP server**: requesting a ride needs a
+privileged Uber scope requiring business-development approval; community MCP
+servers wrapping it are unofficial and mostly gated. Would also spend the
+app's on-device/no-account differentiator on a commodity feature. Note Uber
+is not the Indian default — Ola, Rapido and Namma Yatri hold serious share,
+and Rapido's bike taxis dominate exactly the short hops this would trigger.
+Honest gap: a deep link can't compute travel time, so *when to fire* is
+guesswork without a maps lookup. Reuses M4 Tier 1's `Linking.openURL` +
+fallback pattern almost verbatim. Low priority — opening Uber directly takes
+about four seconds.
 
-**The blocker is not MCP, it is that there is nothing to connect to.** Reminders live only in AsyncStorage on the handset. An MCP server runs on a host — a laptop, or a cloud runtime — and needs a reachable data source. There is none. Verified again 2026-08-24: `artifacts/api-server/src/routes/` contains exactly one route (`health.ts`), and `lib/db/src/schema/index.ts` still exports nothing at all. So the honest version of this item is **"build the backend, then MCP is a thin layer on top"**, and the backend is the entire cost. MCP is a protocol for calling an API; it does not conjure the API.
+### M6. Remind a contact from natural language
 
-**Same prerequisite as M4 Tier 2 and M7.** Device→server sync, an identity model, and auth. Whoever builds that first pays for all three. Sequence this *after* Tier 2 rather than duplicating the work — and note that if Tier 2 is never built, this item never becomes cheap.
+*(builds on M4 Tier 1)* "Remind my husband to pick up milk" — resolving the
+recipient from reminder text instead of tapping through a picker. M4 Tier 1
+deliberately uses an explicit picker, so this is a later refinement: needs
+contact resolution from free text, relationship aliases ("my husband" → a
+specific contact), and disambiguation ("which David?"). Would also need to
+work in Malayalam, where the parser is hand-written
+(`utils/malayalamDateParser.ts`).
 
-**A genuinely cheap version exists, and it is read-only.** Point an MCP server at an exported backup JSON (Settings → Back up reminders) and expose query tools over it: what is due, what is overdue, what keeps getting postponed — the last of which is now interesting, since `snoozeCount` and `originalDatetime` landed 2026-08-23. Costs no backend, no accounts, no native build. Two honest limits: the data is **stale as of the last manual export**, and writes cannot reach the phone, so "add a reminder" can at best emit a file the user imports by hand. Worth doing only if the read half alone is useful; a stale, one-way integration may be worse than none.
+### M7. Group reminders with RSVP
 
-**Do not build a device-hosted MCP server.** Phones do not host processes a desktop client can reach, and an adb-based reader of `RKStorage` works only on debuggable builds — that is a debugging tool, not a product.
+*(shares M4 Tier 2's backend)* Raised 2026-08-09: "book turfs or movie
+tickets via the group reminder". The booking is **not** the feature; the
+coordination around it is.
 
-**Privacy is a real design constraint here, not a footnote.** The app's stated position is on-device, no account, no network — see `threat_model.md` and the README. An MCP server ships the user's entire reminder list to whatever model is on the other end, which is the exact opposite of that promise. If this is built it needs explicit, revocable, per-session consent and honest copy, and it should never be on by default. **Check that it does not undercut the app's differentiator before building it** — the 2026-08-09 adoption assessment found the moat is on-device processing, and this feature spends precisely that.
+**The problem nobody owns.** Nine people in a WhatsApp group, "who's in for
+Saturday 6am football?", three confirm, two go silent, someone books anyway,
+two don't show, the payment split never resolves. Booking the turf itself is
+already easy (Hudle/Playo, ~30 seconds). The coordination dies in WhatsApp.
 
-**Prior art to reuse:** `lib/api-spec/openapi.yaml` plus its orval codegen already exist, so an API surface has scaffolding even though it has no endpoints. Whatever MCP tools get defined should be generated from that spec rather than hand-written twice.
+**Why this is M4 Tier 2, not a new backend.** Tier 2 is app-to-app delivery
+*with acknowledgement flowing back*. Acknowledgement **is** RSVP. A group
+reminder tracking who confirmed is Tier 2 aimed at a group — same push
+tokens, same identity model, same server.
 
+**Why it matters strategically.** The 2026-08-09 adoption assessment priced
+Tier 2 as a caregiving feature (real but narrow, one persona). Group
+coordination is materially larger on the *same* infrastructure, and is the
+first roadmap item giving the young-urban-professional persona a reason to
+stay rather than churn week one. **This is a correction to that report's
+read of Tier 2, not a new feature area.**
 
-M9. **Smart re-nudge** *(Component 2 of the Smart Alerts spec — the only one not built)* - the re-alert engine the other four components were built to support. Spec: [`docs/superpowers/specs/2026-08-23-smart-alerts-design.md`](docs/superpowers/specs/2026-08-23-smart-alerts-design.md) (see "Component 2"). Components 1, 3, 4 and 5 — instrumentation, quiet hours, the input fix and the "Why tasks slip" explainer — shipped 2026-08-23 via [`docs/superpowers/plans/2026-08-23-smart-alerts-foundations.md`](docs/superpowers/plans/2026-08-23-smart-alerts-foundations.md). This one was deliberately built last, on real data.
+**Booking is the last tap, not the product.** Once N people confirm,
+deep-link to Hudle / Playo / BookMyShow. Verified 2026-08-09:
+**BookMyShow publishes no official public API and runs no partner program**
+— available options are scraping or reverse-engineered projects, ToS-
+violating and unstable. Hudle/Playo document integration only for *venue
+partners*. So the division is forced and correct: we own coordination, they
+own the transaction. **Do not build a booking integration.**
 
-**Four parts:** (a) a **ladder** of re-alerts, Off / Gentle (+1 hr, the default) / Persistent (+15 min, +1 hr, +4 hr), with a hard stop at 3 — an unbounded ladder is what trains reflexive dismissal; (b) the **dread override** — `snoozeCount >= 3` gets no further re-nudges *at any level, Persistent included*, because it has demonstrated that more pings do not work on it. This deliberately overrides the user's setting and is the psychological thesis of the feature, not a tunable; (c) the **shrink prompt**, in-app at that same threshold, offering *Just do 2 minutes* / *Move to a better time* / *Break it into steps* / *Actually, drop it*, plus the "Why does this keep happening?" link into the Component 5 explainer — that link is the reason Component 5 shipped first; (d) the **check-in notification**, one per reminder ever, sent the next morning at a neutral moment rather than at the reminder's own time (that slot is already loaded with dread), on its own low-importance channel, suppressed entirely at Off.
+**Open questions before this gets a spec.** (a) Arguably a *different app* —
+group RSVP for weekend football shares almost nothing with a
+Malayalam-parsing personal reminder list. (b) Forks with M4 Tier 2's
+caregiving use case: same infrastructure, different audience, audience
+choice drives the UI. (c) Group identity without accounts is unsolved —
+Tier 1's phone-number-as-key approach may or may not stretch to groups.
+(d) Malayalam support for group flows is unexamined.
 
-**Cross-cutting rules:** quiet-hours deferral with overnight rungs collapsing into a single "3 reminders still open"; a daily ceiling of 6 across all reminders, dropped rather than deferred on hitting the cap; and an explicit snooze cancelling the whole pending ladder via the existing `cancelScheduledForReminder` sweep.
+### M8. MCP server
 
-**Prerequisite now met.** It was deferred until real `snoozeCount` data existed; `ReminderService.ts` has been incrementing it on every snooze since Component 1 shipped.
+*(raised 2026-08-24)* Expose reminders to an AI assistant: "what have I got
+tomorrow", asked from a desktop chat rather than the phone.
 
-**Constraint added 2026-08-24 — it collides with the setAlarmClock fix.** Ladder rungs are ordinary scheduled notifications carrying the same `reminderId` payload, so a rung inheriting `alarm: true` from its reminder would route through `setAlarmClock()` (see D19 in [`device-tests.md`](device-tests.md)). That would make **every rung** claim the system's single "next alarm clock" slot, repeatedly overwriting the user's real clock alarm on the lock screen, and would fire many `setAlarmClock()` calls per day — which is what trips OEM "frequently wakes your system" heuristics. **The re-nudge scheduling path must force the non-alarm-clock route explicitly**; the reminder's own alarm flag must not propagate to its rungs.
+**The blocker is not MCP, it is that there is nothing to connect to.**
+Reminders live only in AsyncStorage on the handset. An MCP server needs a
+reachable data source; there is none (verified 2026-08-24: one health route,
+zero DB tables). Honest version: **"build the backend, then MCP is a thin
+layer on top"** — the backend is the entire cost. Same prerequisite as M4
+Tier 2 and M7 — sequence this *after* Tier 2 rather than duplicating the
+work.
 
+**A genuinely cheap version exists, read-only.** Point an MCP server at an
+exported backup JSON (Settings → Back up reminders) and expose query tools
+over it — what's due, overdue, what keeps getting postponed
+(`snoozeCount`/`originalDatetime` since 2026-08-23). No backend, no
+accounts, no native build. Two honest limits: data is **stale as of the
+last manual export**, and writes can't reach the phone. Worth doing only if
+the read half alone is useful.
+
+**Do not build a device-hosted MCP server.** Phones don't host processes a
+desktop client can reach; an adb-based reader works only on debuggable
+builds — a debugging tool, not a product.
+
+**Privacy is a real constraint, not a footnote.** The app's stated position
+is on-device, no account, no network (`threat_model.md`, README). An MCP
+server ships the user's entire reminder list to whatever model is on the
+other end — the opposite of that promise. Needs explicit, revocable,
+per-session consent, honest copy, never on by default. **Check this doesn't
+undercut the app's differentiator before building it.**
+
+**Prior art to reuse:** `lib/api-spec/openapi.yaml` + its orval codegen
+already exist as scaffolding. Whatever MCP tools get defined should be
+generated from that spec, not hand-written twice.
+
+### M9. Smart re-nudge
+
+*(Component 2 of the Smart Alerts spec — the only one not built)* The
+re-alert engine the other four components were built to support. Spec:
+[`docs/superpowers/specs/2026-08-23-smart-alerts-design.md`](docs/superpowers/specs/2026-08-23-smart-alerts-design.md)
+("Component 2"). Components 1/3/4/5 shipped 2026-08-23. This one was
+deliberately built last, on real data.
+
+**Four parts:** (a) a **ladder** of re-alerts — Off / Gentle (+1 hr,
+default) / Persistent (+15 min, +1 hr, +4 hr), hard stop at 3; (b) the
+**dread override** — `snoozeCount >= 3` gets no further re-nudges at any
+level, overriding the user's setting deliberately, the psychological thesis
+of the feature; (c) the **shrink prompt** at that threshold (*Just do 2
+minutes* / *Move to a better time* / *Break it into steps* / *Actually,
+drop it*), plus a link into the Component 5 explainer; (d) the **check-in
+notification**, once per reminder ever, next morning at a neutral moment, own
+low-importance channel, suppressed entirely at Off.
+
+**Cross-cutting rules:** quiet-hours deferral with overnight rungs
+collapsing into one "3 reminders still open"; daily ceiling of 6 across all
+reminders, dropped not deferred on hitting the cap; explicit snooze cancels
+the whole pending ladder via the existing `cancelScheduledForReminder`
+sweep.
+
+**Prerequisite now met** — it was deferred until real `snoozeCount` data
+existed; `ReminderService.ts` has incremented it on every snooze since
+Component 1 shipped.
+
+**Constraint — collides with the setAlarmClock fix.** Ladder rungs are
+ordinary scheduled notifications carrying the same `reminderId` payload, so
+a rung inheriting `alarm: true` would route through `setAlarmClock()` (see
+[device-tests/cross-cutting.md#d19](device-tests/cross-cutting.md#d19)).
+That would make **every rung** claim the system's single "next alarm clock"
+slot, repeatedly overwriting the user's real clock alarm, and trip OEM
+"frequently wakes your system" heuristics. **The re-nudge scheduling path
+must force the non-alarm-clock route explicitly** — the reminder's own alarm
+flag must not propagate to its rungs.
+
+### Persona-based personalization onboarding
+
+*(not in the priority table above — deferred, unreviewed branch)* Plan:
+[`C:\Users\anand\.gemini\antigravity\brain\a09f2cdd-23cf-461e-b10c-cce7da152001\implementation_plan.md`](file:///C:/Users/anand/.gemini/antigravity/brain/a09f2cdd-23cf-461e-b10c-cce7da152001/implementation_plan.md)
+(written by Gemini/Antigravity). A first-run 3-question quiz maps the user
+to one of 4 profiles (Busy Juggler, Step-by-Step Doer, Quick Finisher, Deep
+Focuser), meant to tailor lead time, alarm/vibration, snooze length and
+notification tone per profile. Lives on branch `feature/persona-onboarding`
+(tip `ae47295`), tagged in its own commit message **`[NOT REVIEWED — do not
+ship as-is]`**. Not merged into `main`. Not in a single EAS build (checked
+2026-08-30). **Deferred — take up later.**
+
+**Status as of 2026-08-30, checked against the plan doc:** roughly
+half-built.
+- **Done:** `types/persona.ts`, `constants/personas.ts`,
+  `utils/personaScoring.ts`, `components/onboarding/OnboardingWizard.tsx`,
+  `components/PersonaComparisonSheet.tsx`; `ReminderService.ts` has
+  `getUserPersona`/`setUserPersona`/`hasCompletedOnboarding`/
+  `markOnboardingCompleted`; `app/_layout.tsx` wires `OnboardingWizard` in
+  place of the old `NameOnboarding`. Tests exist for wizard, comparison
+  sheet, scoring util; full suite (730 tests) passes, typecheck clean on
+  that branch.
+- **Not started:** `app/(tabs)/settings.tsx` has no "Reminder Style" section
+  at all (no persona badge, comparison-sheet entry point, re-take-quiz
+  control, or per-setting overrides). `app/smart-alerts.tsx` has no
+  persona-tuning explanation card. `getPersonaSettings()`/
+  `savePersonaSettings()` (per-setting override storage) never written.
+  Scheduling doesn't apply persona lead time anywhere — `scheduleNotification`
+  still uses one hardcoded `ALARM_EARLY_OFFSET_MS` (60s) for everyone, so the
+  plan's headline mechanism (personas changing actual reminder *behavior*,
+  not just onboarding copy) isn't wired up. No manual/device verification —
+  it's never been built into a runnable artifact.

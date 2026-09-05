@@ -1,0 +1,30 @@
+# Smoke test: does Maestro's selector/assertion layer see this app's RN Text
+# nodes and numeral-time parsing at all, or does it hit the same "RN Text
+# nodes aren't exposed to the accessibility tree" wall raw uiautomator hit?
+#
+# NOTE: this does NOT type Malayalam script, despite the filename — Maestro's
+# `inputText` is ASCII-only on Android (drives `adb shell input text`; see
+# maestro#146, open since 2022). It types an English sentence with a numeral
+# time and checks the app's own parsing/rendering renders it as 12-hour
+# AM/PM. A flow that needs to type actual Malayalam script needs an external
+# workaround (see CLAUDE.md's Testing > End-to-end tests section) — none
+# exists here yet.
+#
+# Persisted: taps Save, so this leaves one reminder behind each run.
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Maestro reminder at 4.30 PM today"
+- tapOn:
+    id: "quick-add-save"
+- assertVisible: "Maestro reminder"
+- assertVisible: "Today · 4:30 PM"
+
+
+

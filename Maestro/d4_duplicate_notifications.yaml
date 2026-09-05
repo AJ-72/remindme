@@ -1,0 +1,54 @@
+# D4: Duplicate notifications
+# Tests that creating the same reminder twice only posts one notification,
+# not duplicate notifications.
+#
+# AUTO: fully scriptable via post-notification count assertion
+# Persisted: saves two identical reminders
+#
+appId: com.curios.remindme
+---
+# Setup: launch app
+# NOTE: clearState:true fails on this device with a SecurityException
+# (PID does not have permission CLEAR_APP_USER_DATA) - confirmed 2026-09-04.
+# Runs against whatever state is already on the device.
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+# Create first reminder
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Duplicate test reminder at 1:30 PM"
+- tapOn:
+    id: "quick-add-save"
+- scrollUntilVisible:
+    element:
+      text: "Duplicate test reminder"
+    direction: DOWN
+    timeout: 10000
+
+# Create identical reminder again
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Duplicate test reminder at 1:30 PM"
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+
+# At this point, the oracle would be to check via `dumpsys alarm`
+# and `dumpsys notification` for a count of 1 (or at most 2 if deduped
+# at notification time rather than alarm time). This Maestro flow can only
+# verify the UI allowed creation; the actual dedup test requires adb.
+# List accumulates across runs (no working clearState - see note above),
+# so scrollUntilVisible rather than a fixed scroll count.
+- scrollUntilVisible:
+    element:
+      text: "Duplicate test reminder"
+    direction: DOWN
+    timeout: 10000
+
+# Note: The real pass/fail assertion happens outside Maestro:
+# Run: adb shell dumpsys notification | grep -c "Duplicate test reminder"
+# Expected: 1 (or very few, not growing with each save)
