@@ -30,7 +30,7 @@ not?") and corrects a wrong explanation that had been assumed in D20.
 | --- | --- | --- |
 | FCM server push, no local alarm | **false** | A reminder created with data off still fired accurately — the server never saw it |
 | On the ColorOS/Doze allowlist | **false** | `dumpsys deviceidle whitelist` has no `apps.tasks` entry |
-| Spends the alarm-clock slot | **false** | `Next alarm clock information:` is empty |
+| Spends the alarm-clock slot | **false** | Tasks' own `dumpsys alarm` entry carries `flags 0x0`, not the `0x9` a `setAlarmClock()` registration shows |
 
 `com.google.android.gms` **is** whitelisted, which is likely where the
 allowlist assumption came from — but Tasks itself is a separate, unprivileged
@@ -105,7 +105,15 @@ drop to 30+ while Tasks holds 10, the correlation strengthens.
 ```powershell
 adb shell dumpsys deviceidle whitelist | Select-String "tasks|curios"
 adb shell dumpsys alarm | Select-String -Context 2,10 "apps.tasks"
+# Read the slot with care: on this ROM the "Next alarm clock information:"
+# header rendered EMPTY during the 2026-09-05 run even though a real
+# alarm-clock alarm was registered (the deskclock entry was present further
+# down the same dump). It DID render populated on 2026-08-26 (see D19), so
+# this is unexplained rather than a known ROM behaviour -- treat an empty
+# header as inconclusive, not as proof no app holds the slot, and confirm
+# against the per-package entry below before drawing any conclusion.
 adb shell dumpsys alarm | Select-String -Context 0,3 "Next alarm clock"
+adb shell dumpsys alarm | Select-String -Context 2,10 "com.curios.remindme"
 adb shell am get-standby-bucket com.google.android.apps.tasks
 adb shell am get-standby-bucket com.curios.remindme
 ```
@@ -149,11 +157,11 @@ system_learnings.md). Three-tier fallback with distinct log lines:
   the dump's `Next wake from idle:` list, yet delivery was exact anyway. Not
   understood. Re-check after a longer Doze period, where maintenance windows
   are further apart than under `force-idle`.
-- **`ALARM_EARLY_OFFSET_MS = 60000` must now be revisited.** It exists ONLY to
-  absorb inexact-alarm drift (see its comment in `ReminderService.ts`). With
-  exact delivery it makes every reminder fire a minute early. Removing it also
-  needs the duplicate-delivery guard at `ReminderService.ts:857-864`
-  revisited (see system_learnings.md 2026-08-09).
+- ~~**`ALARM_EARLY_OFFSET_MS = 60000` must now be revisited.**~~ **Resolved**
+  by the exact-timing change (see [D26](#d26)): the constant is removed, and
+  the two duplicate-delivery guards that depended on it now simplify to a
+  plain `datetime > now` comparison. Verification of the resulting delivery
+  time is D26's job, not this note's.
 - **The status-bar alarm icon.** Every scheduled reminder now registers as a
   system alarm clock. Confirm what the user actually sees with several
   reminders pending — **addressed by D22**, see below.
@@ -597,3 +605,76 @@ adb shell run-as com.curios.remindme ls -la databases/    # debuggable only
 
 **Do not ship Settings copy claiming automatic backup until this passes** — a
 wrong promise about data safety is worse than saying nothing.
+
+---
+
+<a id="d26"></a>
+## D26 — Exact timing for non-alarm reminders · `PENDING`
+
+*Added 2026-09-05.* Silent reminders now route through `setAlarmClock()` like
+alarm ones. The JS flag is `exactTiming` (default ON, global Settings toggle +
+per-reminder override in the detail screen); the native patch reads it from
+`content.data` alongside `alarm`.
+
+**Why this cannot be proven in Jest.** The suite asserts the flag reaches
+`content.data` and nothing further. Everything that matters here — whether
+ColorOS honours the registration, what the alarm's `windowLength` and `flags`
+actually are, and when the notification lands — happens inside the OS. The
+baseline below was measured with the *old* build precisely because green tests
+said nothing about it.
+
+**Baseline (2026-09-05, OnePlus CPH2569, local debug build, device b81a371a).**
+A silent reminder 5 minutes out, on the alarm-gated build, reproducing the
+reported bug:
+
+```
+remindme-patch: EXACT set for 1788626415840 (alarmClock=false, canScheduleExactAlarms=true)
+RTC_WAKEUP #10: ... com.curios.remindme ... windowLength 130581 ... flags 0x4
+```
+
+`130581 / 174000 = 75.0%` — an exact match for AOSP's `maxTriggerTime()`
+inexact heuristic. The call succeeded, the permission was held, no exception
+was thrown, and the alarm was still registered inexact. The deskclock control
+was unaffected (`windowLength 0`, `flags 0x9`).
+
+**Requires a native rebuild.** The patch changed, and expo-notifications ships
+a precompiled `.aar` — `buildFromSource` for it is already set in
+`artifacts/mobile/package.json`, but the APK must be rebuilt or the old
+alarm-gated binary keeps running and every check below reports the baseline.
+
+**Steps.**
+1. Rebuild and install (`npx expo run:android` from `artifacts/mobile`, or
+   `scripts/dev-device.ps1`).
+2. Create a **silent** reminder ~5 minutes out.
+3. ```
+   adb logcat -d | Select-String "remindme-patch"
+   adb shell dumpsys alarm | Select-String -Context 2,10 "com.curios.remindme"
+   ```
+4. Watch it fire against a clock.
+5. Turn the reminder's **"Arrive on time"** switch off in its detail screen and
+   repeat steps 3-4 with a fresh reminder.
+
+**Pass.** At step 3 the log line reads `ALARM_CLOCK set` (not `EXACT set`) and
+the alarm shows `windowLength 0` with `flags 0x9`. At step 4 it arrives within
+a few seconds of its time. At step 5 it reverts to `EXACT set` / `flags 0x4` —
+the override must actually reach the native layer, or the setting is decorative.
+
+**Fails if.** `windowLength` is non-zero with the switch ON — particularly at
+**75% of futurity**, which is the ColorOS demotion fingerprint and would mean
+`setAlarmClock()` is being downgraded too, invalidating the whole approach.
+
+**Also unverified, and not answered by the above:**
+- **The `showIntent` question.** Every reminder now claims the alarm-clock
+  display slot, so the status-bar icon is expected to be permanently present
+  in normal use — a much more visible change than when only alarm reminders
+  did it. Whether a null `showIntent` suppresses the icon was **not** measured;
+  it could not be, since the installed build never reached `setAlarmClock()`
+  for a silent reminder. Check what the status bar and lock screen actually
+  show with several silent reminders pending.
+- **The user's real Clock alarm** must still fire, and D22's finding that the
+  slot is display-only (all alarms fire regardless) should be re-confirmed now
+  that far more reminders compete for it.
+- **OEM frequency heuristics** — "frequently wakes your system" warnings become
+  likelier now that every reminder registers as an alarm clock.
+- **Battery.** Previously flagged as unverified for alarm reminders only; the
+  population is now every reminder.

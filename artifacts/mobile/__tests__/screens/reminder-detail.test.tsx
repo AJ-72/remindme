@@ -79,6 +79,46 @@ describe("ReminderDetailScreen", () => {
     expect(await findByText("Some details")).toBeTruthy();
   });
 
+  // The per-reminder override of the global "Arrive on time" default. Writing
+  // the field is not enough on its own -- the notification has to be re-armed
+  // so the already-registered alarm is replaced, which editReminder does.
+  it("defaults the exact-timing switch on for a reminder with no stored preference", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("detail-exact-timing-switch");
+    expect(switchEl.props.value).toBe(true);
+  });
+
+  it("reflects a stored exactTiming: false on the switch", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ exactTiming: false })])
+    );
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("detail-exact-timing-switch");
+    expect(switchEl.props.value).toBe(false);
+  });
+
+  it("persists an exact-timing override without disturbing the reminder's other fields", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("detail-exact-timing-switch");
+
+    await act(async () => {
+      fireEvent(switchEl, "valueChange", false);
+    });
+
+    await waitFor(async () => {
+      const stored = JSON.parse(
+        (await AsyncStorage.getItem(STORAGE_KEY)) as string
+      );
+      expect(stored[0].exactTiming).toBe(false);
+      expect(stored[0].title).toBe("Test reminder");
+      expect(stored[0].description).toBe("Some details");
+      expect(stored[0].datetime).toBe(FUTURE);
+    });
+  });
+
   it("shows the already-handled message when the reminder is missing", async () => {
     const { findByText } = renderScreen();
     expect(

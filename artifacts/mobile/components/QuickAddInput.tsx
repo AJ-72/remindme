@@ -879,6 +879,21 @@ export default function QuickAddInput({ onSaved }: Props) {
         </View>
       </View>
 
+      {/* Shown only when the reminder being composed will actually be silent
+          AND that came from the Settings default rather than a deliberate tap.
+          Keyed off `alarm` (state) rather than alarmTouchedRef, since a ref
+          does not re-render — the hint has to clear the moment the bell is
+          tapped. Silence only: punctuality is carried independently by
+          exactTiming, so a silent reminder is no longer a late one. */}
+      {!defaultAlarmEnabled && !alarm && (
+        <View style={styles.vagueHint} testID="quick-add-silent-hint">
+          <Text style={styles.vagueHintText}>
+            Silent — arrives on time, without a sound. Tap the bell to make it
+            ring.
+          </Text>
+        </View>
+      )}
+
       {showVagueHint && (
         <View style={styles.vagueHint} testID="vague-task-hint">
           <Text style={styles.vagueHintText}>

@@ -27,6 +27,7 @@ import {
 } from "@/services/DebugLogService";
 import {
   buildBackupJson,
+  countPendingRemindersDisagreeingWithAlarm,
   importRemindersFromJson,
 } from "@/services/ReminderService";
 import {
@@ -46,7 +47,11 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const {
     defaultAlarmEnabled,
+    defaultExactTimingEnabled,
+    setDefaultExactTimingEnabled,
     setDefaultAlarmEnabled,
+    setAlarmForPending,
+    reminders,
     showDescriptionInNotifications,
     setShowDescriptionInNotifications,
     inviteNudgeEnabled,
@@ -67,6 +72,44 @@ export default function SettingsScreen() {
   const [restoreText, setRestoreText] = useState("");
   const [restoreError, setRestoreError] = useState("");
   const [nameSheetVisible, setNameSheetVisible] = useState(false);
+
+  /**
+   * The default always changes — that is what the switch means. What needs
+   * asking is whether EXISTING pending reminders should follow, since each
+   * carries its own alarm value that this default never reads at fire time.
+   * Silently rewriting them would discard a deliberate per-reminder override;
+   * silently leaving them is what made the status-bar icon linger after the
+   * toggle went off (D22). So: change the default, then offer the sweep.
+   *
+   * Both directions prompt, and in both the cancel-role button is the one that
+   * changes nothing — a dismissed alert must never mass-rewrite reminders.
+   */
+  const handleDefaultAlarmChange = async (enabled: boolean) => {
+    await setDefaultAlarmEnabled(enabled);
+    const affected = countPendingRemindersDisagreeingWithAlarm(
+      reminders,
+      enabled
+    );
+    if (affected === 0) return;
+    const plural = affected === 1 ? "reminder" : "reminders";
+    Alert.alert(
+      enabled
+        ? `Turn alarm on for your ${affected} existing ${plural}?`
+        : `Silence your ${affected} existing ${plural} too?`,
+      enabled
+        ? `${affected === 1 ? "It is" : "They are"} silent, and may arrive late. Turning alarm on makes ${affected === 1 ? "it ring" : "them ring"} out loud at the exact time.`
+        : `${affected === 1 ? "It is" : "They are"} set to ring, and will keep ringing on time. Silenced reminders may arrive up to 20 minutes late.`,
+      [
+        { text: "Keep them as they are", style: "cancel" },
+        {
+          text: enabled ? `Turn on for all ${affected}` : `Silence all ${affected}`,
+          onPress: () => {
+            void setAlarmForPending(enabled);
+          },
+        },
+      ]
+    );
+  };
 
   const openLogs = async () => {
     const entries = await getDebugLogs();
@@ -375,26 +418,49 @@ export default function SettingsScreen() {
             color={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
           />
           <View style={{ flex: 1 }}>
-            {/* The label names punctuality, not just sound. Turning this off
-                routes the reminder through the API aggressive OEM power
-                management downgrades (see D7/D19 in device-tests.md), so a
-                silent reminder is also a late one — a behaviour the old
-                "Play alarm sound by default" wording hid completely. */}
-            <Text style={styles.alarmLabel}>
-              Alarm — rings, and arrives on time
-            </Text>
+            {/* This controls SOUND only. It used to name punctuality too,
+                because a non-alarm reminder went through the API aggressive
+                OEM power management downgrades (see D7/D19/D25 in
+                device-tests/cross-cutting.md). Exact timing is now its own
+                setting below, so a silent reminder is no longer a late one
+                and that wording would be false. */}
+            <Text style={styles.alarmLabel}>Alarm sound</Text>
             <Text style={styles.alarmSubLabel}>
               {defaultAlarmEnabled
-                ? "Rings out loud, and fires at exactly the time you set"
-                : "Silent, and may arrive up to 20 minutes late"}
+                ? "Rings out loud"
+                : "Silent — arrives without a sound"}
             </Text>
           </View>
           <Switch
             testID="default-alarm-switch"
             value={defaultAlarmEnabled}
-            onValueChange={(v) => setDefaultAlarmEnabled(v)}
+            onValueChange={(v) => handleDefaultAlarmChange(v)}
             trackColor={{ false: colors.muted, true: colors.primary + "66" }}
             thumbColor={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
+          />
+        </View>
+        <View style={[styles.alarmCard, styles.descriptionCard]}>
+          <Feather
+            name={defaultExactTimingEnabled ? "clock" : "watch"}
+            size={18}
+            color={defaultExactTimingEnabled ? colors.primary : colors.mutedForeground}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.alarmLabel}>Arrive on time</Text>
+            <Text style={styles.alarmSubLabel}>
+              {defaultExactTimingEnabled
+                ? "Fires at exactly the time you set"
+                : "Your phone may delay it by several minutes — up to an hour for a next-day one"}
+            </Text>
+          </View>
+          <Switch
+            testID="default-exact-timing-switch"
+            value={defaultExactTimingEnabled}
+            onValueChange={(v) => setDefaultExactTimingEnabled(v)}
+            trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+            thumbColor={
+              defaultExactTimingEnabled ? colors.primary : colors.mutedForeground
+            }
           />
         </View>
         {/* Android-only: the persistent status-bar clock is a side effect of
@@ -446,10 +512,11 @@ export default function SettingsScreen() {
                   icon comes with it.
                 </Text>
                 <Text style={styles.explainerText}>
-                  The control you do have is the Alarm switch above, and you
-                  can set it per reminder. A reminder with the alarm off is
-                  scheduled the ordinary way: no icon, but your phone may delay
-                  it by several minutes — up to an hour for a next-day one.
+                  The control you do have is the &ldquo;Arrive on time&rdquo;
+                  switch above, and you can set it per reminder from its detail
+                  screen. A reminder with it off is scheduled the ordinary way:
+                  no icon, but your phone may delay it by several minutes — up
+                  to an hour for a next-day one.
                 </Text>
               </View>
             )}

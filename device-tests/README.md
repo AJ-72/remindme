@@ -15,7 +15,7 @@ ships it.**
 
 | File | Covers | IDs |
 | --- | --- | --- |
-| [cross-cutting.md](cross-cutting.md) | Alarm delivery mechanics — the OEM battery/Doze/AlarmManager behavior everything else depends on | D1, D7, D19, D20, D22, D25 |
+| [cross-cutting.md](cross-cutting.md) | Alarm delivery mechanics — the OEM battery/Doze/AlarmManager behavior everything else depends on | D1, D7, D19, D20, D22, D25, D26 |
 | [notifications.md](notifications.md) | Notification actions, channels, dedupe | D2, D3, D4, D15, D16 |
 | [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9, D10, D11, D12, D13 |
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14 |
@@ -44,11 +44,12 @@ ships it.**
 ## All scenarios at a glance
 
 Last updated after the automated run of **2026-09-04** (OnePlus CPH2569,
-local debug build via `expo run:android`) unless noted. **9 `AUTO` · 13
+local debug build via `expo run:android`) unless noted. **9 `AUTO` · 14
 `SEMI` · 1 `MANUAL`.**
 
 | ID | Scenario | Status | Last run | Auto? | Blocks backlog | File |
 | --- | --- | --- | --- | --- | --- | --- |
+| D26 | Exact timing for non-alarm reminders | `PENDING` | — | SEMI | — | [cross-cutting](cross-cutting.md#d26) |
 | D25 | How Google Tasks actually stays punctual (comparison) | `INFO` | 2026-09-05 | AUTO | — | [cross-cutting](cross-cutting.md#d25) |
 | D19 | `setAlarmClock()` exact delivery | `PASS` | 2026-08-24 | AUTO | — | [cross-cutting](cross-cutting.md#d19) |
 | D20 | EAS re-verify after setAlarmClock | `PASS` | 2026-08-29 | SEMI | — | [cross-cutting](cross-cutting.md#d20) |
@@ -183,6 +184,7 @@ tables stay about status:
 | D19 / D20 / D21 / D23 | `dumpsys alarm` `windowLength`/`flags`, `Next alarm clock` slot, `AlarmManager` delivery log |
 | D22 | Label strings via `uiautomator`; delivery lateness with the permission revoked |
 | D25 | `dumpsys deviceidle whitelist`, `dumpsys alarm` history/`policyWhenElapsed`, `am get-standby-bucket` |
+| D26 | `dumpsys alarm` `windowLength`/`flags` + the `remindme-patch` logcat line; status-bar icon needs a human |
 
 **None of this exists as a harness today.** `pnpm test` is Jest only, which is
 why this folder exists. Read the column above as "could be automated", not
