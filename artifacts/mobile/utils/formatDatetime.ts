@@ -8,6 +8,15 @@ function isSameDay(a: Date, b: Date): boolean {
   );
 }
 
+// Some locales/ICU implementations render toLocaleTimeString's hour12 marker
+// as lowercase "am"/"pm" instead of "AM"/"PM". Force uppercase so display is
+// consistent regardless of device locale.
+export function formatTime12h(d: Date): string {
+  return d
+    .toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })
+    .replace(/am|pm/i, (m) => m.toUpperCase());
+}
+
 export function formatDatetime(iso: string): string {
   const d = new Date(iso);
   const now = new Date();
@@ -19,7 +28,7 @@ export function formatDatetime(iso: string): string {
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const time = formatTime12h(d);
   if (isSameDay(d, now)) return `Today · ${time}`;
   if (isSameDay(d, tomorrow)) return `Tomorrow · ${time}`;
   return d.toLocaleDateString([], { month: "short", day: "numeric" }) + ` · ${time}`;

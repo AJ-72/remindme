@@ -23,6 +23,7 @@ import type { PickableContact } from "@/services/ContactsService";
 import type { ReminderRecipient } from "@/services/ReminderService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import { getFontFamily } from "@/utils/getFontFamily";
+import { formatTime12h } from "@/utils/formatDatetime";
 
 type DateTimePickerEvent = { type: string; nativeEvent: object };
 const DateTimePicker: React.ComponentType<any> | null =
@@ -169,10 +170,7 @@ export default function AddReminderScreen() {
     day: "numeric",
     year: "numeric",
   });
-  const formattedTime = parsedDate.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const formattedTime = formatTime12h(parsedDate);
 
   const canSave = !saving && !!(isEditing ? editTitle.trim() : parsedTitle || input.trim());
 

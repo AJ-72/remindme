@@ -27,6 +27,7 @@ import {
 } from "@/services/SpeechService";
 import type { PickableContact } from "@/services/ContactsService";
 import type { ReminderRecipient } from "@/services/ReminderService";
+import { formatTime12h } from "@/utils/formatDatetime";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import type { ParsedAmbiguity } from "@/utils/malayalamDateParser";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
@@ -86,7 +87,7 @@ function formatDatePill(d: Date): string {
 }
 
 function formatTimePill(d: Date): string {
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return formatTime12h(d);
 }
 
 function formatSuggestedTime(d: Date): string {
