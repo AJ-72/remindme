@@ -9,6 +9,18 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-05 — Silent reminders arrived minutes late: ColorOS demotes a *successful* setExactAndAllowWhileIdle() to an inexact alarm
+
+**WHAT:** Route non-alarm reminders through `setAlarmClock()` as well, gated on a new `exactTiming` flag rather than on the `alarm` flag. The flag defaults ON, and the native side reads it as `optBoolean("exactTiming", true)` — absent means true, so notifications scheduled before the field existed stay punctual across the upgrade instead of silently regressing. Punctuality and sound are now independent: global Settings toggle plus a per-reminder override in the detail screen. Removed `ALARM_EARLY_OFFSET_MS`, which existed only to absorb inexact drift and would otherwise fire every reminder a minute early; its two duplicate-delivery guards collapse to a plain `datetime > now`.
+
+**WHY:** The demotion is invisible from JS — the call throws nothing, `canScheduleExactAlarms()` returns true, and the patch logs the exact call as successful. It is only detectable in `dumpsys alarm`: a silent reminder 5 minutes out registered `windowLength 130581` against `174000` of futurity, which is **exactly 75%**, AOSP's `maxTriggerTime()` inexact heuristic, with `flags 0x4` instead of the `0x9` a `setAlarmClock()` registration shows. That 75% ratio is the diagnostic fingerprint — check for it before believing any "exact" alarm on these OEMs. Also worth recording: Google Tasks' punctuality is **not** explained by Doze allowlisting (measured false — `com.google.android.gms` is whitelisted, Tasks itself is not) nor by holding the alarm-clock slot; it registers *weaker* alarms than we now do, and the gap is standby bucket (10 vs our 20).
+
+**Trade-off, deliberately accepted:** `setAlarmClock()` claims the system's next-alarm-clock slot. That slot is a **display** slot, not a scheduling one — every registered alarm still fires — so the user's Clock alarm is hidden from that one readout, never cancelled. Cost is a near-permanent status-bar alarm icon, since every reminder now registers this way.
+
+**WHERE:** [patches/expo-notifications@0.32.17.patch](patches/expo-notifications@0.32.17.patch) (needs `buildFromSource`, already set — expo-notifications ships a precompiled `.aar`, so patch edits need a native rebuild to take effect), [artifacts/mobile/services/ReminderService.ts](artifacts/mobile/services/ReminderService.ts), [artifacts/mobile/app/reminder-detail.tsx](artifacts/mobile/app/reminder-detail.tsx), [artifacts/mobile/app/(tabs)/settings.tsx](artifacts/mobile/app/(tabs)/settings.tsx). Device verification is **pending** as D26 in [device-tests/cross-cutting.md](device-tests/cross-cutting.md) — Jest cannot see any of this.
+
+---
+
 ## 2026-09-01 — Ambiguous Malayalam numeral ("രാവിലെ 5 ആപ്പിൾ") was silently resolved the wrong way, deleting the quantity from the title
 
 **WHAT:** When an hour reading rests on a bare numeral next to a period word (morning/evening/etc.), the parser now produces *both* readings — numeral-as-hour and numeral-as-part-of-title — instead of picking one. `QuickAddInput` asks the user once on save, showing each reading's resulting time + title as a tappable row; nothing is written until answered. The chosen title is held in a ref across the quiet-hours detour (05:00 falls in the default quiet window, so that path is common here and was saving the wrong title).
