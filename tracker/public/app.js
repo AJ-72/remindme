@@ -1,5 +1,16 @@
 const state = {
   selectedId: null,
+  readyItems: [],
+  listItems: [],
+};
+
+const KIND_LABELS = { feature: 'Feature', bug: 'Bug', spike: 'Spike', debt: 'Debt' };
+const STATUS_LABELS = {
+  open: 'Open',
+  in_progress: 'In Progress',
+  blocked: 'Blocked',
+  deferred: 'Deferred',
+  done: 'Done',
 };
 
 function escapeHtml(str) {
@@ -14,11 +25,10 @@ function checkedValues(fieldsetId) {
 }
 
 function renderBadges(item) {
-  let html = `<span class="badge badge-kind">${item.kind}</span>`;
-  html += `<span class="badge badge-status">${item.status}</span>`;
-  if (item.status === 'blocked') html += `<span class="badge badge-blocked-manual">manually blocked</span>`;
-  if (item.computedBlocked) html += `<span class="badge badge-blocked-computed">blocked by dependency</span>`;
-  if (item.effort) html += `<span class="badge">${escapeHtml(item.effort)}</span>`;
+  let html = `<span class="badge badge-kind-${item.kind}">${KIND_LABELS[item.kind] || item.kind}</span>`;
+  html += `<span class="badge badge-status-${item.status}">${STATUS_LABELS[item.status] || item.status}</span>`;
+  if (item.computedBlocked) html += `<span class="badge badge-blocked-computed">Blocked by dependency</span>`;
+  if (item.effort) html += `<span class="badge badge-effort">${escapeHtml(item.effort)}</span>`;
   return html;
 }
 
@@ -53,20 +63,65 @@ function sanitizeRenderedMarkdown(html) {
   return container.innerHTML;
 }
 
-function renderList(targetId, items) {
+function matchesSearch(item, query) {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return item.id.toLowerCase().includes(q) || item.title.toLowerCase().includes(q);
+}
+
+function sortItems(items, sortKey) {
+  const sorted = [...items];
+  switch (sortKey) {
+    case 'created_asc':
+      sorted.reverse();
+      break;
+    case 'id_asc':
+      sorted.sort((a, b) => a.id.localeCompare(b.id));
+      break;
+    case 'status_asc':
+      sorted.sort((a, b) => a.status.localeCompare(b.status));
+      break;
+    default:
+      // API already returns created_at DESC.
+      break;
+  }
+  return sorted;
+}
+
+function renderList(targetId, emptyId, countId, items) {
   const ul = document.getElementById(targetId);
   ul.innerHTML = '';
   for (const item of items) {
     const li = document.createElement('li');
-    li.innerHTML = `<strong>${item.id}</strong> ${escapeHtml(item.title)} ${renderBadges(item)}`;
+    li.innerHTML = `
+      <span class="item-id">${item.id}</span>
+      <span class="item-title">${escapeHtml(item.title)}</span>
+      <span class="item-badges">${renderBadges(item)}</span>
+    `;
     li.addEventListener('click', () => openDetail(item.id));
     ul.appendChild(li);
   }
+  document.getElementById(emptyId).hidden = items.length > 0;
+  document.getElementById(countId).textContent = items.length;
+}
+
+function applyListFilters() {
+  const query = document.getElementById('search-input').value.trim();
+  const sortKey = document.getElementById('sort-select').value;
+  const filtered = state.listItems.filter(item => matchesSearch(item, query));
+  renderList('item-list', 'list-empty', 'list-count', sortItems(filtered, sortKey));
+}
+
+function applyReadyFilters() {
+  const query = document.getElementById('search-input').value.trim();
+  const filtered = state.readyItems.filter(item => matchesSearch(item, query));
+  renderList('ready-list', 'ready-empty', 'ready-count', filtered);
 }
 
 async function loadReady() {
   const res = await fetch('/api/items/ready');
-  renderList('ready-list', await res.json());
+  state.readyItems = await res.json();
+  applyReadyFilters();
 }
 
 async function loadList() {
@@ -80,11 +135,20 @@ async function loadList() {
   if (blockedOnly) params.set('blocked', 'true');
 
   const res = await fetch(`/api/items?${params}`);
-  renderList('item-list', await res.json());
+  state.listItems = await res.json();
+  applyListFilters();
 }
 
 async function refreshAll() {
   await Promise.all([loadReady(), loadList()]);
+}
+
+function openAddModal() {
+  document.getElementById('add-modal-backdrop').hidden = false;
+}
+
+function closeAddModal() {
+  document.getElementById('add-modal-backdrop').hidden = true;
 }
 
 async function openDetail(id) {
@@ -92,6 +156,7 @@ async function openDetail(id) {
   const res = await fetch(`/api/items/${id}`);
   const item = await res.json();
 
+  document.getElementById('detail-backdrop').hidden = false;
   document.getElementById('detail-panel').hidden = false;
   document.getElementById('detail-title').textContent = `${item.id}: ${item.title}`;
   document.getElementById('detail-meta').innerHTML = renderBadges(item);
@@ -105,9 +170,28 @@ async function openDetail(id) {
   document.getElementById('detail-blockers').innerHTML = blockersHtml;
 }
 
-document.getElementById('detail-close').addEventListener('click', () => {
+function closeDetail() {
+  document.getElementById('detail-backdrop').hidden = true;
   document.getElementById('detail-panel').hidden = true;
   state.selectedId = null;
+}
+
+document.getElementById('open-add-modal').addEventListener('click', openAddModal);
+document.getElementById('add-modal-close').addEventListener('click', closeAddModal);
+document.getElementById('add-form-cancel').addEventListener('click', closeAddModal);
+document.getElementById('add-modal-backdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'add-modal-backdrop') closeAddModal();
+});
+
+document.getElementById('detail-close').addEventListener('click', closeDetail);
+document.getElementById('detail-backdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'detail-backdrop') closeDetail();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('detail-backdrop').hidden) closeDetail();
+  if (!document.getElementById('add-modal-backdrop').hidden) closeAddModal();
 });
 
 document.getElementById('detail-save').addEventListener('click', async () => {
@@ -148,9 +232,16 @@ document.getElementById('add-form').addEventListener('submit', async (e) => {
     }),
   });
   e.target.reset();
+  closeAddModal();
   await refreshAll();
 });
 
-document.querySelectorAll('#filters input').forEach(el => el.addEventListener('change', loadList));
+document.querySelectorAll('#filters input, #kind-filters input, #status-filters input, #blocked-only-filter')
+  .forEach(el => el.addEventListener('change', loadList));
+document.getElementById('search-input').addEventListener('input', () => {
+  applyReadyFilters();
+  applyListFilters();
+});
+document.getElementById('sort-select').addEventListener('change', applyListFilters);
 
 refreshAll();
