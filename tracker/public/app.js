@@ -2,6 +2,12 @@ const state = {
   selectedId: null,
 };
 
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 function checkedValues(fieldsetId) {
   return Array.from(document.querySelectorAll(`#${fieldsetId} input:checked`))
     .map(el => el.value);
@@ -21,7 +27,7 @@ function renderList(targetId, items) {
   ul.innerHTML = '';
   for (const item of items) {
     const li = document.createElement('li');
-    li.innerHTML = `<strong>${item.id}</strong> ${item.title} ${renderBadges(item)}`;
+    li.innerHTML = `<strong>${item.id}</strong> ${escapeHtml(item.title)} ${renderBadges(item)}`;
     li.addEventListener('click', () => openDetail(item.id));
     ul.appendChild(li);
   }
@@ -58,7 +64,7 @@ async function openDetail(id) {
   document.getElementById('detail-panel').hidden = false;
   document.getElementById('detail-title').textContent = `${item.id}: ${item.title}`;
   document.getElementById('detail-meta').innerHTML = renderBadges(item);
-  document.getElementById('detail-notes-rendered').innerHTML = marked.parse(item.notes_md || '');
+  document.getElementById('detail-notes-rendered').innerHTML = marked.parse(escapeHtml(item.notes_md || ''));
   document.getElementById('detail-notes-edit').value = item.notes_md || '';
 
   const blockersHtml = [
