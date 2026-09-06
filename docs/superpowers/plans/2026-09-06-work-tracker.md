@@ -285,7 +285,7 @@ test('isComputedBlocked reflects an open blocker', () => {
   db.close(); fs.unlinkSync(path);
 });
 
-test('readyItems excludes computed-blocked and non-open items', () => {
+test('readyItems excludes computed-blocked and non-open items, but keeps items that block others', () => {
   const { db, path } = freshDb('ready');
   const blocker = createItem(db, { kind: 'bug', title: 'Blocker' });
   const blocked = createItem(db, { kind: 'feature', title: 'Blocked feature' });
@@ -296,7 +296,7 @@ test('readyItems excludes computed-blocked and non-open items', () => {
   db.prepare("UPDATE items SET status = 'done' WHERE id = ?").run(done.id);
 
   const ids = readyItems(db).map(i => i.id).sort();
-  assert.deepStrictEqual(ids, [ready.id].sort());
+  assert.deepStrictEqual(ids, [blocker.id, ready.id].sort());
   db.close(); fs.unlinkSync(path);
 });
 
@@ -1211,3 +1211,12 @@ git commit -m "feat(tracker): migrate backlog.md content, replace with pointer f
   the kind-guessing heuristic's limits and gives a concrete manual
   fix-up path, per the spec's own callout of this as a known judgment
   call rather than an automatable step.
+- **Post-hoc correction (found during Task 2 execution, 2026-09-06):**
+  this plan's `readyItems` test fixture originally asserted
+  `[ready.id]` only, which is inconsistent with `readyItems`'s own
+  stated two-condition interface spec above (an item that blocks
+  something else, but is itself open and not computed-blocked, should
+  still count as ready). Fixed in both this plan and the design spec's
+  intent: the fixture now asserts `[blocker.id, ready.id]`. Recorded in
+  the SDD ledger for this plan as a ruling — see
+  `.superpowers/sdd/2026-09-06-work-tracker/progress.md`.
