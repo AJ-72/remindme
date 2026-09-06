@@ -2,7 +2,15 @@ const state = {
   selectedId: null,
   readyItems: [],
   listItems: [],
+  heroId: null,
 };
+
+const spotlightScene = typeof TrackerScene !== 'undefined'
+  ? TrackerScene.mountSpotlight(document.getElementById('hero-canvas'))
+  : null;
+if (typeof TrackerScene !== 'undefined') {
+  TrackerScene.initBackground(document.getElementById('bg-canvas'));
+}
 
 const KIND_LABELS = { feature: 'Feature', bug: 'Bug', spike: 'Spike', debt: 'Debt' };
 const STATUS_LABELS = {
@@ -139,8 +147,67 @@ async function loadList() {
   applyListFilters();
 }
 
-async function refreshAll() {
+function pickOldestReady(items) {
+  if (items.length === 0) return null;
+  return items.reduce((oldest, item) => (item.created_at < oldest.created_at ? item : oldest));
+}
+
+function renderHero(item) {
+  const content = document.getElementById('hero-content');
+  const empty = document.getElementById('hero-empty');
+
+  if (!item) {
+    content.hidden = true;
+    empty.hidden = false;
+    if (spotlightScene) spotlightScene.setStage('empty');
+    return;
+  }
+
+  content.hidden = false;
+  empty.hidden = true;
+  document.getElementById('hero-id').textContent = item.id;
+  document.getElementById('hero-title').textContent = item.title;
+  document.getElementById('hero-badges').innerHTML = renderBadges(item);
+
+  const inProgress = item.status === 'in_progress';
+  document.getElementById('hero-hint').textContent = inProgress
+    ? 'In progress — fuel the finish and mark it done.'
+    : 'Ready to go — no dependencies in the way.';
+  document.getElementById('hero-start').hidden = inProgress;
+  document.getElementById('hero-done').textContent = inProgress ? '🚀 Mark done' : '🚀 Done already?';
+
+  if (spotlightScene) {
+    spotlightScene.setKind(item.kind);
+    spotlightScene.setStage(inProgress ? 'ignition' : 'idle');
+  }
+}
+
+async function refreshHero() {
+  let heroItem = null;
+
+  if (state.heroId) {
+    const res = await fetch(`/api/items/${state.heroId}`);
+    if (res.ok) {
+      const item = await res.json();
+      if (item.status !== 'done') heroItem = item;
+    }
+  }
+
+  if (!heroItem) {
+    heroItem = pickOldestReady(state.readyItems);
+    state.heroId = heroItem ? heroItem.id : null;
+  }
+
+  renderHero(heroItem);
+}
+
+async function refreshLists() {
   await Promise.all([loadReady(), loadList()]);
+}
+
+async function refreshAll() {
+  await refreshLists();
+  await refreshHero();
 }
 
 function openAddModal() {
@@ -234,6 +301,42 @@ document.getElementById('add-form').addEventListener('submit', async (e) => {
   e.target.reset();
   closeAddModal();
   await refreshAll();
+});
+
+document.getElementById('hero-open').addEventListener('click', () => {
+  if (state.heroId) openDetail(state.heroId);
+});
+
+document.getElementById('hero-start').addEventListener('click', async () => {
+  if (!state.heroId) return;
+  await fetch(`/api/items/${state.heroId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'in_progress' }),
+  });
+  await refreshAll();
+});
+
+document.getElementById('hero-done').addEventListener('click', async () => {
+  if (!state.heroId) return;
+  const doneId = state.heroId;
+  await fetch(`/api/items/${doneId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'done' }),
+  });
+
+  await refreshLists();
+
+  const finish = async () => {
+    state.heroId = null;
+    await refreshHero();
+  };
+  if (spotlightScene) {
+    spotlightScene.launch(finish);
+  } else {
+    await finish();
+  }
 });
 
 document.querySelectorAll('#filters input, #kind-filters input, #status-filters input, #blocked-only-filter')

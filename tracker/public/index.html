@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <canvas id="bg-canvas" aria-hidden="true"></canvas>
+
   <div class="app">
     <header class="topbar">
       <div class="brand">
@@ -29,6 +31,29 @@
         Add item
       </button>
     </header>
+
+    <section id="hero-section" class="hero">
+      <div class="hero-scene-wrap">
+        <canvas id="hero-canvas"></canvas>
+      </div>
+      <div class="hero-body">
+        <span class="hero-eyebrow" id="hero-eyebrow">Next up</span>
+        <div id="hero-content">
+          <div class="hero-item-row">
+            <span class="item-id" id="hero-id"></span>
+            <h2 id="hero-title"></h2>
+          </div>
+          <div class="hero-badges" id="hero-badges"></div>
+          <p class="hero-hint" id="hero-hint">Ready to go — no dependencies in the way.</p>
+          <div class="hero-actions">
+            <button id="hero-open" class="btn btn-secondary" type="button">View details</button>
+            <button id="hero-start" class="btn btn-secondary" type="button">🔥 Start working</button>
+            <button id="hero-done" class="btn btn-primary" type="button">🚀 Mark done</button>
+          </div>
+        </div>
+        <p class="hero-empty" id="hero-empty" hidden>Nothing is ready right now. Add an item, or clear a blocker, to light the fuse.</p>
+      </div>
+    </section>
 
     <div class="layout">
       <aside class="sidebar">
@@ -161,6 +186,8 @@
   </div>
 
   <script src="vendor/marked.min.js"></script>
+  <script src="vendor/three.min.js"></script>
+  <script src="scene.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
