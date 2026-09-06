@@ -161,8 +161,10 @@ tracker (`tracker/`), not `backlog.md` (moved 2026-09-06 — see
 is one file, `tracker/tracker.db`):
 
 ```bash
-# What's ready to work on right now (open, no unresolved blockers)
-sqlite3 tracker/tracker.db "SELECT id, title FROM items WHERE status='open'"
+# What's ready to work on right now (open, no unresolved blockers) —
+# delegates to the tracker's own readyItems logic rather than re-deriving
+# the computed-blocked join by hand.
+curl http://localhost:4100/api/items/ready
 
 # Mark an item done after shipping it
 sqlite3 tracker/tracker.db "UPDATE items SET status='done', closed_at=datetime('now') WHERE id='BUG-3'"
