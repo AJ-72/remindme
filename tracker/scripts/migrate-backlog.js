@@ -32,9 +32,9 @@ function parseBacklog(markdownText) {
 
     const [id, legacyNum, title, effort, statusRaw, notes] = cells;
     if (id === '#' || id.startsWith('---')) continue;
-    if (!/^[A-Z]+\d+$/.test(id)) continue;
+    if (!/^[A-Z]+\d+(-[A-Z0-9]+)?$/.test(id)) continue;
 
-    const statusText = statusRaw.replace(/`/g, '').trim();
+    const statusText = statusRaw.replace(/`/g, '').trim().split(/\s+/)[0]; // Extract first word only
     const status = STATUS_MAP[statusText];
     if (!status) continue;
 
@@ -61,6 +61,7 @@ function migrate(db, markdownText) {
       kind: row.kindGuess,
       title: row.title,
       effort: row.effort,
+      status: row.status,
       notesMd,
     });
   }
@@ -70,7 +71,24 @@ function migrate(db, markdownText) {
 if (require.main === module) {
   const backlogPath = path.join(__dirname, '../../backlog.md');
   const dbPath = path.join(__dirname, '../tracker.db');
-  const markdownText = fs.readFileSync(backlogPath, 'utf8');
+
+  let markdownText;
+  const fileContent = fs.readFileSync(backlogPath, 'utf8');
+
+  // If backlog.md has been replaced with a pointer file, read from git history
+  if (fileContent.includes('Backlog moved')) {
+    const { execSync } = require('node:child_process');
+    const gitDir = path.join(__dirname, '../../');
+    try {
+      markdownText = execSync('git show HEAD~1:backlog.md', { cwd: gitDir, encoding: 'utf8' });
+    } catch (err) {
+      console.error('Failed to read backlog.md from git history:', err.message);
+      process.exit(1);
+    }
+  } else {
+    markdownText = fileContent;
+  }
+
   const db = openDb(dbPath);
   const count = migrate(db, markdownText);
   console.log(`Migrated ${count} items from backlog.md into tracker.db`);

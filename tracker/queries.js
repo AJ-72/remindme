@@ -8,12 +8,12 @@ function nextId(db, kind) {
   return `${prefix}-${n}`;
 }
 
-function createItem(db, { kind, title, effort = null, severity = null, notesMd = null }) {
+function createItem(db, { kind, title, effort = null, severity = null, notesMd = null, status = 'open' }) {
   const id = nextId(db, kind);
   db.prepare(
-    `INSERT INTO items (id, kind, title, effort, severity, notes_md)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, kind, title, effort, severity, notesMd);
+    `INSERT INTO items (id, kind, title, effort, severity, notes_md, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, kind, title, effort, severity, notesMd, status);
   return getItem(db, id);
 }
 

@@ -31,6 +31,19 @@ test('createItem inserts and getItem reads it back', () => {
   db.close(); fs.unlinkSync(path);
 });
 
+test('createItem with explicit status preserves it', () => {
+  const { db, path } = freshDb('create-status');
+  const blocked = createItem(db, { kind: 'bug', title: 'Blocked task', status: 'blocked' });
+  const deferred = createItem(db, { kind: 'feature', title: 'Deferred task', status: 'deferred' });
+  const open = createItem(db, { kind: 'bug', title: 'Open task' }); // defaults to 'open'
+
+  assert.strictEqual(blocked.status, 'blocked');
+  assert.strictEqual(deferred.status, 'deferred');
+  assert.strictEqual(open.status, 'open');
+
+  db.close(); fs.unlinkSync(path);
+});
+
 test('isComputedBlocked reflects an open blocker', () => {
   const { db, path } = freshDb('blocked');
   const blocker = createItem(db, { kind: 'bug', title: 'Root cause' });
