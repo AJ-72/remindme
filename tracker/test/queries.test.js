@@ -56,7 +56,7 @@ test('readyItems excludes computed-blocked and non-open items', () => {
   db.prepare("UPDATE items SET status = 'done' WHERE id = ?").run(done.id);
 
   const ids = readyItems(db).map(i => i.id).sort();
-  assert.deepStrictEqual(ids, [ready.id].sort());
+  assert.deepStrictEqual(ids, [blocker.id, ready.id].sort());
   db.close(); fs.unlinkSync(path);
 });
 

@@ -70,16 +70,9 @@ function listItems(db, { kinds, statuses, blockedOnly } = {}) {
 }
 
 function readyItems(db) {
-  const open = db.prepare("SELECT * FROM items WHERE status = 'open' ORDER BY created_at DESC")
-    .all();
-  return open.filter(item => {
-    if (isComputedBlocked(db, item.id)) return false;
-    // exclude if it blocks any other item that exists (not just open items)
-    const blocksAny = db.prepare(
-      "SELECT 1 FROM blocks WHERE blocked_by_id = ?"
-    ).get(item.id);
-    return !blocksAny;
-  });
+  return db.prepare("SELECT * FROM items WHERE status = 'open' ORDER BY created_at DESC")
+    .all()
+    .filter(r => !isComputedBlocked(db, r.id));
 }
 
 module.exports = { nextId, createItem, getItem, listItems, isComputedBlocked, readyItems };
