@@ -1,0 +1,77 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Work Tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Work Tracker</h1>
+
+  <section id="filters">
+    <fieldset id="kind-filters">
+      <legend>Kind</legend>
+      <label><input type="checkbox" value="feature" checked> Feature</label>
+      <label><input type="checkbox" value="bug" checked> Bug</label>
+      <label><input type="checkbox" value="spike" checked> Spike</label>
+      <label><input type="checkbox" value="debt" checked> Debt</label>
+    </fieldset>
+    <fieldset id="status-filters">
+      <legend>Status</legend>
+      <label><input type="checkbox" value="open" checked> Open</label>
+      <label><input type="checkbox" value="in_progress" checked> In Progress</label>
+      <label><input type="checkbox" value="blocked" checked> Blocked</label>
+      <label><input type="checkbox" value="deferred" checked> Deferred</label>
+      <label><input type="checkbox" value="done"> Done</label>
+    </fieldset>
+    <label><input type="checkbox" id="blocked-only-filter"> Show only computed-blocked</label>
+  </section>
+
+  <section id="ready-section">
+    <h2>Ready now</h2>
+    <ul id="ready-list"></ul>
+  </section>
+
+  <section id="add-item">
+    <h2>Add item</h2>
+    <form id="add-form">
+      <select name="kind" required>
+        <option value="feature">Feature</option>
+        <option value="bug">Bug</option>
+        <option value="spike">Spike</option>
+        <option value="debt">Debt</option>
+      </select>
+      <input name="title" placeholder="Title" required>
+      <select name="effort">
+        <option value="">(no effort)</option>
+        <option value="S">S</option>
+        <option value="M">M</option>
+        <option value="L">L</option>
+      </select>
+      <button type="submit">Add</button>
+    </form>
+  </section>
+
+  <section id="list-section">
+    <h2>All items</h2>
+    <ul id="item-list"></ul>
+  </section>
+
+  <section id="detail-panel" hidden>
+    <h2 id="detail-title"></h2>
+    <div id="detail-meta"></div>
+    <div id="detail-notes-rendered"></div>
+    <textarea id="detail-notes-edit"></textarea>
+    <button id="detail-save">Save notes</button>
+    <div id="detail-blockers"></div>
+    <form id="add-blocker-form">
+      <input id="add-blocker-id" placeholder="Blocked by item ID (e.g. BUG-3)">
+      <button type="submit">Add blocker</button>
+    </form>
+    <button id="detail-close">Close</button>
+  </section>
+
+  <script src="vendor/marked.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
