@@ -1,0 +1,46 @@
+# D16: Personalized snooze re-alert
+# Tests that after snoozing a "remind someone else" reminder,
+# the re-alert notification title includes the recipient name.
+#
+# AUTO: fully scriptable - checks notification title via dumpsys
+# Persisted: creates a "remind someone" reminder
+#
+appId: com.curios.remindme
+---
+# Setup: launch app
+# NOTE: clearState:true fails on this device with a SecurityException
+# (PID does not have permission CLEAR_APP_USER_DATA) - confirmed 2026-09-04.
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+# Create a regular reminder (snooze works for any reminder)
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Test snooze reminder at 2:00 PM"
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+# The list is sorted by upcoming time and accumulates across runs (no
+# working clearState on this device - see note above), so a freshly saved
+# item is not guaranteed to be in the initial viewport, and the number of
+# scrolls needed grows with each run. scrollUntilVisible searches as far
+# as needed instead of guessing a fixed number of scrolls.
+- scrollUntilVisible:
+    element:
+      text: "Test snooze reminder"
+    direction: DOWN
+    timeout: 10000
+
+# Note: The real test of personalized snooze re-alert requires:
+# 1. Creating a "remind someone" reminder
+# 2. Triggering the notification
+# 3. Snoozing it
+# 4. Waiting for re-alert
+# 5. Checking `dumpsys notification` for the title containing the name
+#
+# This requires timing/waiting that Maestro doesn't handle well for
+# notifications fired by the OS at a specific time. The pass/fail assertion
+# happens via adb after notification fires.

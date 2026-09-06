@@ -1,5 +1,5 @@
 import React from "react";
-import { Linking, Platform, Share, StyleSheet, useColorScheme } from "react-native";
+import { Alert, Linking, Platform, Share, StyleSheet, useColorScheme } from "react-native";
 import { router } from "expo-router";
 import { APP_SHARE_BLURB, buildAppShareMessage } from "@/utils/appShare";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
@@ -10,6 +10,7 @@ import { RemindersProvider } from "@/contexts/RemindersContext";
 import {
   INVITE_NUDGE_ENABLED_KEY,
   DEFAULT_ALARM_KEY,
+  DEFAULT_EXACT_TIMING_KEY,
   SHOW_DESCRIPTION_KEY,
   DICTATION_LANGUAGE_KEY,
   VIBRATION_KEY,
@@ -48,28 +49,158 @@ beforeEach(async () => {
   await (AsyncStorage as any).clear();
 });
 
+// The Settings toggle is a DEFAULT for new reminders — nothing in the
+// scheduling path reads it — so existing reminders keep their own alarm value
+// and keep ringing after it goes off. That surprise (a lit status-bar icon
+// with the setting off) is what these tests lock down: the default always
+// changes, the retroactive sweep is offered, and it is never automatic.
+describe("SettingsScreen retroactive alarm prompt", () => {
+  const FUTURE = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+  const seedReminders = async (alarms: boolean[]) =>
+    AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(
+        alarms.map((alarm, i) => ({
+          id: `r${i}`,
+          title: `Reminder ${i}`,
+          description: "",
+          datetime: FUTURE(),
+          completed: false,
+          alarm,
+        }))
+      )
+    );
+
+  it("offers to silence existing alarm reminders when switching off", async () => {
+    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
+    await seedReminders([true, true]);
+    const { findByTestId } = renderScreen();
+
+    fireEvent(await findByTestId("default-alarm-switch"), "valueChange", false);
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    expect(alertSpy.mock.calls[0][0]).toContain("2 existing reminders");
+  });
+
+  it("offers to turn alarm on for existing silent reminders when switching on", async () => {
+    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
+    await seedReminders([false]);
+    const { findByTestId } = renderScreen();
+
+    fireEvent(await findByTestId("default-alarm-switch"), "valueChange", true);
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    expect(alertSpy.mock.calls[0][0]).toContain("1 existing reminder");
+  });
+
+  it("does not prompt when no pending reminder would change", async () => {
+    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
+    await seedReminders([false]);
+    const { findByTestId } = renderScreen();
+
+    fireEvent(await findByTestId("default-alarm-switch"), "valueChange", false);
+
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(DEFAULT_ALARM_KEY)).toBe("false")
+    );
+    expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  // The switch means "change the default" — that must happen whether or not
+  // the user accepts the retroactive sweep, and before they answer.
+  it("changes the default even while the prompt is unanswered", async () => {
+    jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
+    await seedReminders([true]);
+    const { findByTestId } = renderScreen();
+
+    fireEvent(await findByTestId("default-alarm-switch"), "valueChange", false);
+
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(DEFAULT_ALARM_KEY)).toBe("false")
+    );
+  });
+
+  // A dismissed alert must never mass-rewrite reminders, so the button that
+  // changes nothing carries the cancel role.
+  it("puts the cancel role on the leave-them-alone button", async () => {
+    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
+    await seedReminders([true]);
+    const { findByTestId } = renderScreen();
+
+    fireEvent(await findByTestId("default-alarm-switch"), "valueChange", false);
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    const buttons = alertSpy.mock.calls[0][2] as { text: string; style?: string }[];
+    expect(buttons[0].style).toBe("cancel");
+    expect(buttons[0].text).toBe("Keep them as they are");
+  });
+
+  it("rewrites the pending reminders only when the sweep is accepted", async () => {
+    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
+    await seedReminders([true]);
+    const { findByTestId } = renderScreen();
+
+    fireEvent(await findByTestId("default-alarm-switch"), "valueChange", false);
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+
+    const buttons = alertSpy.mock.calls[0][2] as { onPress?: () => void }[];
+    buttons[1].onPress!();
+
+    await waitFor(async () => {
+      const stored = JSON.parse(
+        (await AsyncStorage.getItem(STORAGE_KEY)) as string
+      );
+      expect(stored[0].alarm).toBe(false);
+    });
+  });
+});
+
 describe("SettingsScreen", () => {
-  it("shows the alarm switch on, with 'on time' copy, when no default is stored", async () => {
+  it("shows the alarm switch on when no default is stored", async () => {
     const { findByText, findByTestId } = renderScreen();
-    expect(
-      await findByText("Rings out loud, and fires at exactly the time you set")
-    ).toBeTruthy();
+    expect(await findByText("Rings out loud")).toBeTruthy();
     const switchEl = await findByTestId("default-alarm-switch");
     expect(switchEl.props.value).toBe(true);
   });
 
-  // The toggle reads as a sound setting but also decides punctuality: a silent
-  // reminder goes through the API aggressive OEM power management downgrades,
-  // so it can land ~20 minutes late. The copy has to say so or the trade-off
-  // is invisible (backlog item 20).
-  it("shows the alarm switch off, with copy warning the reminder may be late", async () => {
+  // The alarm toggle used to decide punctuality as well as sound, so its "off"
+  // copy warned about arriving ~20 minutes late. Exact timing is now its own
+  // setting, so a silent reminder is punctual and that warning would be a lie.
+  it("shows the alarm switch off, with copy promising silence but not lateness", async () => {
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
-    const { findByText, findByTestId } = renderScreen();
-    expect(
-      await findByText("Silent, and may arrive up to 20 minutes late")
-    ).toBeTruthy();
+    const { findByText, findByTestId, queryByText } = renderScreen();
+    expect(await findByText("Silent — arrives without a sound")).toBeTruthy();
+    expect(queryByText(/late/i)).toBeNull();
     const switchEl = await findByTestId("default-alarm-switch");
     expect(switchEl.props.value).toBe(false);
+  });
+
+  it("shows the exact-timing switch on by default, with on-time copy", async () => {
+    const { findByText, findByTestId } = renderScreen();
+    expect(await findByText("Fires at exactly the time you set")).toBeTruthy();
+    const switchEl = await findByTestId("default-exact-timing-switch");
+    expect(switchEl.props.value).toBe(true);
+  });
+
+  it("toggling exact timing persists the new default to storage", async () => {
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("default-exact-timing-switch");
+
+    fireEvent(switchEl, "valueChange", false);
+
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        DEFAULT_EXACT_TIMING_KEY,
+        JSON.stringify(false)
+      )
+    );
   });
 
   it("toggling the switch persists the new default to storage", async () => {
@@ -123,7 +254,8 @@ describe("SettingsScreen", () => {
   // sub-label, and flex:1 in a column collapses it to zero height. A text query
   // alone can't catch that, so assert the style too.
   it.each([
-    ["Alarm — rings, and arrives on time"],
+    ["Alarm sound"],
+    ["Arrive on time"],
     ["Vibrate"],
     ["Show description in notifications"],
     ["Debug logs"],
@@ -190,13 +322,13 @@ describe("SettingsScreen", () => {
       expect(queryByText(/Settings . Apps . Reminders/)).toBeNull();
     });
 
-    it("points at the app's own Alarm toggle as the real escape hatch", async () => {
+    it("points at the app's own exact-timing toggle as the real escape hatch", async () => {
       setPlatform("android");
       const { findByTestId, findByText } = renderScreen();
 
       fireEvent.press(await findByTestId("alarm-icon-explainer"));
 
-      expect(await findByText(/Alarm switch above/)).toBeTruthy();
+      expect(await findByText(/Arrive on time.+switch above/s)).toBeTruthy();
     });
 
     // The button used to open Android's Alarms & reminders screen. Removed:

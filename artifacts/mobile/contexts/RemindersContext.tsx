@@ -16,6 +16,7 @@ import {
   deleteReminder as serviceDelete,
   editReminder as serviceEdit,
   getDefaultAlarmEnabled,
+  getDefaultExactTimingEnabled,
   getDictationLanguage,
   getShowDescriptionEnabled,
   getInviteNudgeEnabled,
@@ -28,7 +29,9 @@ import {
   initNotifications,
   loadReminders,
   rescheduleAllFutureReminders,
+  setAlarmForPendingReminders as serviceSetAlarmForPendingReminders,
   setDefaultAlarmEnabled as serviceSetDefaultAlarmEnabled,
+  setDefaultExactTimingEnabled as serviceSetDefaultExactTimingEnabled,
   setDictationLanguage as serviceSetDictationLanguage,
   setShowDescriptionEnabled as serviceSetShowDescriptionEnabled,
   setInviteNudgeEnabled as serviceSetInviteNudgeEnabled,
@@ -68,6 +71,19 @@ interface RemindersContextType {
   loading: boolean;
   defaultAlarmEnabled: boolean;
   setDefaultAlarmEnabled: (enabled: boolean) => Promise<void>;
+  /**
+   * Whether NEW reminders default to punctual delivery. Existing reminders
+   * carry their own `exactTiming`; flipping this never rewrites them.
+   */
+  defaultExactTimingEnabled: boolean;
+  setDefaultExactTimingEnabled: (enabled: boolean) => Promise<void>;
+  /**
+   * Retroactively bring existing pending reminders in line with `alarm`.
+   * Opt-in only — `setDefaultAlarmEnabled` deliberately does NOT call this,
+   * since a per-reminder alarm choice is user intent the default must not
+   * silently overwrite.
+   */
+  setAlarmForPending: (alarm: boolean) => Promise<void>;
   showDescriptionInNotifications: boolean;
   setShowDescriptionInNotifications: (enabled: boolean) => Promise<void>;
   inviteNudgeEnabled: boolean;
@@ -102,6 +118,7 @@ export function RemindersProvider({
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [defaultAlarmEnabled, setDefaultAlarmEnabledState] = useState(true);
+  const [defaultExactTimingEnabled, setDefaultExactTimingEnabledState] = useState(true);
   const [showDescriptionInNotifications, setShowDescriptionInNotificationsState] =
     useState(false);
   const [dictationLanguage, setDictationLanguageState] = useState<DictationLanguage>("en-US");
@@ -118,6 +135,7 @@ export function RemindersProvider({
     const [
       loadedReminders,
       defaultAlarm,
+      defaultExactTiming,
       showDescription,
       dictLang,
       preset,
@@ -129,6 +147,7 @@ export function RemindersProvider({
       await Promise.all([
         loadReminders(),
         getDefaultAlarmEnabled(),
+        getDefaultExactTimingEnabled(),
         getShowDescriptionEnabled(),
         getDictationLanguage(),
         getSnoozePreset(),
@@ -139,6 +158,7 @@ export function RemindersProvider({
       ]);
     setReminders(loadedReminders);
     setDefaultAlarmEnabledState(defaultAlarm);
+    setDefaultExactTimingEnabledState(defaultExactTiming);
     setShowDescriptionInNotificationsState(showDescription);
     setDictationLanguageState(dictLang);
     setSnoozePresetState(preset);
@@ -192,6 +212,16 @@ export function RemindersProvider({
     setDefaultAlarmEnabledState(enabled);
   }, []);
 
+  const setDefaultExactTimingEnabled = useCallback(async (enabled: boolean) => {
+    await serviceSetDefaultExactTimingEnabled(enabled);
+    setDefaultExactTimingEnabledState(enabled);
+  }, []);
+
+  const setAlarmForPending = useCallback(async (alarm: boolean) => {
+    const updated = await serviceSetAlarmForPendingReminders(reminders, alarm);
+    setReminders(updated);
+  }, [reminders]);
+
   const setInviteNudgeEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetInviteNudgeEnabled(enabled);
     setInviteNudgeEnabledState(enabled);
@@ -229,11 +259,20 @@ export function RemindersProvider({
 
   const addReminder = useCallback(
     async (data: Omit<Reminder, "id" | "completed" | "notificationId">) => {
-      const { reminders: updated } = await serviceAdd(reminders, data);
+      // The exact-timing default is applied here rather than at each creation
+      // site: unlike `alarm` there is no control for it on the add screens,
+      // so the only per-reminder choice is the detail-screen override, which
+      // sets the field explicitly and is preserved by the `!== undefined`
+      // check below.
+      const { reminders: updated } = await serviceAdd(reminders, {
+        ...data,
+        exactTiming:
+          data.exactTiming !== undefined ? data.exactTiming : defaultExactTimingEnabled,
+      });
       setReminders(updated);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    [reminders]
+    [reminders, defaultExactTimingEnabled]
   );
 
   const editReminder = useCallback(
@@ -298,6 +337,9 @@ export function RemindersProvider({
         loading,
         defaultAlarmEnabled,
         setDefaultAlarmEnabled,
+        defaultExactTimingEnabled,
+        setDefaultExactTimingEnabled,
+        setAlarmForPending,
         showDescriptionInNotifications,
         setShowDescriptionInNotifications,
         inviteNudgeEnabled,

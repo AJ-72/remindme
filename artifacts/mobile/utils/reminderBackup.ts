@@ -11,6 +11,7 @@ export const BACKUP_VERSION = 1;
 
 export interface BackupSettings {
   defaultAlarmEnabled?: boolean;
+  defaultExactTimingEnabled?: boolean;
   showDescriptionEnabled?: boolean;
   vibrationEnabled?: boolean;
   dictationLanguage?: DictationLanguage;

@@ -277,7 +277,7 @@ private fun setupAlarm(triggerAtMillis: Long, operation: PendingIntent) {
    - `flags 0x5` or `0x7` (`FLAG_STANDALONE` present)
    - `AlarmClockInfo` present
    - Alarm appears in `Next wake from idle:` list
-3. **Run Forced Doze Test (Phase 3 in `device-tests.md`):**
+3. **Run Forced Doze Test (Phase 3 in `device-tests/cross-cutting.md`, D7):**
    ```powershell
    adb shell dumpsys battery unplug
    adb shell input keyevent 26

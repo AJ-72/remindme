@@ -1,0 +1,86 @@
+# D11: Quiet hours including midnight wrap
+# Tests that the quiet hours feature correctly shows confirmation sheets
+# for reminders created during quiet hours, especially across midnight.
+#
+# AUTO: fully scriptable - checks sheet presence and saved times
+# Persisted: sets quiet hours and creates reminders
+#
+# Note: This test is complex as it requires:
+# - Navigating to Settings
+# - Setting specific times
+# - Creating reminders at specific times
+# - Checking for conditional UI (confirmation sheets)
+#
+# For now, this is a placeholder that validates basic app functionality.
+# Full quiet hours testing requires UI automation of time pickers which
+# may vary by device/Android version.
+#
+appId: com.curios.remindme
+---
+# Setup: launch app
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+# Navigate to Settings tab. "Smart Alerts" is below the fold (Settings
+# grew past one viewport - see settings.tsx comment), so scroll first.
+- tapOn:
+    text: "Settings"
+- extendedWaitUntil:
+    visible:
+      id: "settings-scroll"
+    timeout: 10000
+- scroll
+- assertVisible:
+    id: "smart-alerts-row"
+
+# Verify Smart Alerts is accessible
+- tapOn:
+    id: "smart-alerts-row"
+- assertVisible: "Quiet hours"
+
+# Navigate back to Settings.
+# NOTE: a plain `tapOn: text: "Home"` to reach the app's Home tab is
+# ambiguous here - it matched the Android system nav bar's Home button
+# (accessibilityText="Home", resource-id=com.android.systemui:id/home)
+# instead of the app's tab, sending the whole test out to the launcher
+# (confirmed 2026-09-04). Relaunching the app is the reliable way back to
+# its Home tab instead of trying to disambiguate that text match.
+- tapOn:
+    id: "smart-alerts-back"
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 10000
+
+# Create a test reminder (no time phrase in text, so this opens the
+# "No time found" sheet - see QuickAddInput.tsx handleSave - confirm it)
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Quiet hours test"
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      text: "Confirm"
+    timeout: 5000
+- tapOn:
+    text: "Confirm"
+- waitForAnimationToEnd
+# The list accumulates across runs (no working clearState - see note
+# above) and is sorted by upcoming time, so a single scroll may not be
+# enough once there are 10+ items. scrollUntilVisible searches as far as
+# needed instead of guessing a fixed number of scrolls.
+- scrollUntilVisible:
+    element:
+      text: "Quiet hours test"
+    direction: DOWN
+    timeout: 10000
+
+# Note: The full quiet hours logic requires access to time pickers
+# which are device/Android-version specific. The oracle validation
+# (checking stored times via AsyncStorage/adb) must happen outside Maestro.

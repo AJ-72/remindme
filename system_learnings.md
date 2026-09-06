@@ -9,12 +9,54 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-05 — Silent reminders arrived minutes late: ColorOS demotes a *successful* setExactAndAllowWhileIdle() to an inexact alarm
+
+**WHAT:** Route non-alarm reminders through `setAlarmClock()` as well, gated on a new `exactTiming` flag rather than on the `alarm` flag. The flag defaults ON, and the native side reads it as `optBoolean("exactTiming", true)` — absent means true, so notifications scheduled before the field existed stay punctual across the upgrade instead of silently regressing. Punctuality and sound are now independent: global Settings toggle plus a per-reminder override in the detail screen. Removed `ALARM_EARLY_OFFSET_MS`, which existed only to absorb inexact drift and would otherwise fire every reminder a minute early; its two duplicate-delivery guards collapse to a plain `datetime > now`.
+
+**WHY:** The demotion is invisible from JS — the call throws nothing, `canScheduleExactAlarms()` returns true, and the patch logs the exact call as successful. It is only detectable in `dumpsys alarm`: a silent reminder 5 minutes out registered `windowLength 130581` against `174000` of futurity, which is **exactly 75%**, AOSP's `maxTriggerTime()` inexact heuristic, with `flags 0x4` instead of the `0x9` a `setAlarmClock()` registration shows. That 75% ratio is the diagnostic fingerprint — check for it before believing any "exact" alarm on these OEMs. Also worth recording: Google Tasks' punctuality is **not** explained by Doze allowlisting (measured false — `com.google.android.gms` is whitelisted, Tasks itself is not) nor by holding the alarm-clock slot; it registers *weaker* alarms than we now do, and the gap is standby bucket (10 vs our 20).
+
+**Trade-off, deliberately accepted:** `setAlarmClock()` claims the system's next-alarm-clock slot. That slot is a **display** slot, not a scheduling one — every registered alarm still fires — so the user's Clock alarm is hidden from that one readout, never cancelled. Cost is a near-permanent status-bar alarm icon, since every reminder now registers this way.
+
+**WHERE:** [patches/expo-notifications@0.32.17.patch](patches/expo-notifications@0.32.17.patch) (needs `buildFromSource`, already set — expo-notifications ships a precompiled `.aar`, so patch edits need a native rebuild to take effect), [artifacts/mobile/services/ReminderService.ts](artifacts/mobile/services/ReminderService.ts), [artifacts/mobile/app/reminder-detail.tsx](artifacts/mobile/app/reminder-detail.tsx), [artifacts/mobile/app/(tabs)/settings.tsx](artifacts/mobile/app/(tabs)/settings.tsx). Device verification is **pending** as D26 in [device-tests/cross-cutting.md](device-tests/cross-cutting.md) — Jest cannot see any of this.
+
+---
+
+## 2026-09-01 — Ambiguous Malayalam numeral ("രാവിലെ 5 ആപ്പിൾ") was silently resolved the wrong way, deleting the quantity from the title
+
+**WHAT:** When an hour reading rests on a bare numeral next to a period word (morning/evening/etc.), the parser now produces *both* readings — numeral-as-hour and numeral-as-part-of-title — instead of picking one. `QuickAddInput` asks the user once on save, showing each reading's resulting time + title as a tappable row; nothing is written until answered. The chosen title is held in a ref across the quiet-hours detour (05:00 falls in the default quiet window, so that path is common here and was saving the wrong title).
+
+**WHY:** "രാവിലെ 5 ആപ്പിൾ വാങ്ങണം" is genuinely ambiguous — "at 5 AM, buy apples" vs "buy 5 apples in the morning" — nothing lexical disambiguates it. The parser was silently picking the hour reading, which deletes the quantity from the title. A wrong *time* is visible on the chip and easy to notice/fix; a missing *quantity* silently baked into the title is not. Only the Malayalam parser needs this — chrono resolves the equivalent English shape without ever misreading the count as an hour.
+
+**WHERE:** [artifacts/mobile/utils/malayalamDateParser.ts](artifacts/mobile/utils/malayalamDateParser.ts), [artifacts/mobile/utils/parseNaturalLanguage.ts](artifacts/mobile/utils/parseNaturalLanguage.ts), [artifacts/mobile/components/QuickAddInput.tsx](artifacts/mobile/components/QuickAddInput.tsx).
+
+---
+
+## 2026-09-01 — Malayalam numeral-time parser was reading ordinary decimal numbers ("2.50 രൂപ", "1.20 അപ്ഡേറ്റ്") as clock times
+
+**WHAT:** A written time must now have a boundary on both sides (via a capturing group, not a lookbehind — Hermes ships without lookbehind support, so that failure mode only shows up on-device, not in Jest), so a match can't start inside a longer number like "111.30". A dot separator now additionally requires corroborating time context (day word, period word, മണി, ന്, am/pm) before it's treated as a clock time, since a dot is a decimal point at least as often as a time separator; a colon is unambiguous and skips that check.
+
+**WHY:** An adversarial sweep found the parser turning ordinary decimal amounts into times — "പാൽ 2.50 രൂപ വാങ്ങണം" became 14:50, "ആപ്പ് 1.20 അപ്ഡേറ്റ്" became 13:20 — and each misparse also deleted the number from the title, the worse failure mode (a wrong time is visible on the chip, a missing quantity isn't).
+
+**WHERE:** [artifacts/mobile/utils/malayalamDateParser.ts](artifacts/mobile/utils/malayalamDateParser.ts).
+
+---
+
+## 2026-09-01 — Malayalam numeral clock times ("11.30", mixed-script "10.30 am") silently fell back to the 9:00 default
+
+**WHAT:** The clock-time pattern accepted only a colon separator; extended to accept a dot too (what the Malayalam phone keyboard and speech recognizers actually produce) and to accept Malayalam-script digits in the numeral positions. Added an am/pm branch ahead of every other clock branch (with correct 12am/12pm handling) so mixed-script input like "10.30 am" can set the meridiem. Also parses a bare numeral hour next to a period word ("രാവിലെ 10"), but skips that whenever an explicit മണി hour appears elsewhere in the sentence, so a stray numeral in the title can't outrank it.
+
+**WHY:** Malayalam text with a numeric time was silently falling back to the 9:00 day-default instead of erroring or flagging — "ആധാരം എഴുത്ത് ഇന്ന് 11.30" parsed the day but dropped the time entirely, with no signal to the user that anything was wrong.
+
+**WHERE:** [artifacts/mobile/utils/malayalamDateParser.ts](artifacts/mobile/utils/malayalamDateParser.ts).
+
+---
+
 ## 2026-08-30 — Reminders silently stopped ringing overnight: nothing re-arms them on app launch, only a 15-minute sweep that can give up forever
 
 **Symptom:** two 08:00 reminders never rang. Investigation with `dumpsys
 alarm` found **zero** alarms registered for the app at all — not even a
 brand-new reminder saved 14+ hours out. Permissions, channels, quiet hours,
-and a reboot were all ruled out (`device-tests.md`/handoff notes have the
+and a reboot were all ruled out (`device-tests/`/handoff notes have the
 full elimination).
 
 **ROOT CAUSE — found by temporarily instrumenting `scheduleNotification`
@@ -177,7 +219,7 @@ the lateness that toggle now advertises. A test asserts the old claim is
 
 **General lesson:** Jest can prove copy *renders*; only a device can prove copy
 is *true*. This one was green in the suite and wrong on the phone — which is
-the whole premise of `device-tests.md`.
+the whole premise of `device-tests/`.
 
 ---
 
@@ -364,7 +406,7 @@ the two cases.
 
 **WHERE:** `patches/expo-notifications@0.32.17.patch` (needs the
 `buildFromSource` opt-out — see the AAR entry below). Evidence and the remaining
-checks: D19/D20 in [`device-tests.md`](device-tests.md). Commits `df3ec64`,
+checks: D19/D20 in [`device-tests/cross-cutting.md`](device-tests/cross-cutting.md#d19). Commits `df3ec64`,
 `6898f25`, `ad51a0c`.
 
 ---
@@ -464,7 +506,7 @@ conclusions here before being caught:**
   eviction than absence. Capture with `adb logcat -v time > file &` started
   BEFORE the action; never conclude from `logcat -d` afterwards.
 
-**WHERE:** tracked as D7 in [`device-tests.md`](device-tests.md), which carries
+**WHERE:** tracked as D7 in [`device-tests/cross-cutting.md`](device-tests/cross-cutting.md#d7), which carries
 the full evidence and the remaining phases.
 
 ---
@@ -521,7 +563,7 @@ touching any code.** Repair with `npx expo prebuild --platform android`, then
 reapply the CMake pin (prebuild wipes it).
 
 **Operational notes:** `adb` is not on PATH — its full path is recorded in
-`device-tests.md`. From PowerShell use `Select-String`, not `grep`. And tick
+`device-tests/README.md`. From PowerShell use `Select-String`, not `grep`. And tick
 **"Always allow from this computer"** on the USB-debugging prompt: without it
 every `adb kill-server` re-prompts and the device reverts to `unauthorized`
 mid-operation.
@@ -542,7 +584,7 @@ Seven findings from testing on a real phone. Four were invisible to the whole su
 
 **Also:** an icon swap is not feedback. The quick-add contact button changed `user-plus` to `user-check` and users could not tell whether a contact had attached, because nothing named the person. State that a user must be sure of needs words, not a glyph.
 
-**The standing list of what this affects lives in [`device-tests.md`](device-tests.md)** (added 2026-08-24, canonical — `backlog.md`'s old D1-D9 section points there now). Add a feature's device-only checks in the same change that ships it, and never mark one `PASS` from a green Jest run.
+**The standing list of what this affects lives in [`device-tests/`](device-tests/README.md)** (added 2026-08-24, canonical — `backlog.md` links there rather than keeping a copy). Add a feature's device-only checks in the same change that ships it, and never mark one `PASS` from a green Jest run.
 
 **WHERE:** `app/(tabs)/settings.tsx`, `app/(tabs)/index.tsx`, `components/{ThemedStatusBar,ContactPickerModal,QuickAddInput}.tsx`, `hooks/useColors.ts`. Commits `e93b46a`..`2f04bf9`.
 
