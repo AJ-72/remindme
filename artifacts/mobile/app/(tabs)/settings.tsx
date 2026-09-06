@@ -3,7 +3,6 @@ import { router } from "expo-router";
 import React, { useState } from "react";
 import {
   Alert,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -11,7 +10,6 @@ import {
   StyleSheet,
   Switch,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,16 +18,7 @@ import { buildAppShareMessage } from "@/utils/appShare";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
-import {
-  clearDebugLogs,
-  formatDebugLogs,
-  getDebugLogs,
-} from "@/services/DebugLogService";
-import {
-  buildBackupJson,
-  countPendingRemindersDisagreeingWithAlarm,
-  importRemindersFromJson,
-} from "@/services/ReminderService";
+import { countPendingRemindersDisagreeingWithAlarm } from "@/services/ReminderService";
 import {
   useThemePreference,
   type ThemePreference,
@@ -62,16 +51,17 @@ export default function SettingsScreen() {
     setDictationLanguage,
     userName,
     setUserName,
-    refreshFromStorage,
   } = useReminders();
   const { preference, setPreference } = useThemePreference();
 
-  const [logsVisible, setLogsVisible] = useState(false);
-  const [logsText, setLogsText] = useState("");
-  const [restoreVisible, setRestoreVisible] = useState(false);
-  const [restoreText, setRestoreText] = useState("");
-  const [restoreError, setRestoreError] = useState("");
   const [nameSheetVisible, setNameSheetVisible] = useState(false);
+
+  // `exactTiming` / `defaultExactTimingEnabled` stay the actual stored
+  // boolean (true = precise Android alarm) — unchanged, so existing
+  // reminders/backups are never reinterpreted. Only the UI is negated: the
+  // switch on this screen means "do not use the Android alarm feature", so
+  // it shows ON exactly when the underlying setting is OFF.
+  const disableExactAlarm = !defaultExactTimingEnabled;
 
   /**
    * The default always changes — that is what the switch means. What needs
@@ -111,78 +101,12 @@ export default function SettingsScreen() {
     );
   };
 
-  const openLogs = async () => {
-    const entries = await getDebugLogs();
-    setLogsText(
-      entries.length ? formatDebugLogs(entries) : "No debug logs recorded yet."
-    );
-    setLogsVisible(true);
-  };
-
-  const shareLogs = async () => {
-    try {
-      await Share.share({ message: logsText });
-    } catch {
-      // user cancelled or sharing isn't available — nothing to do
-    }
-  };
-
   const shareApp = async () => {
     try {
       await Share.share({ message: buildAppShareMessage() });
     } catch {
       // User dismissed the sheet, or no share target exists — nothing to say.
     }
-  };
-
-  const shareBackup = async () => {
-    try {
-      await Share.share({ message: await buildBackupJson() });
-    } catch {
-      // user cancelled or sharing isn't available — nothing to do
-    }
-  };
-
-  const openRestore = () => {
-    setRestoreText("");
-    setRestoreError("");
-    setRestoreVisible(true);
-  };
-
-  const confirmRestore = async () => {
-    const result = await importRemindersFromJson(restoreText);
-    if (!result.ok) {
-      setRestoreError(
-        "That doesn't look like a Reminders backup. Paste the whole backup text, including the outer { }."
-      );
-      return;
-    }
-
-    setRestoreVisible(false);
-    // The list is loaded once at provider mount, so it has to be told the
-    // store changed underneath it.
-    await refreshFromStorage();
-
-    const parts = [
-      `${result.added} added`,
-      result.duplicates ? `${result.duplicates} already here` : "",
-      result.skipped ? `${result.skipped} couldn't be read` : "",
-    ].filter(Boolean);
-    Alert.alert("Restored", `${parts.join(", ")}.`);
-  };
-
-  const handleClearLogs = () => {
-    Alert.alert("Clear debug logs?", "This can't be undone.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Clear",
-        style: "destructive",
-        onPress: async () => {
-          await clearDebugLogs();
-          setLogsText("No debug logs recorded yet.");
-        },
-      },
-    ]);
   };
 
   const styles = StyleSheet.create({
@@ -209,54 +133,75 @@ export default function SettingsScreen() {
       paddingTop: 4,
       paddingBottom: insets.bottom + 24,
     },
-    alarmCard: {
+    // Plain-language section headers, so the screen reads as a handful of
+    // grouped topics instead of one undifferentiated list of cards.
+    sectionLabel: {
+      fontSize: 13,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.mutedForeground,
+      marginTop: 24,
+      marginBottom: 8,
+      paddingHorizontal: 4,
+    },
+    firstSectionLabel: {
+      marginTop: 4,
+    },
+    // One card, several rows: replaces what used to be a separate bordered
+    // card per row within a section, so a group of related settings reads as
+    // one visual object instead of three or four stacked ones.
+    card: {
       backgroundColor: colors.card,
       borderRadius: 16,
       borderWidth: 1,
       borderColor: colors.border,
-      paddingHorizontal: 16,
-      paddingVertical: 14,
+      overflow: "hidden",
+    },
+    row: {
       flexDirection: "row",
       alignItems: "center",
       gap: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+    rowDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
     },
     // No flex here: this label sits inside a nested column View alongside its
     // sub-label. flex:1 in a column makes the title fight the sub-label for
     // vertical space and collapse to zero height. The row-level flex belongs
     // on the wrapping View, not on the Text.
-    alarmLabel: {
+    rowLabel: {
       fontSize: 15,
       fontFamily: "Inter_500Medium",
       color: colors.foreground,
     },
-    alarmSubLabel: {
+    rowSubLabel: {
       fontSize: 12,
       fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
       marginTop: 2,
     },
-    descriptionCard: {
-      marginTop: 12,
-    },
-    explainerCard: {
-      marginTop: 12,
-      flexDirection: "column",
-      alignItems: "stretch",
-      gap: 0,
-    },
-    explainerHeader: {
+    // The alarm-icon explainer sits subordinate to the row above it (the
+    // negated exact-alarm toggle it explains), not as a settings row of its
+    // own — smaller type, a help icon rather than a chevron, indented to read
+    // as a footnote rather than a fourth peer setting.
+    explainerRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 10,
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
     },
     explainerTitle: {
       flex: 1,
-      fontSize: 13,
+      fontSize: 12,
       fontFamily: "Inter_500Medium",
       color: colors.mutedForeground,
     },
     explainerBody: {
-      marginTop: 10,
+      paddingHorizontal: 16,
+      paddingBottom: 14,
       gap: 10,
     },
     explainerText: {
@@ -264,15 +209,6 @@ export default function SettingsScreen() {
       fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
       lineHeight: 19,
-    },
-    languageCard: {
-      marginTop: 12,
-    },
-    languageLabel: {
-      fontSize: 15,
-      fontFamily: "Inter_500Medium",
-      color: colors.foreground,
-      marginBottom: 10,
     },
     languagePillRow: {
       flexDirection: "row",
@@ -283,6 +219,8 @@ export default function SettingsScreen() {
       fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
       marginTop: 10,
+      paddingHorizontal: 16,
+      paddingBottom: 14,
     },
     languagePill: {
       paddingVertical: 8,
@@ -303,101 +241,8 @@ export default function SettingsScreen() {
     languagePillTextActive: {
       color: colors.primaryForeground,
     },
-    debugRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
     chevron: {
       marginLeft: "auto",
-    },
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: "rgba(0,0,0,0.5)",
-      justifyContent: "flex-end",
-    },
-    modalSheet: {
-      backgroundColor: colors.card,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      maxHeight: "85%",
-      paddingHorizontal: 20,
-      paddingTop: 16,
-      paddingBottom: Platform.OS === "ios" ? 40 : 24,
-    },
-    modalHandle: {
-      width: 36,
-      height: 4,
-      borderRadius: 2,
-      backgroundColor: colors.border,
-      alignSelf: "center",
-      marginBottom: 16,
-    },
-    modalTitle: {
-      fontSize: 16,
-      fontFamily: "Inter_600SemiBold",
-      color: colors.foreground,
-      marginBottom: 12,
-    },
-    modalText: {
-      fontSize: 11,
-      lineHeight: 16,
-      fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
-      color: colors.foreground,
-    },
-    modalBtnRow: {
-      flexDirection: "row",
-      gap: 12,
-      marginTop: 16,
-    },
-    modalBtn: {
-      flex: 1,
-      paddingVertical: 13,
-      borderRadius: 12,
-      alignItems: "center",
-    },
-    modalBtnSecondary: {
-      backgroundColor: colors.muted,
-    },
-    modalBtnPrimary: {
-      backgroundColor: colors.primary,
-    },
-    modalBtnTextSecondary: {
-      fontSize: 15,
-      fontFamily: "Inter_600SemiBold",
-      color: colors.mutedForeground,
-    },
-    modalBtnTextPrimary: {
-      fontSize: 15,
-      fontFamily: "Inter_600SemiBold",
-      color: colors.primaryForeground,
-    },
-    restoreHelp: {
-      fontSize: 13,
-      lineHeight: 18,
-      fontFamily: "Inter_400Regular",
-      color: colors.mutedForeground,
-      marginBottom: 12,
-    },
-    restoreInput: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      minHeight: 120,
-      maxHeight: 220,
-      textAlignVertical: "top",
-      fontSize: 12,
-      fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
-      color: colors.foreground,
-    },
-    restoreError: {
-      fontSize: 13,
-      lineHeight: 18,
-      fontFamily: "Inter_400Regular",
-      color: colors.destructive,
-      marginTop: 10,
     },
   });
 
@@ -411,485 +256,361 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
         testID="settings-scroll"
       >
-        <View style={styles.alarmCard}>
-          <Feather
-            name={defaultAlarmEnabled ? "bell" : "bell-off"}
-            size={18}
-            color={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
-          />
-          <View style={{ flex: 1 }}>
-            {/* This controls SOUND only. It used to name punctuality too,
-                because a non-alarm reminder went through the API aggressive
-                OEM power management downgrades (see D7/D19/D25 in
-                device-tests/cross-cutting.md). Exact timing is now its own
-                setting below, so a silent reminder is no longer a late one
-                and that wording would be false. */}
-            <Text style={styles.alarmLabel}>Alarm sound</Text>
-            <Text style={styles.alarmSubLabel}>
-              {defaultAlarmEnabled
-                ? "Rings out loud"
-                : "Silent — arrives without a sound"}
-            </Text>
-          </View>
-          <Switch
-            testID="default-alarm-switch"
-            value={defaultAlarmEnabled}
-            onValueChange={(v) => handleDefaultAlarmChange(v)}
-            trackColor={{ false: colors.muted, true: colors.primary + "66" }}
-            thumbColor={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
-          />
-        </View>
-        <View style={[styles.alarmCard, styles.descriptionCard]}>
-          <Feather
-            name={defaultExactTimingEnabled ? "clock" : "watch"}
-            size={18}
-            color={defaultExactTimingEnabled ? colors.primary : colors.mutedForeground}
-          />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Arrive on time</Text>
-            <Text style={styles.alarmSubLabel}>
-              {defaultExactTimingEnabled
-                ? "Fires at exactly the time you set"
-                : "Your phone may delay it by several minutes — up to an hour for a next-day one"}
-            </Text>
-          </View>
-          <Switch
-            testID="default-exact-timing-switch"
-            value={defaultExactTimingEnabled}
-            onValueChange={(v) => setDefaultExactTimingEnabled(v)}
-            trackColor={{ false: colors.muted, true: colors.primary + "66" }}
-            thumbColor={
-              defaultExactTimingEnabled ? colors.primary : colors.mutedForeground
-            }
-          />
-        </View>
-        {/* Android-only: the persistent status-bar clock is a side effect of
-            setAlarmClock(), the one scheduling API these OEMs honour. It
-            cannot be engineered away — one pending registration is enough to
-            show it — so the honest move is to explain it rather than hide it. */}
-        {Platform.OS === "android" && (
+        {/* Identity — set once, but conventionally the first thing in Settings */}
+        <Text style={[styles.sectionLabel, styles.firstSectionLabel]}>You</Text>
+        <View style={styles.card}>
           <Pressable
-            testID="alarm-icon-explainer"
-            style={[styles.alarmCard, styles.explainerCard]}
-            onPress={() => setAlarmIconExplained((v) => !v)}
+            style={styles.row}
+            onPress={() => setNameSheetVisible(true)}
+            testID="user-name-row"
           >
-            <View style={styles.explainerHeader}>
-              <Feather name="help-circle" size={16} color={colors.mutedForeground} />
-              <Text style={styles.explainerTitle}>
-                Why is there an alarm icon in my status bar?
+            <Feather name="user" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Your name</Text>
+              <Text
+                style={[
+                  styles.rowSubLabel,
+                  userName ? { fontFamily: getFontFamily(userName, "400Regular") } : null,
+                ]}
+                testID="user-name-value"
+              >
+                {userName || "Not set — used to greet you and sign your messages"}
               </Text>
-              <Feather
-                name={alarmIconExplained ? "chevron-up" : "chevron-down"}
-                size={16}
-                color={colors.mutedForeground}
-              />
             </View>
-            {alarmIconExplained && (
-              <View style={styles.explainerBody}>
-                <Text style={styles.explainerText}>
-                  It means at least one reminder is armed to go off at exactly
-                  its time. Android shows the icon whenever an app registers a
-                  precise alarm, and that registration is the only thing that
-                  stops your phone&apos;s battery saver from delaying the
-                  reminder by several minutes — or an hour for a next-day one.
-                </Text>
-                <Text style={styles.explainerText}>
-                  The icon does not mean anything is running in the background
-                  or draining your battery. It disappears once no alarm
-                  reminders are pending.
-                </Text>
-                {/* Deliberately does NOT point at Android's "Alarms &
-                    reminders" screen. Verified on device 2026-08-29: this app
-                    is absent from that list, because it holds USE_EXACT_ALARM
-                    — a normal, auto-granted, non-revocable permission that
-                    supersedes SCHEDULE_EXACT_ALARM on targetSdk 34+. Sending
-                    the user there dropped them onto a long list their own app
-                    was not in. The real control is our own Alarm toggle. */}
-                <Text style={styles.explainerText}>
-                  Android does not offer a per-app switch for this one.
-                  Reminders registers as an alarm app — the same category as
-                  your clock — so there is no OS toggle to turn off, and the
-                  icon comes with it.
-                </Text>
-                <Text style={styles.explainerText}>
-                  The control you do have is the &ldquo;Arrive on time&rdquo;
-                  switch above, and you can set it per reminder from its detail
-                  screen. A reminder with it off is scheduled the ordinary way:
-                  no icon, but your phone may delay it by several minutes — up
-                  to an hour for a next-day one.
-                </Text>
-              </View>
-            )}
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
           </Pressable>
-        )}
-        <View style={[styles.alarmCard, styles.descriptionCard]}>
-          <Feather
-            name={vibrationEnabled ? "smartphone" : "slash"}
-            size={18}
-            color={vibrationEnabled ? colors.primary : colors.mutedForeground}
-          />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Vibrate</Text>
-            <Text style={styles.alarmSubLabel}>
-              {vibrationEnabled
-                ? "Notification will vibrate, even when sound is off"
-                : "Notification will not vibrate"}
-            </Text>
-          </View>
-          <Switch
-            testID="vibration-switch"
-            value={vibrationEnabled}
-            onValueChange={(v) => setVibrationEnabled(v)}
-            trackColor={{ false: colors.muted, true: colors.primary + "66" }}
-            thumbColor={vibrationEnabled ? colors.primary : colors.mutedForeground}
-          />
-        </View>
-        <View style={[styles.alarmCard, styles.descriptionCard]}>
-          <Feather
-            name={showDescriptionInNotifications ? "eye" : "eye-off"}
-            size={18}
-            color={
-              showDescriptionInNotifications ? colors.primary : colors.mutedForeground
-            }
-          />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Show description in notifications</Text>
-            <Text style={styles.alarmSubLabel}>
-              {showDescriptionInNotifications
-                ? "Description appears on the lock screen and notification shade"
-                : "Notification shows only the reminder title"}
-            </Text>
-          </View>
-          <Switch
-            testID="show-description-switch"
-            value={showDescriptionInNotifications}
-            onValueChange={(v) => setShowDescriptionInNotifications(v)}
-            trackColor={{ false: colors.muted, true: colors.primary + "66" }}
-            thumbColor={
-              showDescriptionInNotifications ? colors.primary : colors.mutedForeground
-            }
-          />
         </View>
 
-        <View style={[styles.alarmCard, styles.descriptionCard]}>
-          <Feather
-            name={inviteNudgeEnabled ? "gift" : "slash"}
-            size={18}
-            color={inviteNudgeEnabled ? colors.primary : colors.mutedForeground}
-          />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Mention this app when messaging</Text>
-            <Text style={styles.alarmSubLabel}>
-              {inviteNudgeEnabled
-                ? "Adds a short line to the first few messages you send someone"
-                : "Your messages go out with nothing extra added"}
-            </Text>
+        {/* When reminders go off — the settings a user actually returns for */}
+        <Text style={styles.sectionLabel}>When reminders go off</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <Feather
+              name={defaultAlarmEnabled ? "bell" : "bell-off"}
+              size={18}
+              color={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
+            />
+            <View style={{ flex: 1 }}>
+              {/* This controls SOUND only. It used to name punctuality too,
+                  because a non-alarm reminder went through the API aggressive
+                  OEM power management downgrades (see D7/D19/D25 in
+                  device-tests/cross-cutting.md). Exact timing is its own
+                  setting below, so a silent reminder is no longer a late one
+                  and that wording would be false. */}
+              <Text style={styles.rowLabel}>Alarm sound</Text>
+              <Text style={styles.rowSubLabel}>
+                {defaultAlarmEnabled ? "Rings out loud" : "Silent — arrives without a sound"}
+              </Text>
+            </View>
+            <Switch
+              testID="default-alarm-switch"
+              value={defaultAlarmEnabled}
+              onValueChange={(v) => handleDefaultAlarmChange(v)}
+              trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+              thumbColor={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
+            />
           </View>
-          <Switch
-            testID="invite-nudge-switch"
-            value={inviteNudgeEnabled}
-            onValueChange={(v) => setInviteNudgeEnabled(v)}
-            trackColor={{ false: colors.muted, true: colors.primary + "66" }}
-            thumbColor={
-              inviteNudgeEnabled ? colors.primary : colors.mutedForeground
-            }
-          />
+
+          {/* Negated on purpose: framing this as "arrive on time" made the
+              off position read as "let it arrive late", which nobody wants
+              and doesn't convey what the setting actually does (opt out of
+              Android's precise-alarm registration — see the explainer below).
+              The underlying `exactTiming` flag keeps its original polarity;
+              only the switch's value/onChange here are inverted. */}
+          <View style={[styles.row, styles.rowDivider]}>
+            <Feather
+              name={disableExactAlarm ? "watch" : "clock"}
+              size={18}
+              color={disableExactAlarm ? colors.mutedForeground : colors.primary}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Do not use Android Alarm feature</Text>
+              <Text style={styles.rowSubLabel}>
+                {disableExactAlarm
+                  ? "Your phone may delay reminders by several minutes — up to an hour for a next-day one"
+                  : "Reminders fire at exactly the time you set"}
+              </Text>
+            </View>
+            <Switch
+              testID="default-exact-timing-switch"
+              value={disableExactAlarm}
+              onValueChange={(v) => setDefaultExactTimingEnabled(!v)}
+              trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+              thumbColor={disableExactAlarm ? colors.primary : colors.mutedForeground}
+            />
+          </View>
+
+          {/* Android-only: the persistent status-bar clock is a side effect of
+              setAlarmClock(), the one scheduling API these OEMs honour. It
+              cannot be engineered away — one pending registration is enough to
+              show it — so the honest move is to explain it rather than hide
+              it. Sits directly under the toggle it explains, styled as a
+              footnote rather than a fourth peer setting. */}
+          {Platform.OS === "android" && (
+            <Pressable
+              testID="alarm-icon-explainer"
+              style={[styles.rowDivider]}
+              onPress={() => setAlarmIconExplained((v) => !v)}
+            >
+              <View style={styles.explainerRow}>
+                <Feather name="help-circle" size={14} color={colors.mutedForeground} />
+                <Text style={styles.explainerTitle}>
+                  Why is there an alarm icon in my status bar?
+                </Text>
+                <Feather
+                  name={alarmIconExplained ? "chevron-up" : "chevron-down"}
+                  size={14}
+                  color={colors.mutedForeground}
+                />
+              </View>
+              {alarmIconExplained && (
+                <View style={styles.explainerBody}>
+                  <Text style={styles.explainerText}>
+                    It means at least one reminder is armed to go off at exactly
+                    its time. Android shows the icon whenever an app registers a
+                    precise alarm, and that registration is the only thing that
+                    stops your phone&apos;s battery saver from delaying the
+                    reminder by several minutes — or an hour for a next-day one.
+                  </Text>
+                  <Text style={styles.explainerText}>
+                    The icon does not mean anything is running in the background
+                    or draining your battery. It disappears once no alarm
+                    reminders are pending.
+                  </Text>
+                  {/* Deliberately does NOT point at Android's "Alarms &
+                      reminders" screen. Verified on device 2026-08-29: this app
+                      is absent from that list, because it holds USE_EXACT_ALARM
+                      — a normal, auto-granted, non-revocable permission that
+                      supersedes SCHEDULE_EXACT_ALARM on targetSdk 34+. Sending
+                      the user there dropped them onto a long list their own app
+                      was not in. The real control is our own toggle above. */}
+                  <Text style={styles.explainerText}>
+                    Android does not offer a per-app switch for this one.
+                    Reminders registers as an alarm app — the same category as
+                    your clock — so there is no OS toggle to turn off, and the
+                    icon comes with it.
+                  </Text>
+                  <Text style={styles.explainerText}>
+                    The control you do have is the &ldquo;Do not use Android
+                    Alarm feature&rdquo; switch above, and you can set it per
+                    reminder from its detail screen. Turning it on schedules the
+                    reminder the ordinary way: no icon, but your phone may delay
+                    it by several minutes — up to an hour for a next-day one.
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          )}
+
+          <View style={[styles.row, styles.rowDivider]}>
+            <Feather
+              name={vibrationEnabled ? "smartphone" : "slash"}
+              size={18}
+              color={vibrationEnabled ? colors.primary : colors.mutedForeground}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Vibrate</Text>
+              <Text style={styles.rowSubLabel}>
+                {vibrationEnabled ? "Vibrates, even when sound is off" : "Does not vibrate"}
+              </Text>
+            </View>
+            <Switch
+              testID="vibration-switch"
+              value={vibrationEnabled}
+              onValueChange={(v) => setVibrationEnabled(v)}
+              trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+              thumbColor={vibrationEnabled ? colors.primary : colors.mutedForeground}
+            />
+          </View>
+
+          <Pressable
+            style={[styles.row, styles.rowDivider]}
+            onPress={() => router.push("/smart-alerts")}
+            testID="smart-alerts-row"
+          >
+            <Feather name="bell" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Quiet hours &amp; follow-ups</Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
+          </Pressable>
         </View>
 
-        <View style={[styles.alarmCard, styles.languageCard]}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.languageLabel}>Appearance</Text>
-            <View style={styles.languagePillRow}>
-              {THEME_OPTIONS.map(({ value, label }) => (
+        {/* What notifications show */}
+        <Text style={styles.sectionLabel}>What notifications show</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <Feather
+              name={showDescriptionInNotifications ? "eye" : "eye-off"}
+              size={18}
+              color={showDescriptionInNotifications ? colors.primary : colors.mutedForeground}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Show description in notifications</Text>
+              <Text style={styles.rowSubLabel}>
+                {showDescriptionInNotifications
+                  ? "Description appears on the lock screen and notification shade"
+                  : "Notification shows only the reminder title"}
+              </Text>
+            </View>
+            <Switch
+              testID="show-description-switch"
+              value={showDescriptionInNotifications}
+              onValueChange={(v) => setShowDescriptionInNotifications(v)}
+              trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+              thumbColor={showDescriptionInNotifications ? colors.primary : colors.mutedForeground}
+            />
+          </View>
+        </View>
+
+        {/* Appearance */}
+        <Text style={styles.sectionLabel}>Appearance</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <View style={styles.languagePillRow}>
+                {THEME_OPTIONS.map(({ value, label }) => (
+                  <Pressable
+                    key={value}
+                    testID={`theme-${value}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: preference === value }}
+                    style={[
+                      styles.languagePill,
+                      preference === value && styles.languagePillActive,
+                    ]}
+                    onPress={() => setPreference(value)}
+                  >
+                    <Text
+                      style={[
+                        styles.languagePillText,
+                        preference === value && styles.languagePillTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Voice input */}
+        <Text style={styles.sectionLabel}>Voice input</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Dictation language</Text>
+            </View>
+          </View>
+          <View style={[styles.row, styles.rowDivider]}>
+            <View style={{ flex: 1 }}>
+              <View style={styles.languagePillRow}>
                 <Pressable
-                  key={value}
-                  testID={`theme-${value}`}
+                  testID="dictation-language-en"
                   accessibilityRole="button"
-                  accessibilityState={{ selected: preference === value }}
+                  accessibilityState={{ selected: dictationLanguage === "en-US" }}
                   style={[
                     styles.languagePill,
-                    preference === value && styles.languagePillActive,
+                    dictationLanguage === "en-US" && styles.languagePillActive,
                   ]}
-                  onPress={() => setPreference(value)}
+                  onPress={() => setDictationLanguage("en-US")}
                 >
                   <Text
                     style={[
                       styles.languagePillText,
-                      preference === value && styles.languagePillTextActive,
+                      dictationLanguage === "en-US" && styles.languagePillTextActive,
                     ]}
                   >
-                    {label}
+                    English
                   </Text>
                 </Pressable>
-              ))}
+                <Pressable
+                  testID="dictation-language-ml"
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: dictationLanguage === "ml-IN" }}
+                  style={[
+                    styles.languagePill,
+                    dictationLanguage === "ml-IN" && styles.languagePillActive,
+                  ]}
+                  onPress={() => setDictationLanguage("ml-IN")}
+                >
+                  <Text
+                    style={[
+                      styles.languagePillText,
+                      dictationLanguage === "ml-IN" && styles.languagePillTextActive,
+                    ]}
+                  >
+                    മലയാളം
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           </View>
+          {dictationLanguage !== "en-US" && (
+            <Text style={styles.languageNotice}>
+              Non-English dictation may use Google's online speech recognition when an
+              offline model isn't available on this device — your voice audio is sent to
+              Google's servers to be transcribed, and an internet connection is required.
+            </Text>
+          )}
         </View>
 
-        <View style={[styles.alarmCard, styles.languageCard]}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.languageLabel}>Dictation language</Text>
-            <View style={styles.languagePillRow}>
-              <Pressable
-                testID="dictation-language-en"
-                accessibilityRole="button"
-                accessibilityState={{ selected: dictationLanguage === "en-US" }}
-                style={[
-                  styles.languagePill,
-                  dictationLanguage === "en-US" && styles.languagePillActive,
-                ]}
-                onPress={() => setDictationLanguage("en-US")}
-              >
-                <Text
-                  style={[
-                    styles.languagePillText,
-                    dictationLanguage === "en-US" && styles.languagePillTextActive,
-                  ]}
-                >
-                  English
-                </Text>
-              </Pressable>
-              <Pressable
-                testID="dictation-language-ml"
-                accessibilityRole="button"
-                accessibilityState={{ selected: dictationLanguage === "ml-IN" }}
-                style={[
-                  styles.languagePill,
-                  dictationLanguage === "ml-IN" && styles.languagePillActive,
-                ]}
-                onPress={() => setDictationLanguage("ml-IN")}
-              >
-                <Text
-                  style={[
-                    styles.languagePillText,
-                    dictationLanguage === "ml-IN" && styles.languagePillTextActive,
-                  ]}
-                >
-                  മലയാളം
-                </Text>
-              </Pressable>
-            </View>
-            {dictationLanguage !== "en-US" && (
-              <Text style={styles.languageNotice}>
-                Non-English dictation may use Google's online speech recognition when an
-                offline model isn't available on this device — your voice audio is sent to
-                Google's servers to be transcribed, and an internet connection is required.
+        {/* Sharing */}
+        <Text style={styles.sectionLabel}>Sharing</Text>
+        <View style={styles.card}>
+          <Pressable style={styles.row} onPress={shareApp} testID="share-app-row">
+            <Feather name="share-2" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Share this app</Text>
+              <Text style={styles.rowSubLabel}>
+                Send someone a short note about Reminders and where to get it
               </Text>
-            )}
-          </View>
-        </View>
-
-        <Pressable
-          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
-          onPress={() => router.push("/smart-alerts")}
-          testID="smart-alerts-row"
-        >
-          <Feather name="bell" size={18} color={colors.mutedForeground} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Smart Alerts</Text>
-            <Text style={styles.alarmSubLabel}>
-              Quiet hours, and how the app follows up on what slips
-            </Text>
-          </View>
-          <Feather
-            name="chevron-right"
-            size={18}
-            color={colors.mutedForeground}
-            style={styles.chevron}
-          />
-        </Pressable>
-
-        <Pressable
-          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
-          onPress={() => setNameSheetVisible(true)}
-          testID="user-name-row"
-        >
-          <Feather name="user" size={18} color={colors.mutedForeground} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Your name</Text>
-            <Text
-              style={[
-                styles.alarmSubLabel,
-                userName
-                  ? { fontFamily: getFontFamily(userName, "400Regular") }
-                  : null,
-              ]}
-              testID="user-name-value"
-            >
-              {userName || "Not set — used to greet you and sign your messages"}
-            </Text>
-          </View>
-          <Feather
-            name="chevron-right"
-            size={18}
-            color={colors.mutedForeground}
-            style={styles.chevron}
-          />
-        </Pressable>
-
-        <Pressable
-          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
-          onPress={shareApp}
-          testID="share-app-row"
-        >
-          <Feather name="share-2" size={18} color={colors.mutedForeground} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Share this app</Text>
-            <Text style={styles.alarmSubLabel}>
-              Send someone a short note about Reminders and where to get it
-            </Text>
-          </View>
-          <Feather
-            name="chevron-right"
-            size={18}
-            color={colors.mutedForeground}
-            style={styles.chevron}
-          />
-        </Pressable>
-
-        <Pressable
-          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
-          onPress={shareBackup}
-          testID="backup-row"
-        >
-          <Feather name="upload" size={18} color={colors.mutedForeground} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Back up reminders</Text>
-            <Text style={styles.alarmSubLabel}>
-              Save a copy you can restore after changing phones
-            </Text>
-          </View>
-          <Feather
-            name="chevron-right"
-            size={18}
-            color={colors.mutedForeground}
-            style={styles.chevron}
-          />
-        </Pressable>
-
-        <Pressable
-          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
-          onPress={openRestore}
-          testID="restore-row"
-        >
-          <Feather name="download" size={18} color={colors.mutedForeground} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Restore from backup</Text>
-            <Text style={styles.alarmSubLabel}>
-              Paste a backup — your current reminders are kept
-            </Text>
-          </View>
-          <Feather
-            name="chevron-right"
-            size={18}
-            color={colors.mutedForeground}
-            style={styles.chevron}
-          />
-        </Pressable>
-
-        <Pressable
-          style={[styles.alarmCard, styles.descriptionCard, styles.debugRow]}
-          onPress={openLogs}
-          testID="debug-logs-row"
-        >
-          <Feather name="file-text" size={18} color={colors.mutedForeground} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.alarmLabel}>Debug logs</Text>
-            <Text style={styles.alarmSubLabel}>
-              View or share logs to help diagnose a problem
-            </Text>
-          </View>
-          <Feather
-            name="chevron-right"
-            size={18}
-            color={colors.mutedForeground}
-            style={styles.chevron}
-          />
-        </Pressable>
-      </ScrollView>
-
-      <Modal
-        visible={logsVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setLogsVisible(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setLogsVisible(false)}>
-          <Pressable onPress={() => {}} style={styles.modalSheet}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Debug logs</Text>
-            <ScrollView>
-              <Text style={styles.modalText} selectable testID="debug-logs-text">
-                {logsText}
-              </Text>
-            </ScrollView>
-            <View style={styles.modalBtnRow}>
-              <Pressable
-                style={[styles.modalBtn, styles.modalBtnSecondary]}
-                onPress={handleClearLogs}
-              >
-                <Text style={styles.modalBtnTextSecondary}>Clear</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalBtn, styles.modalBtnPrimary]}
-                onPress={shareLogs}
-              >
-                <Text style={styles.modalBtnTextPrimary}>Share</Text>
-              </Pressable>
             </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
           </Pressable>
-        </Pressable>
-      </Modal>
-
-      <Modal
-        visible={restoreVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setRestoreVisible(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setRestoreVisible(false)}>
-          <Pressable onPress={() => {}} style={styles.modalSheet}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Restore from backup</Text>
-            <Text style={styles.restoreHelp}>
-              Paste the backup text you saved earlier. Reminders already on this phone
-              are kept — anything already here won&apos;t be added twice.
-            </Text>
-            <TextInput
-              style={styles.restoreInput}
-              value={restoreText}
-              onChangeText={(text) => {
-                setRestoreText(text);
-                if (restoreError) setRestoreError("");
-              }}
-              placeholder="Paste backup text here"
-              placeholderTextColor={colors.mutedForeground}
-              multiline
-              autoCorrect={false}
-              autoCapitalize="none"
-              testID="restore-input"
+          <View style={[styles.row, styles.rowDivider]}>
+            <Feather
+              name={inviteNudgeEnabled ? "gift" : "slash"}
+              size={18}
+              color={inviteNudgeEnabled ? colors.primary : colors.mutedForeground}
             />
-            {restoreError ? (
-              <Text style={styles.restoreError}>{restoreError}</Text>
-            ) : null}
-            <View style={styles.modalBtnRow}>
-              <Pressable
-                style={[styles.modalBtn, styles.modalBtnSecondary]}
-                onPress={() => setRestoreVisible(false)}
-              >
-                <Text style={styles.modalBtnTextSecondary}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalBtn, styles.modalBtnPrimary]}
-                onPress={confirmRestore}
-                testID="restore-confirm"
-              >
-                <Text style={styles.modalBtnTextPrimary}>Restore</Text>
-              </Pressable>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Mention this app when messaging</Text>
+              <Text style={styles.rowSubLabel}>
+                {inviteNudgeEnabled ? "Adds a short line to your messages" : "Adds nothing extra"}
+              </Text>
             </View>
+            <Switch
+              testID="invite-nudge-switch"
+              value={inviteNudgeEnabled}
+              onValueChange={(v) => setInviteNudgeEnabled(v)}
+              trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+              thumbColor={inviteNudgeEnabled ? colors.primary : colors.mutedForeground}
+            />
+          </View>
+        </View>
+
+        {/* More */}
+        <Text style={styles.sectionLabel}>More</Text>
+        <View style={styles.card}>
+          <Pressable
+            style={styles.row}
+            onPress={() => router.push("/backup")}
+            testID="backup-troubleshooting-row"
+          >
+            <Feather name="tool" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Backup &amp; troubleshooting</Text>
+              <Text style={styles.rowSubLabel}>
+                Save a copy of your reminders, or get logs for a problem
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
           </Pressable>
-        </Pressable>
-      </Modal>
+        </View>
+      </ScrollView>
 
       <NameSheet
         visible={nameSheetVisible}

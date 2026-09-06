@@ -799,6 +799,23 @@ export async function deleteReminder(
   return reminders;
 }
 
+// Batch delete (e.g. "clear all completed"): cancels every affected
+// notification, then writes the result in one saveReminders call rather than
+// one per id — a "delete all completed" that instead called deleteReminder in
+// a loop would serialize N separate AsyncStorage writes for no benefit, since
+// they all resolve to the same final list.
+export async function deleteReminders(
+  current: Reminder[],
+  ids: string[]
+): Promise<Reminder[]> {
+  const idSet = new Set(ids);
+  const targets = current.filter((r) => idSet.has(r.id));
+  await Promise.all(targets.map((r) => cancelNotification(r.notificationId)));
+  const reminders = current.filter((r) => !idSet.has(r.id));
+  await saveReminders(reminders);
+  return reminders;
+}
+
 export async function toggleComplete(
   current: Reminder[],
   id: string

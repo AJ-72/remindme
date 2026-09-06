@@ -79,24 +79,28 @@ describe("ReminderDetailScreen", () => {
     expect(await findByText("Some details")).toBeTruthy();
   });
 
-  // The per-reminder override of the global "Arrive on time" default. Writing
-  // the field is not enough on its own -- the notification has to be re-armed
-  // so the already-registered alarm is replaced, which editReminder does.
-  it("defaults the exact-timing switch on for a reminder with no stored preference", async () => {
+  // The per-reminder override of the global "Do not use Android Alarm
+  // feature" default. The switch is negated relative to the stored
+  // `exactTiming` field (switch ON means the alarm feature is disabled), so a
+  // reminder with no stored preference (exactTiming defaults to precise/on)
+  // shows the switch OFF. Writing the field is not enough on its own -- the
+  // notification has to be re-armed so the already-registered alarm is
+  // replaced, which editReminder does.
+  it("defaults the exact-timing switch off (alarm feature enabled) for a reminder with no stored preference", async () => {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
     const { findByTestId } = renderScreen();
     const switchEl = await findByTestId("detail-exact-timing-switch");
-    expect(switchEl.props.value).toBe(true);
+    expect(switchEl.props.value).toBe(false);
   });
 
-  it("reflects a stored exactTiming: false on the switch", async () => {
+  it("reflects a stored exactTiming: false as the switch ON (alarm feature disabled)", async () => {
     await AsyncStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([makeReminder({ exactTiming: false })])
     );
     const { findByTestId } = renderScreen();
     const switchEl = await findByTestId("detail-exact-timing-switch");
-    expect(switchEl.props.value).toBe(false);
+    expect(switchEl.props.value).toBe(true);
   });
 
   it("persists an exact-timing override without disturbing the reminder's other fields", async () => {
@@ -104,8 +108,10 @@ describe("ReminderDetailScreen", () => {
     const { findByTestId } = renderScreen();
     const switchEl = await findByTestId("detail-exact-timing-switch");
 
+    // Switching the (negated) "disable alarm feature" toggle ON is what
+    // writes exactTiming: false to storage.
     await act(async () => {
-      fireEvent(switchEl, "valueChange", false);
+      fireEvent(switchEl, "valueChange", true);
     });
 
     await waitFor(async () => {

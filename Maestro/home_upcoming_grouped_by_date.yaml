@@ -1,0 +1,19 @@
+# Guards the Upcoming section's date grouping (backlog: "group the upcoming
+# section on dates: Today, Tomorrow, then next days date + day for a week,
+# and everything else under later"). Creates one same-day reminder and
+# confirms it renders under a "Today" label, not a flat undifferentiated list.
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Grouping check task today at 9pm"
+- tapOn:
+    id: "quick-add-save"
+- assertVisible: "Upcoming"
+- assertVisible: "Today"
+- assertVisible: "Grouping check task"

@@ -1,0 +1,38 @@
+# Guards two edit-screen fixes: (1) editing the title re-parses and updates
+# the Date/Time preview instead of leaving the old datetime in place, and
+# (2) "Remind Someone" now renders after the alarm toggle, not before the
+# Parsed-as preview. Creates a reminder, opens it for edit, retypes the title
+# with a new date phrase, and checks the preview updates plus the new
+# section order is on screen together.
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Reparse check task today at 9pm"
+- tapOn:
+    id: "quick-add-save"
+- tapOn: "Reparse check task"
+- extendedWaitUntil:
+    visible:
+      id: "edit-title-input"
+    timeout: 10000
+- eraseText
+- inputText: "Reparse check task tomorrow at 8am"
+# The edit screen's Date row renders the full formatted date (e.g. "Mon, 7
+# Sept 2026"), not a relative "Tomorrow" label like the home screen's date
+# pills — assert on the "auto" badge instead, which is what actually proves
+# the title's date phrase was re-parsed rather than the old datetime just
+# sitting there unchanged.
+- assertVisible: "auto"
+- hideKeyboard
+# formatTime12h renders a non-breaking space between "8:00" and "AM"
+# (confirmed via `maestro hierarchy`: accessibilityText "8:00 AM"), so a
+# plain "8:00 AM" string never matches — regex tolerates either space char.
+- assertVisible: "8:00.AM"
+- assertVisible: "Alarm sound"
+- assertVisible: "Remind me to message someone"

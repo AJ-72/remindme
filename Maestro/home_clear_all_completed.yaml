@@ -1,0 +1,30 @@
+# Guards "select all completed tasks and delete it all at once" (backlog).
+# Creates a uniquely-named reminder, marks it done, then uses the Completed
+# section's "Clear all" action + confirm sheet, and checks the reminder is
+# gone. No clearState (this device's adb shell denies CLEAR_APP_USER_DATA —
+# see time_12hour_format.yaml) so the assertion targets this run's specific
+# title rather than an empty list.
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Clear all completed check task today at 9pm"
+- tapOn:
+    id: "quick-add-save"
+- assertVisible: "Clear all completed check task"
+- tapOn:
+    id: "complete-toggle"
+- assertVisible: "Completed"
+- assertVisible:
+    id: "clear-completed-button"
+- tapOn:
+    id: "clear-completed-button"
+- assertVisible: "Delete All Completed"
+- tapOn:
+    id: "confirm-sheet-confirm"
+- assertNotVisible: "Clear all completed check task"

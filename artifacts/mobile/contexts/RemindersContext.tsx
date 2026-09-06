@@ -14,6 +14,7 @@ import {
   type DictationLanguage,
   addReminder as serviceAdd,
   deleteReminder as serviceDelete,
+  deleteReminders as serviceDeleteMany,
   editReminder as serviceEdit,
   getDefaultAlarmEnabled,
   getDefaultExactTimingEnabled,
@@ -64,6 +65,7 @@ interface RemindersContextType {
     data: Omit<Reminder, "id" | "completed" | "notificationId">
   ) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
+  deleteReminders: (ids: string[]) => Promise<void>;
   toggleComplete: (id: string) => Promise<void>;
   snoozeReminder: (id: string, preset?: SnoozePreset) => Promise<void>;
   snoozePreset: SnoozePreset;
@@ -296,6 +298,16 @@ export function RemindersProvider({
     [reminders]
   );
 
+  const deleteReminders = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const updated = await serviceDeleteMany(reminders, ids);
+      setReminders(updated);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    },
+    [reminders]
+  );
+
   const toggleComplete = useCallback(
     async (id: string) => {
       const updated = await serviceToggle(reminders, id);
@@ -330,6 +342,7 @@ export function RemindersProvider({
         addReminder,
         editReminder,
         deleteReminder,
+        deleteReminders,
         toggleComplete,
         snoozeReminder,
         snoozePreset,

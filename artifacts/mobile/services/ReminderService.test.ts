@@ -23,6 +23,7 @@ import {
   setVibrationEnabled,
   VIBRATION_KEY,
   deleteReminder,
+  deleteReminders,
   editReminder,
   SNOOZE_PRESET_KEY,
   getDefaultAlarmEnabled,
@@ -158,6 +159,28 @@ describe("deleteReminder", () => {
     const result = await deleteReminder([r1, r2], "r1");
     expect(result.find((r) => r.id === "r1")).toBeUndefined();
     expect(result.find((r) => r.id === "r2")).toBeDefined();
+  });
+});
+
+describe("deleteReminders", () => {
+  it("removes every listed id and leaves the rest unchanged", async () => {
+    const r1 = makeReminder({ id: "r1" });
+    const r2 = makeReminder({ id: "r2" });
+    const r3 = makeReminder({ id: "r3" });
+    const result = await deleteReminders([r1, r2, r3], ["r1", "r3"]);
+    expect(result.map((r) => r.id)).toEqual(["r2"]);
+  });
+
+  it("does nothing for an empty id list", async () => {
+    const r1 = makeReminder({ id: "r1" });
+    const result = await deleteReminders([r1], []);
+    expect(result).toEqual([r1]);
+  });
+
+  it("ignores ids that don't match anything", async () => {
+    const r1 = makeReminder({ id: "r1" });
+    const result = await deleteReminders([r1], ["unknown"]);
+    expect(result).toEqual([r1]);
   });
 });
 

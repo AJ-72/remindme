@@ -64,11 +64,17 @@ export default function ReminderDetailScreen() {
   // Per-reminder override of the Settings default. Goes through editReminder
   // so the notification is cancelled and re-armed on the new API -- writing
   // the field alone would leave the old, already-registered alarm in place.
+  // `exactTiming` keeps its original polarity in storage; only the switch
+  // below negates it for display, to match the Settings screen's "Do not use
+  // Android Alarm feature" framing.
   const handleToggleExactTiming = async (value: boolean) => {
     if (!reminder) return;
     const { id: _id, completed, notificationId, ...rest } = reminder;
     await editReminder(reminder.id, { ...rest, exactTiming: value });
   };
+
+  const handleToggleDisableExactAlarm = (disable: boolean) =>
+    handleToggleExactTiming(!disable);
 
   const handleSelectSnoozePreset = async (preset: SnoozePreset) => {
     setSnoozeSheetVisible(false);
@@ -282,29 +288,29 @@ export default function ReminderDetailScreen() {
           {!reminder.completed && (
             <View style={styles.settingRow}>
               <Feather
-                name="clock"
+                name={reminder.exactTiming === false ? "watch" : "clock"}
                 size={14}
                 color={
-                  reminder.exactTiming !== false
-                    ? colors.primary
-                    : colors.mutedForeground
+                  reminder.exactTiming === false
+                    ? colors.mutedForeground
+                    : colors.primary
                 }
               />
               <View style={{ flex: 1 }}>
-                <Text style={styles.settingLabel}>Arrive on time</Text>
+                <Text style={styles.settingLabel}>Do not use Android Alarm feature</Text>
                 <Text style={styles.settingSubLabel}>
-                  {reminder.exactTiming !== false
-                    ? "Fires at exactly the time you set"
-                    : "Your phone may delay this by several minutes"}
+                  {reminder.exactTiming === false
+                    ? "Your phone may delay this by several minutes"
+                    : "Fires at exactly the time you set"}
                 </Text>
               </View>
               <Switch
                 testID="detail-exact-timing-switch"
-                value={reminder.exactTiming !== false}
-                onValueChange={handleToggleExactTiming}
+                value={reminder.exactTiming === false}
+                onValueChange={handleToggleDisableExactAlarm}
                 trackColor={{ false: colors.muted, true: colors.primary + "66" }}
                 thumbColor={
-                  reminder.exactTiming !== false
+                  reminder.exactTiming === false
                     ? colors.primary
                     : colors.mutedForeground
                 }

@@ -21,18 +21,23 @@ import { useColors } from "@/hooks/useColors";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
 import { buildGreeting, greetingName, initialsFor } from "@/utils/greeting";
 import { getFontFamily } from "@/utils/getFontFamily";
+import { groupByDate } from "@/utils/groupByDate";
 import NameSheet from "@/components/NameSheet";
+
+// Distinguishes the two confirm sheets that share pendingDelete* state below:
+// deleting one reminder vs. clearing every completed one at once.
+type PendingDelete = { kind: "single"; id: string } | { kind: "clear-completed" };
 
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { reminders, deleteReminder, loading, userName, setUserName } =
+  const { reminders, deleteReminder, deleteReminders, loading, userName, setUserName } =
     useReminders();
   const [refreshing, setRefreshing] = useState(false);
-  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [nameSheetVisible, setNameSheetVisible] = useState(false);
 
-  const { upcoming, sending, completed } = useMemo(() => {
+  const { upcomingGroups, upcomingCount, sending, completed } = useMemo(() => {
     const byDateAsc = (a: Reminder, b: Reminder) =>
       new Date(a.datetime).getTime() - new Date(b.datetime).getTime();
     // Sending and Upcoming partition the incomplete reminders, so nothing can
@@ -44,20 +49,32 @@ export default function HomeScreen() {
     const completed = reminders
       .filter((r) => r.completed)
       .sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
-    return { upcoming, sending, completed };
+    // Today / Tomorrow / named weekdays for the rest of the week / Later —
+    // an ever-growing flat list stopped scanning like a calendar once there
+    // were more than a handful of reminders.
+    const upcomingGroups = groupByDate(upcoming, (r) => new Date(r.datetime));
+    return { upcomingGroups, upcomingCount: upcoming.length, sending, completed };
   }, [reminders]);
 
   const handleDelete = (id: string) => {
-    setPendingDeleteId(id);
+    setPendingDelete({ kind: "single", id });
+  };
+
+  const handleClearCompleted = () => {
+    setPendingDelete({ kind: "clear-completed" });
   };
 
   const handleConfirmDelete = async () => {
-    if (pendingDeleteId) await deleteReminder(pendingDeleteId);
-    setPendingDeleteId(null);
+    if (pendingDelete?.kind === "single") {
+      await deleteReminder(pendingDelete.id);
+    } else if (pendingDelete?.kind === "clear-completed") {
+      await deleteReminders(completed.map((r) => r.id));
+    }
+    setPendingDelete(null);
   };
 
   const handleCancelDelete = () => {
-    setPendingDeleteId(null);
+    setPendingDelete(null);
   };
 
   const handleRefresh = async () => {
@@ -191,6 +208,27 @@ export default function HomeScreen() {
       paddingVertical: 2,
       borderRadius: 10,
     },
+    sectionHeaderRight: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    clearCompletedText: {
+      fontSize: 12,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.destructive,
+    },
+    // Small per-group label inside Upcoming (Today/Tomorrow/weekday/Later) —
+    // deliberately smaller and unstyled-as-a-badge compared to sectionHeaderLabel,
+    // since these are sub-groups of one section rather than section headers
+    // themselves.
+    dateGroupLabel: {
+      fontSize: 12,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.mutedForeground,
+      marginBottom: 6,
+      marginTop: 10,
+    },
   });
 
   if (loading) {
@@ -253,11 +291,11 @@ export default function HomeScreen() {
                   trading it for the name prompt would make the app LESS useful
                   to the user who skipped onboarding. */}
               <Text style={styles.headerSubtitle}>
-                {upcoming.length + sending.length === 0
+                {upcomingCount + sending.length === 0
                   ? userName
                     ? `All caught up, ${greetingName(userName)}!`
                     : "All caught up!"
-                  : `${upcoming.length + sending.length} upcoming`}
+                  : `${upcomingCount + sending.length} upcoming`}
               </Text>
             </View>
           </View>
@@ -311,14 +349,24 @@ export default function HomeScreen() {
           </View>
         ) : (
           <>
-            {upcoming.length > 0 && (
+            {upcomingCount > 0 && (
               <>
                 <View style={styles.sectionHeaderRow}>
                   <Text style={styles.sectionHeaderLabel}>Upcoming</Text>
-                  <Text style={styles.sectionCount}>{upcoming.length}</Text>
+                  <Text style={styles.sectionCount}>{upcomingCount}</Text>
                 </View>
-                {upcoming.map((r) => (
-                  <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
+                {/* Today / Tomorrow / named weekdays for the rest of the week
+                    / Later, instead of one flat list — see utils/groupByDate.
+                    Each group gets its own small date label so the section
+                    still reads as a calendar once there are more than a
+                    handful of reminders. */}
+                {upcomingGroups.map((group) => (
+                  <View key={`${group.key}-${group.items[0]?.id}`}>
+                    <Text style={styles.dateGroupLabel}>{group.label}</Text>
+                    {group.items.map((r) => (
+                      <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
+                    ))}
+                  </View>
                 ))}
               </>
             )}
@@ -328,7 +376,7 @@ export default function HomeScreen() {
                 <View
                   style={[
                     styles.sectionHeaderRow,
-                    { marginTop: upcoming.length > 0 ? 12 : 6 },
+                    { marginTop: upcomingCount > 0 ? 12 : 6 },
                   ]}
                 >
                   <Text style={styles.sectionHeaderLabel}>Remind Someone</Text>
@@ -347,12 +395,23 @@ export default function HomeScreen() {
                     styles.sectionHeaderRow,
                     {
                       marginTop:
-                        upcoming.length > 0 || sending.length > 0 ? 12 : 6,
+                        upcomingCount > 0 || sending.length > 0 ? 12 : 6,
                     },
                   ]}
                 >
                   <Text style={styles.sectionHeaderLabel}>Completed</Text>
-                  <Text style={styles.sectionCount}>{completed.length}</Text>
+                  <View style={styles.sectionHeaderRight}>
+                    <Text style={styles.sectionCount}>{completed.length}</Text>
+                    <Pressable
+                      onPress={handleClearCompleted}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Delete all completed reminders"
+                      testID="clear-completed-button"
+                    >
+                      <Text style={styles.clearCompletedText}>Clear all</Text>
+                    </Pressable>
+                  </View>
                 </View>
                 {completed.map((r) => (
                   <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
@@ -374,9 +433,13 @@ export default function HomeScreen() {
       />
 
       <ConfirmSheet
-        visible={pendingDeleteId !== null}
-        title="Delete Reminder"
-        message="Are you sure you want to delete this reminder?"
+        visible={pendingDelete !== null}
+        title={pendingDelete?.kind === "clear-completed" ? "Delete All Completed" : "Delete Reminder"}
+        message={
+          pendingDelete?.kind === "clear-completed"
+            ? `Are you sure you want to delete all ${completed.length} completed reminder${completed.length === 1 ? "" : "s"}? This can't be undone.`
+            : "Are you sure you want to delete this reminder?"
+        }
         confirmLabel="Delete"
         destructive
         onConfirm={handleConfirmDelete}
