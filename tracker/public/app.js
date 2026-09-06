@@ -22,19 +22,26 @@ function renderBadges(item) {
   return html;
 }
 
+// URL-bearing attributes that can carry a javascript:/data: navigation or
+// script-execution vector — checked against the same scheme allowlist.
+const URL_ATTRS = ['href', 'src', 'data', 'formaction'];
+
 // Sanitizes an HTML string produced by marked.parse() before it is assigned
-// to innerHTML: strips any <script> tag outright, strips any href that
-// isn't http(s)/anchor/relative/mailto (blocks javascript: links), and
+// to innerHTML: removes <script>/<iframe>/<object>/<embed>/<base> elements
+// outright (classic script-execution/navigation-hijack vectors that don't
+// belong in migrated notes content at all), strips any href/src/data/
+// formaction that isn't http(s)/anchor/relative/mailto (blocks javascript:
+// links and same-shaped src/data attributes on iframe/object/embed), and
 // strips any on*-prefixed event-handler attribute as defense in depth.
 function sanitizeRenderedMarkdown(html) {
   const container = document.createElement('div');
   container.innerHTML = html;
 
-  container.querySelectorAll('script').forEach(el => el.remove());
+  container.querySelectorAll('script, iframe, object, embed, base').forEach(el => el.remove());
 
   container.querySelectorAll('*').forEach(el => {
     [...el.attributes].forEach(attr => {
-      if (attr.name === 'href' && !/^(https?:|#|\/|mailto:)/i.test(attr.value)) {
+      if (URL_ATTRS.includes(attr.name.toLowerCase()) && !/^(https?:|#|\/|mailto:)/i.test(attr.value)) {
         el.removeAttribute(attr.name);
       }
       if (attr.name.toLowerCase().startsWith('on')) {
