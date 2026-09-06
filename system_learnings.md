@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-06 — Work tracker build: three real bugs the plan's own reference code carried, caught only by review
+
+**WHAT:** Three defects shipped in the plan/spec's own example code for `tracker/` (not implementer error) were found and fixed during the SDD build: (1) `readyItems(db)` briefly excluded items that block other items — the plan's test fixture contradicted its own two-condition prose spec; fixed to the literal spec (`status='open'` AND not computed-blocked, nothing else) in `tracker/queries.js`. (2) The one-shot `tracker/scripts/migrate-backlog.js` computed each row's `status` but never passed it to `createItem`, silently defaulting every migrated item to `open` — real `BLOCKED`/`DEFERRED` items from `backlog.md` (B3/B7/B8, M4-T2/M6/M8) lost that state on the first migration run; fixed by adding an optional `status` param to `createItem` (`tracker/queries.js`) threaded through from `migrate()`. (3) `tracker/public/app.js`'s original `openDetail()` inserted `item.title` and `marked.parse(item.notes_md)` straight into `innerHTML` with no escaping — stored XSS via free-text notes — fixed with an `escapeHtml()` pass, later upgraded to parse-then-sanitize (`sanitizeRenderedMarkdown`) since escape-then-parse was corrupting code-span entities in real migrated notes containing backticks.
+
+**WHY:** All three were caught by dispatched task reviewers/re-reviewers verifying implementer code against the plan's *stated* interface rather than trusting the plan's own example code as correct — the plan is an argument, not automatically ground truth. The XSS fix itself then needed a second pass: removing the blanket `escapeHtml()` pre-pass fixed the double-escaping but reopened raw-HTML-element vectors (`<iframe src="javascript:...">`, `<object data=...>`) that the new sanitizer's `href`-only, `script`-only allowlist didn't cover — caught by the final whole-branch review, which is structurally the only review pass that can compare pre- and post-migration data end-to-end (per-task reviews are diff-scoped and can't see a migration's completeness against its source file).
+
+**WHERE:** [tracker/queries.js](tracker/queries.js), [tracker/scripts/migrate-backlog.js](tracker/scripts/migrate-backlog.js), [tracker/public/app.js](tracker/public/app.js) (`sanitizeRenderedMarkdown`, final form strips `script`/`iframe`/`object`/`embed`/`base` elements and checks `href`/`src`/`data`/`formaction` against a URL-scheme allowlist). Full ruling trail in the branch's SDD ledger (since deleted per the skill's cleanup step — see `docs/superpowers/plans/2026-09-06-work-tracker.md`'s Self-Review Notes for the readyItems/XSS corrections applied to the plan document itself). Known residual gap, accepted as low-severity: `xlink:href` on inline SVG is not covered by the sanitizer's allowlist, and no automated DOM-level test exists for it (no jsdom in this standalone project) — manual/logical-trace verification only.
+
+---
+
 ## 2026-09-06 — Work tracker uses `node:sqlite`, not `better-sqlite3` as the design spec named
 
 **WHAT:** The `tracker/` implementation plan (`docs/superpowers/plans/2026-09-06-work-tracker.md`) specifies Node's built-in `node:sqlite` module for the local work-tracker's storage layer, deviating from `docs/superpowers/specs/2026-09-06-work-tracker-design.md`, which named `better-sqlite3`.
