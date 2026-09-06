@@ -823,6 +823,12 @@ const state = {
   selectedId: null,
 };
 
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 function checkedValues(fieldsetId) {
   return Array.from(document.querySelectorAll(`#${fieldsetId} input:checked`))
     .map(el => el.value);
@@ -842,7 +848,7 @@ function renderList(targetId, items) {
   ul.innerHTML = '';
   for (const item of items) {
     const li = document.createElement('li');
-    li.innerHTML = `<strong>${item.id}</strong> ${item.title} ${renderBadges(item)}`;
+    li.innerHTML = `<strong>${item.id}</strong> ${escapeHtml(item.title)} ${renderBadges(item)}`;
     li.addEventListener('click', () => openDetail(item.id));
     ul.appendChild(li);
   }
@@ -879,7 +885,7 @@ async function openDetail(id) {
   document.getElementById('detail-panel').hidden = false;
   document.getElementById('detail-title').textContent = `${item.id}: ${item.title}`;
   document.getElementById('detail-meta').innerHTML = renderBadges(item);
-  document.getElementById('detail-notes-rendered').innerHTML = marked.parse(item.notes_md || '');
+  document.getElementById('detail-notes-rendered').innerHTML = marked.parse(escapeHtml(item.notes_md || ''));
   document.getElementById('detail-notes-edit').value = item.notes_md || '';
 
   const blockersHtml = [
@@ -1220,3 +1226,14 @@ git commit -m "feat(tracker): migrate backlog.md content, replace with pointer f
   intent: the fixture now asserts `[blocker.id, ready.id]`. Recorded in
   the SDD ledger for this plan as a ruling — see
   `.superpowers/sdd/2026-09-06-work-tracker/progress.md`.
+- **Post-hoc correction (found during Task 4 execution, 2026-09-06):**
+  this plan's original `app.js` code inserted `item.title` and
+  `marked.parse(item.notes_md)` directly into `innerHTML` with no
+  escaping — a stored-XSS risk for two free-text fields. Fixed in this
+  plan: added an `escapeHtml()` helper, applied it to `item.title` in
+  `renderList()` and to `item.notes_md` before `marked.parse()` in
+  `openDetail()` (escaping before markdown parsing still lets markdown
+  syntax render normally, since `*`/`#`/etc. are unaffected by HTML
+  escaping). Server-controlled enum/ID fields (kind, status, effort,
+  blocker ids) were left unescaped deliberately — only free-text user
+  fields needed the fix. Recorded in the SDD ledger as a ruling.
