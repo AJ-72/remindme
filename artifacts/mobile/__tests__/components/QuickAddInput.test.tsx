@@ -92,6 +92,39 @@ describe("QuickAddInput", () => {
     );
   });
 
+  // The Settings toggle only seeds NEW reminders, so a user who turned it off
+  // gets a silent reminder with no other signal at compose time. The hint also
+  // names lateness, since the alarm flag decides the scheduling API too.
+  it("warns that the reminder will be silent when the default is off", async () => {
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
+    const { findByTestId } = renderComponent();
+
+    const hint = await findByTestId("quick-add-silent-hint");
+    expect(hint).toBeTruthy();
+  });
+
+  it("shows no silent warning when the default is on", async () => {
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
+    const { queryByTestId, findByTestId } = renderComponent();
+
+    await findByTestId("quick-add-alarm-toggle");
+    await waitFor(() =>
+      expect(queryByTestId("quick-add-silent-hint")).toBeNull()
+    );
+  });
+
+  it("clears the silent warning once the bell is tapped", async () => {
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
+    const { findByTestId, queryByTestId } = renderComponent();
+
+    await findByTestId("quick-add-silent-hint");
+    fireEvent.press(await findByTestId("quick-add-alarm-toggle"));
+
+    await waitFor(() =>
+      expect(queryByTestId("quick-add-silent-hint")).toBeNull()
+    );
+  });
+
   it("saves with alarm off when the stored default is off", async () => {
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
     const { findByTestId } = renderComponent();

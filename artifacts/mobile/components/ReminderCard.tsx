@@ -212,6 +212,7 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
         </View>
 
         <Pressable
+          testID={`delete-reminder-${reminder.id}`}
           style={styles.deleteBtn}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

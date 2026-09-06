@@ -49,7 +49,7 @@ local debug build via `expo run:android`) unless noted. **9 `AUTO` · 14
 
 | ID | Scenario | Status | Last run | Auto? | Blocks backlog | File |
 | --- | --- | --- | --- | --- | --- | --- |
-| D26 | Exact timing for non-alarm reminders | `PENDING` | — | SEMI | — | [cross-cutting](cross-cutting.md#d26) |
+| D26 | Exact timing for non-alarm reminders | `PASS` | 2026-09-06 | SEMI | — | [cross-cutting](cross-cutting.md#d26) |
 | D25 | How Google Tasks actually stays punctual (comparison) | `INFO` | 2026-09-05 | AUTO | — | [cross-cutting](cross-cutting.md#d25) |
 | D19 | `setAlarmClock()` exact delivery | `PASS` | 2026-08-24 | AUTO | — | [cross-cutting](cross-cutting.md#d19) |
 | D20 | EAS re-verify after setAlarmClock | `PASS` | 2026-08-29 | SEMI | — | [cross-cutting](cross-cutting.md#d20) |

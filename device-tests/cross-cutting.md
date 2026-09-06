@@ -8,6 +8,7 @@ new to this — several other items are meaningless if alarms do not fire.
 
 | ID | Scenario | Status | Last run | Auto? |
 | --- | --- | --- | --- | --- |
+| [D26](#d26) | Exact timing for non-alarm reminders | `PASS` | 2026-09-06 | SEMI |
 | [D25](#d25) | How Google Tasks actually stays punctual | `INFO` | 2026-09-05 | AUTO |
 | [D19](#d19) | `setAlarmClock()` exact delivery | `PASS` | 2026-08-24 | AUTO |
 | [D20](#d20) | EAS re-verify after setAlarmClock | `PASS` | 2026-08-29 | SEMI |
@@ -609,7 +610,7 @@ wrong promise about data safety is worse than saying nothing.
 ---
 
 <a id="d26"></a>
-## D26 — Exact timing for non-alarm reminders · `PENDING`
+## D26 — Exact timing for non-alarm reminders · `PASS` (2026-09-06, user-confirmed)
 
 *Added 2026-09-05.* Silent reminders now route through `setAlarmClock()` like
 alarm ones. The JS flag is `exactTiming` (default ON, global Settings toggle +
@@ -662,6 +663,62 @@ the override must actually reach the native layer, or the setting is decorative.
 **Fails if.** `windowLength` is non-zero with the switch ON — particularly at
 **75% of futurity**, which is the ColorOS demotion fingerprint and would mean
 `setAlarmClock()` is being downgraded too, invalidating the whole approach.
+
+### Result — 2026-09-06 (OnePlus CPH2569, local debug build, device b81a371a)
+
+Rebuilt via `build-and-install-android.ps1` (`buildFromSource` compiled the
+patch — confirmed by `remindme-patch` log lines appearing at all). Four
+independent silent reminders created and watched fire, then the override
+tested via snooze:
+
+| reminder | target | delivered | late by | log line | windowLength | flags |
+| --- | --- | --- | --- | --- | --- | --- |
+| D26 | 06:50:00.000 | 06:50:00.009 | 9ms | `ALARM_CLOCK set` | 0 | 0x9 |
+| D26b | 07:29:00.000 | 07:29:00.008 | 8ms | `ALARM_CLOCK set` | 0 | 0x9 |
+| D26c | 07:43:00.000 | 07:43:00.009 | 9ms | `ALARM_CLOCK set` | 0 | 0x9 |
+| D26d | 07:48:00.000 | 07:48:00.013 | 13ms | `ALARM_CLOCK set` | 0 | 0x9 |
+
+All four confirmed via `adb shell dumpsys alarm` (registration) and
+`adb logcat -d | grep remindme-patch` (native call), cross-checked against
+`AlarmManager: sending alarm` in a continuous `logcat -v time` capture
+(not `logcat -d` after the fact, to avoid the ring-buffer trap noted in D7).
+`NotificationContentProvider queryBadge` confirmed the tray notification
+actually posted, and the D26 notification was visually present in the shade.
+
+**Step 5 (override).** The switch lives on `reminder-detail.tsx`, reached only
+via a notification tap — tapping a card from the home list opens **Edit**
+(`add-reminder.tsx`), which has no such control. This makes the override
+untestable on a reminder before its first fire. Worked around by: letting
+D26d fire, opening its notification, turning **Arrive on time** off (switch
+`checked` verified via `uiautomator dump`, not just visually), then tapping
+**Snooze** (+5 min) to produce a fresh future registration carrying the
+override:
+
+```
+remindme-patch: EXACT set for 1788661696251 (alarmClock=false, canScheduleExactAlarms=true)
+RTC_WAKEUP #19: ... com.curios.remindme ... windowLength 224979 ... flags 0x4
+```
+
+`EXACT set`, non-zero window, `flags 0x4` — the override reaches the native
+layer correctly.
+
+**Not directly tested: the override on a reminder's own first fire** (only
+via snooze's reschedule path). The code path is the same
+(`editReminder` → cancel + reschedule with the new `exactTiming`), and snooze
+uses `scheduleSnoozeNotification`, a distinct function from
+`scheduleNotification` — both were confirmed in Jest to thread `exactTiming`
+per the summary, but only the snooze path has now been confirmed on-device.
+
+**UX gap noticed, not a scheduling defect:** the "Arrive on time" switch is
+shown and interactive on already-fired/completed reminders too, where
+toggling it is inert (confirmed: no new alarm registration resulted from
+toggling D26c/D26d post-fire, consistent with `isPendingForAlarmRewrite`
+correctly skipping them) but the screen gives no indication of that. Worth a
+follow-up to disable or hide the switch once a reminder is completed.
+
+**Status: `PASS`, confirmed by the user 2026-09-06** — the user set up the
+D26e reminder, snoozed it with the override off, and confirmed the result
+above directly rather than from a screenshot alone.
 
 **Also unverified, and not answered by the above:**
 - **The `showIntent` question.** Every reminder now claims the alarm-clock
