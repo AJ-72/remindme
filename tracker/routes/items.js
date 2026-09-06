@@ -1,11 +1,15 @@
 const express = require('express');
-const { createItem, getItem, listItems, readyItems } = require('../queries.js');
+const { createItem, getItem, listItems, readyItems, needsRefinementItems } = require('../queries.js');
 
 function createItemsRouter(db) {
   const router = express.Router();
 
   router.get('/ready', (req, res) => {
     res.json(readyItems(db));
+  });
+
+  router.get('/needs-refinement', (req, res) => {
+    res.json(needsRefinementItems(db));
   });
 
   router.get('/', (req, res) => {

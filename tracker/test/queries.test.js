@@ -3,7 +3,8 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const { openDb } = require('../db.js');
 const {
-  nextId, createItem, getItem, listItems, isComputedBlocked, readyItems,
+  nextId, createItem, getItem, listItems, isComputedBlocked, readyItems, needsRefinementItems,
+  getDorChecklist, saveDorChecklist, getRefinement, saveRefinement,
 } = require('../queries.js');
 
 function freshDb(name) {
@@ -70,6 +71,86 @@ test('readyItems excludes computed-blocked and non-open items', () => {
 
   const ids = readyItems(db).map(i => i.id).sort();
   assert.deepStrictEqual(ids, [blocker.id, ready.id].sort());
+  db.close(); fs.unlinkSync(path);
+});
+
+test('dor_checklist starts empty and round-trips through save/get', () => {
+  const { db, path } = freshDb('dor-checklist');
+  assert.deepStrictEqual(getDorChecklist(db).criteria, []);
+
+  const saved = saveDorChecklist(db, ['Has acceptance criteria', 'Estimated']);
+  assert.deepStrictEqual(saved.criteria, ['Has acceptance criteria', 'Estimated']);
+  assert.deepStrictEqual(getDorChecklist(db).criteria, saved.criteria);
+  db.close(); fs.unlinkSync(path);
+});
+
+test('readyItems falls back to open+unblocked when no checklist is configured', () => {
+  const { db, path } = freshDb('ready-no-checklist');
+  const ready = createItem(db, { kind: 'feature', title: 'Ready feature' });
+  assert.deepStrictEqual(readyItems(db).map(i => i.id), [ready.id]);
+  assert.deepStrictEqual(needsRefinementItems(db), []);
+  db.close(); fs.unlinkSync(path);
+});
+
+test('readyItems requires a passing, current-checklist refinement once a checklist is set', () => {
+  const { db, path } = freshDb('ready-with-checklist');
+  const item = createItem(db, { kind: 'feature', title: 'Needs refinement' });
+  const checklist = saveDorChecklist(db, ['Has acceptance criteria']);
+
+  // Not yet refined against this checklist -> not ready, shows as needing refinement.
+  assert.deepStrictEqual(readyItems(db).map(i => i.id), []);
+  assert.deepStrictEqual(needsRefinementItems(db).map(i => i.id), [item.id]);
+
+  // Refined, but a criterion failed -> still not ready.
+  saveRefinement(db, item.id, {
+    checklist: [{ criterion: 'Has acceptance criteria', met: false, note: 'missing' }],
+    checklistVersion: checklist.updatedAt,
+    acceptanceCriteriaMd: '', openQuestions: [], suggestedModel: 'small',
+    suggestedModelReason: 'trivial', provider: 'anthropic', modelUsed: 'claude-sonnet-5',
+  });
+  assert.deepStrictEqual(readyItems(db).map(i => i.id), []);
+  assert.deepStrictEqual(needsRefinementItems(db).map(i => i.id), [item.id]);
+
+  // Refined and passing -> ready.
+  saveRefinement(db, item.id, {
+    checklist: [{ criterion: 'Has acceptance criteria', met: true, note: 'looks good' }],
+    checklistVersion: checklist.updatedAt,
+    acceptanceCriteriaMd: '- [ ] Do the thing', openQuestions: [], suggestedModel: 'small',
+    suggestedModelReason: 'trivial', provider: 'anthropic', modelUsed: 'claude-sonnet-5',
+  });
+  assert.deepStrictEqual(readyItems(db).map(i => i.id), [item.id]);
+  assert.deepStrictEqual(needsRefinementItems(db), []);
+
+  // Editing the checklist invalidates the old refinement.
+  saveDorChecklist(db, ['Has acceptance criteria', 'Estimated']);
+  assert.deepStrictEqual(readyItems(db).map(i => i.id), []);
+  assert.deepStrictEqual(needsRefinementItems(db).map(i => i.id), [item.id]);
+
+  db.close(); fs.unlinkSync(path);
+});
+
+test('saveRefinement upserts — a second call replaces the first', () => {
+  const { db, path } = freshDb('refinement-upsert');
+  const item = createItem(db, { kind: 'bug', title: 'Flaky test' });
+  const checklist = saveDorChecklist(db, ['Estimated']);
+
+  saveRefinement(db, item.id, {
+    checklist: [{ criterion: 'Estimated', met: false, note: 'no effort set' }],
+    checklistVersion: checklist.updatedAt,
+    acceptanceCriteriaMd: '', openQuestions: ['What triggers the flake?'], suggestedModel: 'medium',
+    suggestedModelReason: 'needs investigation', provider: 'anthropic', modelUsed: 'claude-sonnet-5',
+  });
+  saveRefinement(db, item.id, {
+    checklist: [{ criterion: 'Estimated', met: true, note: 'now S' }],
+    checklistVersion: checklist.updatedAt,
+    acceptanceCriteriaMd: '- [ ] Fix it', openQuestions: [], suggestedModel: 'small',
+    suggestedModelReason: 'now scoped', provider: 'anthropic', modelUsed: 'claude-sonnet-5',
+  });
+
+  const refinement = getRefinement(db, item.id);
+  assert.strictEqual(refinement.checklist[0].met, true);
+  assert.deepStrictEqual(refinement.openQuestions, []);
+  assert.strictEqual(refinement.suggested_model, 'small');
   db.close(); fs.unlinkSync(path);
 });
 

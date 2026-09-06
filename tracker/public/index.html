@@ -26,6 +26,11 @@
         <input id="search-input" type="search" placeholder="Search by ID or title…" aria-label="Search items">
       </div>
 
+      <button id="open-dor-modal" class="btn btn-secondary" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Definition of Ready
+      </button>
+
       <button id="open-add-modal" class="btn btn-primary" type="button">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         Add item
@@ -107,6 +112,19 @@
           <p class="empty-state" id="ready-empty" hidden>Nothing is ready to pick up right now.</p>
         </section>
 
+        <section id="refine-section" class="panel refine-panel" hidden>
+          <div class="panel-header">
+            <h2>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              Needs refinement
+            </h2>
+            <span class="count-badge" id="refine-count">0</span>
+          </div>
+          <p class="panel-subhead">Open and unblocked, but not yet meeting the Definition of Ready checklist.</p>
+          <ul id="refine-list" class="item-list"></ul>
+          <p class="empty-state" id="refine-empty" hidden></p>
+        </section>
+
         <section id="list-section" class="panel">
           <div class="panel-header">
             <h2>All items</h2>
@@ -156,6 +174,34 @@
     </div>
   </div>
 
+  <!-- Definition of Ready modal -->
+  <div id="dor-modal-backdrop" class="backdrop" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="dor-modal-title">
+      <div class="modal-header">
+        <h2 id="dor-modal-title">Definition of Ready</h2>
+        <button id="dor-modal-close" class="icon-btn" type="button" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="stacked-form">
+        <p class="dor-explainer">
+          An item only shows under "Ready now" once it passes every criterion below.
+          Leave this empty to use the old rule (open + unblocked = ready).
+        </p>
+        <div id="dor-criteria-list" class="dor-criteria-list"></div>
+        <div class="inline-form">
+          <input id="dor-new-criterion" class="text-input" placeholder="Add a criterion, e.g. Has acceptance criteria">
+          <button id="dor-add-criterion" class="btn btn-secondary" type="button">Add</button>
+        </div>
+        <p class="dor-status" id="dor-status"></p>
+        <div class="modal-actions" style="justify-content: space-between;">
+          <button id="dor-generate" class="btn btn-secondary" type="button">✨ Draft with AI</button>
+          <button id="dor-save" class="btn btn-primary" type="button">Save checklist</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Detail slide-over -->
   <div id="detail-backdrop" class="backdrop" hidden>
     <section id="detail-panel" class="detail-panel" hidden>
@@ -181,6 +227,32 @@
           <input id="add-blocker-id" class="text-input" placeholder="Blocked by item ID (e.g. BUG-3)">
           <button type="submit" class="btn btn-secondary">Add blocker</button>
         </form>
+      </div>
+
+      <div class="detail-block">
+        <h3>AI refinement</h3>
+        <button id="detail-refine" class="btn btn-secondary" type="button">✨ Refine with AI</button>
+        <p class="refine-status" id="refine-status" hidden></p>
+        <div id="refine-result" class="refine-result" hidden>
+          <div>
+            <span class="refine-label">Definition of Ready</span>
+            <ul id="refine-checklist" class="refine-checklist"></ul>
+          </div>
+          <div id="refine-acceptance-wrap">
+            <span class="refine-label">Draft acceptance criteria</span>
+            <div id="refine-acceptance" class="notes-rendered"></div>
+            <button id="refine-insert-notes" class="btn btn-ghost" type="button">Insert into notes</button>
+          </div>
+          <div id="refine-questions-wrap">
+            <span class="refine-label">Open questions</span>
+            <ul id="refine-questions" class="refine-questions"></ul>
+          </div>
+          <div>
+            <span class="refine-label">Suggested model</span>
+            <p id="refine-model" class="refine-model"></p>
+          </div>
+          <p class="refine-meta" id="refine-meta"></p>
+        </div>
       </div>
     </section>
   </div>

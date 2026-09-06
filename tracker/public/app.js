@@ -2,8 +2,12 @@ const state = {
   selectedId: null,
   readyItems: [],
   listItems: [],
+  refineItems: [],
   heroId: null,
+  dorCriteria: [],
 };
+
+const MODEL_SIZE_LABELS = { small: 'Small / fast model', medium: 'Mid-size model', large: 'Top-tier model' };
 
 const spotlightScene = typeof TrackerScene !== 'undefined'
   ? TrackerScene.mountSpotlight(document.getElementById('hero-canvas'))
@@ -186,10 +190,23 @@ async function refreshHero() {
   let heroItem = null;
 
   if (state.heroId) {
-    const res = await fetch(`/api/items/${state.heroId}`);
-    if (res.ok) {
-      const item = await res.json();
-      if (item.status !== 'done') heroItem = item;
+    // Prefer the authoritative ready list (it already applies the Definition
+    // of Ready gate) over re-fetching the item directly — a direct fetch
+    // would only know the item isn't "done", not whether it still counts as
+    // ready, and could keep spotlighting an item that just failed a newly
+    // saved checklist.
+    const stillReady = state.readyItems.find(i => i.id === state.heroId);
+    if (stillReady) {
+      heroItem = stillReady;
+    } else {
+      // Exception: once work has actually started (in_progress), keep it
+      // pinned even though readyItems() only lists 'open' items — otherwise
+      // clicking "Start working" would make the hero item vanish mid-task.
+      const res = await fetch(`/api/items/${state.heroId}`);
+      if (res.ok) {
+        const item = await res.json();
+        if (item.status === 'in_progress') heroItem = item;
+      }
     }
   }
 
@@ -201,13 +218,57 @@ async function refreshHero() {
   renderHero(heroItem);
 }
 
+async function loadNeedsRefinement() {
+  const res = await fetch('/api/items/needs-refinement');
+  state.refineItems = await res.json();
+  renderList('refine-list', 'refine-empty', 'refine-count', state.refineItems);
+  document.getElementById('refine-section').hidden = state.refineItems.length === 0;
+}
+
 async function refreshLists() {
-  await Promise.all([loadReady(), loadList()]);
+  await Promise.all([loadReady(), loadList(), loadNeedsRefinement()]);
 }
 
 async function refreshAll() {
   await refreshLists();
   await refreshHero();
+}
+
+function renderDorCriteria() {
+  const list = document.getElementById('dor-criteria-list');
+  list.innerHTML = '';
+  if (state.dorCriteria.length === 0) {
+    list.innerHTML = '<p class="dor-empty-hint">No criteria yet — every open, unblocked item counts as ready.</p>';
+    return;
+  }
+  state.dorCriteria.forEach((criterion, index) => {
+    const row = document.createElement('div');
+    row.className = 'dor-criterion-row';
+    row.innerHTML = `<span>${escapeHtml(criterion)}</span><button type="button" class="dor-criterion-remove" aria-label="Remove">✕</button>`;
+    row.querySelector('button').addEventListener('click', () => {
+      state.dorCriteria.splice(index, 1);
+      renderDorCriteria();
+    });
+    list.appendChild(row);
+  });
+}
+
+function setDorStatus(text, isError = false) {
+  const el = document.getElementById('dor-status');
+  el.textContent = text;
+  el.classList.toggle('is-error', isError);
+}
+
+async function openDorModal() {
+  document.getElementById('dor-modal-backdrop').hidden = false;
+  setDorStatus('');
+  const checklist = await (await fetch('/api/dor-checklist')).json();
+  state.dorCriteria = checklist.criteria;
+  renderDorCriteria();
+}
+
+function closeDorModal() {
+  document.getElementById('dor-modal-backdrop').hidden = true;
 }
 
 function openAddModal() {
@@ -216,6 +277,56 @@ function openAddModal() {
 
 function closeAddModal() {
   document.getElementById('add-modal-backdrop').hidden = true;
+}
+
+function renderRefinement(refinement) {
+  const statusEl = document.getElementById('refine-status');
+  const resultEl = document.getElementById('refine-result');
+
+  if (!refinement) {
+    statusEl.hidden = true;
+    resultEl.hidden = true;
+    return;
+  }
+
+  statusEl.hidden = true;
+  resultEl.hidden = false;
+
+  const checklistEl = document.getElementById('refine-checklist');
+  checklistEl.innerHTML = '';
+  for (const entry of refinement.checklist) {
+    const li = document.createElement('li');
+    li.className = entry.met ? 'met' : 'unmet';
+    li.innerHTML = `
+      <span class="refine-check-icon">${entry.met ? '✅' : '❌'}</span>
+      <span>${escapeHtml(entry.criterion)}${entry.note ? `<span class="refine-check-note">${escapeHtml(entry.note)}</span>` : ''}</span>
+    `;
+    checklistEl.appendChild(li);
+  }
+
+  const acceptanceWrap = document.getElementById('refine-acceptance-wrap');
+  const acceptanceMd = refinement.acceptance_criteria_md || '';
+  acceptanceWrap.hidden = !acceptanceMd;
+  const acceptanceEl = document.getElementById('refine-acceptance');
+  acceptanceEl.innerHTML = sanitizeRenderedMarkdown(marked.parse(acceptanceMd));
+  acceptanceEl.dataset.raw = acceptanceMd;
+
+  const questionsWrap = document.getElementById('refine-questions-wrap');
+  const questions = refinement.openQuestions || [];
+  questionsWrap.hidden = questions.length === 0;
+  document.getElementById('refine-questions').innerHTML = questions.map(q => `<li>${escapeHtml(q)}</li>`).join('');
+
+  const modelEl = document.getElementById('refine-model');
+  if (refinement.suggested_model) {
+    modelEl.hidden = false;
+    const label = MODEL_SIZE_LABELS[refinement.suggested_model] || refinement.suggested_model;
+    modelEl.innerHTML = `<strong>${escapeHtml(label)}</strong>${refinement.suggested_model_reason ? ` — ${escapeHtml(refinement.suggested_model_reason)}` : ''}`;
+  } else {
+    modelEl.hidden = true;
+  }
+
+  document.getElementById('refine-meta').textContent =
+    `Refined ${refinement.created_at} via ${refinement.provider}/${refinement.model_used}`;
 }
 
 async function openDetail(id) {
@@ -235,6 +346,9 @@ async function openDetail(id) {
     '<strong>Blocks:</strong> ' + (item.blocks.map(b => `${b.id} (${b.status})`).join(', ') || 'none'),
   ].join('<br>');
   document.getElementById('detail-blockers').innerHTML = blockersHtml;
+
+  const existingRefinement = await (await fetch(`/api/items/${id}/refinement`)).json();
+  renderRefinement(existingRefinement);
 }
 
 function closeDetail() {
@@ -255,10 +369,60 @@ document.getElementById('detail-backdrop').addEventListener('click', (e) => {
   if (e.target.id === 'detail-backdrop') closeDetail();
 });
 
+document.getElementById('open-dor-modal').addEventListener('click', openDorModal);
+document.getElementById('dor-modal-close').addEventListener('click', closeDorModal);
+document.getElementById('dor-modal-backdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'dor-modal-backdrop') closeDorModal();
+});
+
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!document.getElementById('detail-backdrop').hidden) closeDetail();
   if (!document.getElementById('add-modal-backdrop').hidden) closeAddModal();
+  if (!document.getElementById('dor-modal-backdrop').hidden) closeDorModal();
+});
+
+document.getElementById('dor-add-criterion').addEventListener('click', () => {
+  const input = document.getElementById('dor-new-criterion');
+  const value = input.value.trim();
+  if (!value) return;
+  state.dorCriteria.push(value);
+  input.value = '';
+  renderDorCriteria();
+});
+document.getElementById('dor-new-criterion').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    document.getElementById('dor-add-criterion').click();
+  }
+});
+
+document.getElementById('dor-generate').addEventListener('click', async () => {
+  setDorStatus('Asking the LLM for a draft…');
+  try {
+    const res = await fetch('/api/dor-checklist/generate', { method: 'POST' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Request failed');
+    state.dorCriteria = body.criteria;
+    renderDorCriteria();
+    setDorStatus(`Drafted by ${body.provider}/${body.model}. Review, then save.`);
+  } catch (err) {
+    setDorStatus(err.message, true);
+  }
+});
+
+document.getElementById('dor-save').addEventListener('click', async () => {
+  setDorStatus('Saving…');
+  const res = await fetch('/api/dor-checklist', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ criteria: state.dorCriteria }),
+  });
+  const saved = await res.json();
+  state.dorCriteria = saved.criteria;
+  renderDorCriteria();
+  setDorStatus('Saved.');
+  await refreshAll();
 });
 
 document.getElementById('detail-save').addEventListener('click', async () => {
@@ -270,6 +434,32 @@ document.getElementById('detail-save').addEventListener('click', async () => {
   });
   await openDetail(state.selectedId);
   await refreshAll();
+});
+
+document.getElementById('detail-refine').addEventListener('click', async () => {
+  const statusEl = document.getElementById('refine-status');
+  document.getElementById('refine-result').hidden = true;
+  statusEl.hidden = false;
+  statusEl.classList.remove('is-error');
+  statusEl.textContent = 'Refining with AI…';
+
+  try {
+    const res = await fetch(`/api/items/${state.selectedId}/refine`, { method: 'POST' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Request failed');
+    renderRefinement(body);
+    await refreshLists();
+  } catch (err) {
+    statusEl.hidden = false;
+    statusEl.classList.add('is-error');
+    statusEl.textContent = err.message;
+  }
+});
+
+document.getElementById('refine-insert-notes').addEventListener('click', () => {
+  const textarea = document.getElementById('detail-notes-edit');
+  const acceptanceMd = document.getElementById('refine-acceptance').dataset.raw || '';
+  textarea.value = textarea.value ? `${textarea.value}\n\n${acceptanceMd}` : acceptanceMd;
 });
 
 document.getElementById('add-blocker-form').addEventListener('submit', async (e) => {

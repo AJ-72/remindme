@@ -174,6 +174,32 @@ Prefer the tracker's own `queries.js` (`readyItems`, `listItems`) over
 hand-written SQL for anything beyond a one-off lookup — it already
 encodes the manual-vs-computed blocked distinction correctly.
 
+**"Ready now" means Definition-of-Ready, not just open+unblocked** (changed
+2026-09-06). `readyItems()` in `queries.js` requires open + unblocked *and*,
+once a Definition-of-Ready checklist has been configured (`dor_checklist`
+table, edited via the "Definition of Ready" button in the UI), a stored
+`item_refinements` row for that item matching the *current* checklist
+version with every criterion `met`. With an empty checklist (the default)
+this is exactly the old open+unblocked rule — nothing changes until a
+checklist is actually saved. `needsRefinementItems()` is the complementary
+"open+unblocked but not yet passing" queue, surfaced in the UI as a "Needs
+refinement" section.
+
+**LLM-assisted refinement** (`llm.js`, `routes/refinement.js`): the tracker
+server can call an LLM to draft the Definition-of-Ready checklist itself, and
+per-item to draft acceptance criteria, list open questions, check the item
+against the checklist, and suggest a model size (small/medium/large) to
+implement it. Provider-agnostic by design (`llm.js`'s `PROVIDERS` map) with
+Anthropic and OpenRouter wired up today; select via `LLM_PROVIDER`
+(`anthropic` | `openrouter`, default `anthropic`) and read the matching key
+from `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`. Override the model with
+`LLM_MODEL`. No API key set → refinement endpoints return `503` with
+`code: 'LLM_NOT_CONFIGURED'` rather than failing silently; the rest of the
+tracker works fully without one. Uses Node's built-in `fetch` — no SDK
+dependency — so `llm.js` exports `__setFetchForTests` as the seam tests use
+to mock the provider call without touching the global `fetch` that tests
+also use to hit their own local server.
+
 ## Gotchas
 
 - **The backend is empty scaffolding.** `artifacts/api-server`, `lib/db`, `lib/api-spec` and the generated clients all exist and build, which makes it look like there is a server to develop against. There is not: the API serves one health route, `openapi.yaml` declares one path, and `lib/db` defines zero tables. The mobile app persists everything in `AsyncStorage` and calls none of it. Re-verified 2026-08-24.
