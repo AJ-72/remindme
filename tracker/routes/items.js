@@ -47,9 +47,9 @@ function createItemsRouter(db) {
     if (req.body.status === 'done' && existing.status !== 'done') {
       updates.push("closed_at = datetime('now')");
     }
-    updates.push("updated_at = datetime('now')");
 
     if (updates.length > 0) {
+      updates.push("updated_at = datetime('now')");
       params.push(req.params.id);
       db.prepare(`UPDATE items SET ${updates.join(', ')} WHERE id = ?`).run(...params);
     }
@@ -58,6 +58,10 @@ function createItemsRouter(db) {
 
   router.post('/:id/blocks', (req, res) => {
     const { blockedById } = req.body;
+    const item = getItem(db, req.params.id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    const blocker = getItem(db, blockedById);
+    if (!blocker) return res.status(404).json({ error: 'not found' });
     db.prepare(
       'INSERT OR IGNORE INTO blocks (item_id, blocked_by_id) VALUES (?, ?)'
     ).run(req.params.id, blockedById);
@@ -65,6 +69,8 @@ function createItemsRouter(db) {
   });
 
   router.delete('/:id/blocks/:blockerId', (req, res) => {
+    const item = getItem(db, req.params.id);
+    if (!item) return res.status(404).json({ error: 'not found' });
     db.prepare(
       'DELETE FROM blocks WHERE item_id = ? AND blocked_by_id = ?'
     ).run(req.params.id, req.params.blockerId);

@@ -110,3 +110,51 @@ test('POST and DELETE /api/items/:id/blocks manage dependency links', async () =
 
   server.close(); db.close(); fs.unlinkSync(dbPath);
 });
+
+test('POST /api/items/:id/blocks returns 404 if item does not exist', async () => {
+  const { app, db, dbPath } = makeApp();
+  const server = app.listen(0);
+  const port = server.address().port;
+
+  const res = await fetch(`http://localhost:${port}/api/items/NONEXISTENT/blocks`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ blockedById: 'BUG-1' }),
+  });
+  assert.strictEqual(res.status, 404);
+
+  server.close(); db.close(); fs.unlinkSync(dbPath);
+});
+
+test('DELETE /api/items/:id/blocks/:blockerId returns 404 if item does not exist', async () => {
+  const { app, db, dbPath } = makeApp();
+  const server = app.listen(0);
+  const port = server.address().port;
+
+  const res = await fetch(`http://localhost:${port}/api/items/NONEXISTENT/blocks/BUG-1`, {
+    method: 'DELETE',
+  });
+  assert.strictEqual(res.status, 404);
+
+  server.close(); db.close(); fs.unlinkSync(dbPath);
+});
+
+test('PATCH with empty body does not update updated_at', async () => {
+  const { app, db, dbPath } = makeApp();
+  const server = app.listen(0);
+  const port = server.address().port;
+
+  const createRes = await fetch(`http://localhost:${port}/api/items`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'bug', title: 'Test' }),
+  });
+  const { id, updated_at: original_updated_at } = await createRes.json();
+
+  const patchRes = await fetch(`http://localhost:${port}/api/items/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  const patched = await patchRes.json();
+  assert.strictEqual(patched.updated_at, original_updated_at);
+
+  server.close(); db.close(); fs.unlinkSync(dbPath);
+});
