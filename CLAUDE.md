@@ -149,6 +149,29 @@ Expo Router with file-based routing under `artifacts/mobile/app/`. Screens impor
   - **Do not confuse this with Jest.** The extensive Malayalam parser coverage (`malayalamDateParser.test.ts`, `QuickAddInput.test.tsx` — e.g. the ambiguous-numeral test typing `"രാവിലെ 5 ആപ്പിൾ വാങ്ങണം"`) uses React Native Testing Library's `fireEvent.changeText`, which sets a text input's value via a synthetic JS event in jsdom — it never runs on a device or goes through `adb`, so this limitation doesn't apply to it at all. Jest/RNTL can exercise Malayalam freely; only a real on-device `inputText` cannot.
   - **The workaround, working example in this repo: ADBKeyboard.** [senzhk/ADBKeyBoard](https://github.com/senzhk/ADBKeyBoard) is a helper IME that accepts arbitrary Unicode via a broadcast intent and commits it straight into the focused field, bypassing keystroke synthesis entirely. It cannot be driven from inside a Maestro YAML — there's no raw shell/exec step in the DSL — so `run-malayalam-maestro-flow.ps1` (repo root) sits outside Maestro and sequences three pieces: **(1)** `Maestro/malayalam_flow_a_focus.yaml` — pure Maestro, launches the app and taps the field into focus, **(2)** the PowerShell script itself — switches the active IME to ADBKeyboard, broadcasts the text (`adb shell am broadcast -a ADB_INPUT_TEXT --es msg "'<text>'"` — the nested single-quotes matter: `adb shell` rejoins args with spaces before the device re-parses them, so an unquoted multi-word string gets split and only the first word lands), then restores the original IME in a `finally` so the device is left clean even if a step fails — **(3)** `Maestro/malayalam_flow_b_verify.yaml` — pure Maestro, continues from wherever focus/cursor landed (save, assert on the Malayalam text and the numeral-time it should parse to). Run with `.\run-malayalam-maestro-flow.ps1 -Device <serial>`; requires ADBKeyboard already installed on that device (`adb install` the APK from its releases page once). Trade-offs, confirmed while building this: loses Maestro's "one self-contained flow, runs anywhere" property, ties the test to ADBKeyboard being pre-installed on that specific device/serial, and isn't CI-portable as written — only worth it for flows that must *type* Malayalam; anything that only navigates to or asserts on existing Malayalam-titled content stays pure Maestro (like `smoke_malayalam_text.yaml`). **Not yet verified end-to-end**: the script's own logic (device targeting, ADBKeyboard-presence check, IME save/restore, error propagation) ran correctly in testing, but flow A itself couldn't get past `com.curios.remindme`'s splash screen on the one device tried (2026-09-03) — `MainActivity` was focused, no crash in logcat, no React Native log lines at all, which points at a stale/release build with no reachable Metro rather than anything in this script or flow. Get a debug build with Metro actually running before trusting a full pass/fail from this.
 
+## Work tracking
+
+Open features/bugs/spikes/tech-debt are tracked in a local SQLite-backed
+tracker (`tracker/`), not `backlog.md` (moved 2026-09-06 — see
+`docs/superpowers/specs/2026-09-06-work-tracker-design.md`).
+
+**Run it:** `cd tracker && npm start`, then open `http://localhost:4100`.
+
+**Querying/updating from a session** (direct SQLite access — the tracker
+is one file, `tracker/tracker.db`):
+
+```bash
+# What's ready to work on right now (open, no unresolved blockers)
+sqlite3 tracker/tracker.db "SELECT id, title FROM items WHERE status='open'"
+
+# Mark an item done after shipping it
+sqlite3 tracker/tracker.db "UPDATE items SET status='done', closed_at=datetime('now') WHERE id='BUG-3'"
+```
+
+Prefer the tracker's own `queries.js` (`readyItems`, `listItems`) over
+hand-written SQL for anything beyond a one-off lookup — it already
+encodes the manual-vs-computed blocked distinction correctly.
+
 ## Gotchas
 
 - **The backend is empty scaffolding.** `artifacts/api-server`, `lib/db`, `lib/api-spec` and the generated clients all exist and build, which makes it look like there is a server to develop against. There is not: the API serves one health route, `openapi.yaml` declares one path, and `lib/db` defines zero tables. The mobile app persists everything in `AsyncStorage` and calls none of it. Re-verified 2026-08-24.
