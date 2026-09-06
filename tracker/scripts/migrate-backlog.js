@@ -68,21 +68,47 @@ function migrate(db, markdownText) {
   return rows.length;
 }
 
+function findOriginalBacklogContent(repoRoot) {
+  const { execSync } = require('node:child_process');
+  try {
+    const log = execSync('git log --format=%H -- backlog.md', { cwd: repoRoot, encoding: 'utf8' })
+      .trim()
+      .split('\n')
+      .filter(sha => sha.length > 0);
+
+    for (const sha of log) {
+      const content = execSync(`git show ${sha}:backlog.md`, { cwd: repoRoot, encoding: 'utf8' });
+      if (!content.includes('Backlog moved')) {
+        return content;
+      }
+    }
+
+    throw new Error(
+      'Could not find original backlog.md content in git history — all commits contain the pointer-file marker. ' +
+      'The backlog content may have been permanently lost or never committed.'
+    );
+  } catch (err) {
+    if (err.message.includes('Could not find original')) {
+      throw err;
+    }
+    throw new Error(`Failed to search git history for backlog.md: ${err.message}`);
+  }
+}
+
 if (require.main === module) {
   const backlogPath = path.join(__dirname, '../../backlog.md');
   const dbPath = path.join(__dirname, '../tracker.db');
+  const repoRoot = path.join(__dirname, '../../');
 
   let markdownText;
   const fileContent = fs.readFileSync(backlogPath, 'utf8');
 
   // If backlog.md has been replaced with a pointer file, read from git history
   if (fileContent.includes('Backlog moved')) {
-    const { execSync } = require('node:child_process');
-    const gitDir = path.join(__dirname, '../../');
     try {
-      markdownText = execSync('git show HEAD~1:backlog.md', { cwd: gitDir, encoding: 'utf8' });
+      markdownText = findOriginalBacklogContent(repoRoot);
     } catch (err) {
-      console.error('Failed to read backlog.md from git history:', err.message);
+      console.error('Error:', err.message);
       process.exit(1);
     }
   } else {
@@ -95,4 +121,4 @@ if (require.main === module) {
   db.close();
 }
 
-module.exports = { parseBacklog, migrate };
+module.exports = { parseBacklog, migrate, findOriginalBacklogContent };
