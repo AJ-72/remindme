@@ -18,8 +18,32 @@ function renderBadges(item) {
   html += `<span class="badge badge-status">${item.status}</span>`;
   if (item.status === 'blocked') html += `<span class="badge badge-blocked-manual">manually blocked</span>`;
   if (item.computedBlocked) html += `<span class="badge badge-blocked-computed">blocked by dependency</span>`;
-  if (item.effort) html += `<span class="badge">${item.effort}</span>`;
+  if (item.effort) html += `<span class="badge">${escapeHtml(item.effort)}</span>`;
   return html;
+}
+
+// Sanitizes an HTML string produced by marked.parse() before it is assigned
+// to innerHTML: strips any <script> tag outright, strips any href that
+// isn't http(s)/anchor/relative/mailto (blocks javascript: links), and
+// strips any on*-prefixed event-handler attribute as defense in depth.
+function sanitizeRenderedMarkdown(html) {
+  const container = document.createElement('div');
+  container.innerHTML = html;
+
+  container.querySelectorAll('script').forEach(el => el.remove());
+
+  container.querySelectorAll('*').forEach(el => {
+    [...el.attributes].forEach(attr => {
+      if (attr.name === 'href' && !/^(https?:|#|\/|mailto:)/i.test(attr.value)) {
+        el.removeAttribute(attr.name);
+      }
+      if (attr.name.toLowerCase().startsWith('on')) {
+        el.removeAttribute(attr.name);
+      }
+    });
+  });
+
+  return container.innerHTML;
 }
 
 function renderList(targetId, items) {
@@ -64,7 +88,7 @@ async function openDetail(id) {
   document.getElementById('detail-panel').hidden = false;
   document.getElementById('detail-title').textContent = `${item.id}: ${item.title}`;
   document.getElementById('detail-meta').innerHTML = renderBadges(item);
-  document.getElementById('detail-notes-rendered').innerHTML = marked.parse(escapeHtml(item.notes_md || ''));
+  document.getElementById('detail-notes-rendered').innerHTML = sanitizeRenderedMarkdown(marked.parse(item.notes_md || ''));
   document.getElementById('detail-notes-edit').value = item.notes_md || '';
 
   const blockersHtml = [
