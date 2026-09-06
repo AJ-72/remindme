@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-07 — Quick-add parser dropped the day when combined with "next/this month|year" ("23rd next month" → today's day-of-month, next month)
+
+**WHAT:** Detect the `<ordinal> (of)? next/this/last month|year` shape in English input before handing text to chrono-node, let chrono resolve month/year/time as before, then override the resolved date's day-of-month with the parsed ordinal (clamped to that month's actual length, e.g. "31st next month" from January → Feb 28). Also strips the ordinal phrase from the derived title so it doesn't leak into it. Added an optional `now` param to `parseNaturalLanguage` (default `new Date()`) for deterministic tests.
+
+**WHY:** chrono-node@2.9.1's relative month/year refiner doesn't compose with a preceding ordinal day-of-month: `chrono.parse("...23rd next month at 8.00 AM"...)` matches only `"next month at 8.00 AM"` as its result span and silently ignores `"23rd"` outside it, resolving to *today's day-of-month* in the target month instead of the requested day (Sep 7 + "23rd next month" → Oct 7, not Oct 23). Confirmed by direct reproduction against chrono-node in isolation — not a misuse of the library on our side, and already on the latest chrono-node major (no version fix available). Using an explicit month name ("23rd of october") parses correctly, so the gap is specific to the relative-month/year phrasing.
+
+**WHERE:** [artifacts/mobile/utils/parseNaturalLanguage.ts](artifacts/mobile/utils/parseNaturalLanguage.ts).
+
+---
+
 ## 2026-09-05 — Silent reminders arrived minutes late: ColorOS demotes a *successful* setExactAndAllowWhileIdle() to an inexact alarm
 
 **WHAT:** Route non-alarm reminders through `setAlarmClock()` as well, gated on a new `exactTiming` flag rather than on the `alarm` flag. The flag defaults ON, and the native side reads it as `optBoolean("exactTiming", true)` — absent means true, so notifications scheduled before the field existed stay punctual across the upgrade instead of silently regressing. Punctuality and sound are now independent: global Settings toggle plus a per-reminder override in the detail screen. Removed `ALARM_EARLY_OFFSET_MS`, which existed only to absorb inexact drift and would otherwise fire every reminder a minute early; its two duplicate-delivery guards collapse to a plain `datetime > now`.
