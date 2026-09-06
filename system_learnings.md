@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-06 — Work tracker uses `node:sqlite`, not `better-sqlite3` as the design spec named
+
+**WHAT:** The `tracker/` implementation plan (`docs/superpowers/plans/2026-09-06-work-tracker.md`) specifies Node's built-in `node:sqlite` module for the local work-tracker's storage layer, deviating from `docs/superpowers/specs/2026-09-06-work-tracker-design.md`, which named `better-sqlite3`.
+
+**WHY:** `better-sqlite3` is a native addon — on Windows it risks a prebuild/Node-version mismatch requiring a local rebuild toolchain, the same class of problem CLAUDE.md already documents at length for Android's CMake/Ninja. `node:sqlite` ships in Node itself (stable since 22.5; this box runs Node 24), so it has zero install risk and needs no native build step. Confirmed via `node --version` before deciding, not assumed.
+
+**WHERE:** [docs/superpowers/plans/2026-09-06-work-tracker.md](docs/superpowers/plans/2026-09-06-work-tracker.md) (Global Constraints section explicitly documents this as superseding the spec). Not yet implemented as of this entry — `tracker/` doesn't exist on disk yet, this records the decision made during planning.
+
+---
+
 ## 2026-09-05 — Silent reminders arrived minutes late: ColorOS demotes a *successful* setExactAndAllowWhileIdle() to an inexact alarm
 
 **WHAT:** Route non-alarm reminders through `setAlarmClock()` as well, gated on a new `exactTiming` flag rather than on the `alarm` flag. The flag defaults ON, and the native side reads it as `optBoolean("exactTiming", true)` — absent means true, so notifications scheduled before the field existed stay punctual across the upgrade instead of silently regressing. Punctuality and sound are now independent: global Settings toggle plus a per-reminder override in the detail screen. Removed `ALARM_EARLY_OFFSET_MS`, which existed only to absorb inexact drift and would otherwise fire every reminder a minute early; its two duplicate-delivery guards collapse to a plain `datetime > now`.
