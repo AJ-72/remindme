@@ -108,6 +108,30 @@ the rules on that transition. This is the correct trade (one place to get
 right, and RLS is default-deny behind it), but it is more surface than the plan
 costed, and each function is where a rule can be forgotten.
 
+### T2.4/T2.5 — what building the bind function found
+
+`bind_via_invite_token()` is the same risk class as T1.8's claim function
+(reads a row nobody's RLS policy protects, must be `SECURITY DEFINER`), and
+was built with the same discipline: 11 tests, every guard sabotage-checked
+before trusting it.
+
+**One design question the tests forced an answer to.** Should a second,
+different account be able to consume a token someone else already bound? No —
+that is a takeover, not a re-tap, and re-verifying a lost device already has
+its own path (rung 2, OTP; "there is no invite link on a migration" per the
+spec). The function refuses with the same error whether the token is spent by
+someone else or the caller already holds a *different* number — one check,
+two attacks, deliberately: a second account grabbing a spent token and an
+established account's number being silently reassigned by a link it didn't
+ask for are the same shape of bug from the database's point of view.
+
+**Scope was kept deliberately narrow**: this function binds identity and
+nothing else. It does not also run `claim_invitations()`. Folding the two
+together would have been more convenient for a client to call once, but it
+would also mean "prove who I am" and "collect my mail" fail or succeed
+together, when they are genuinely separate operations with separate failure
+modes worth being able to reason about independently.
+
 ### What the T1.8 sabotage pass found
 
 Every guard in the claim function was removed in turn to check its test fails
@@ -169,8 +193,8 @@ that fetches the caller's hash; those rows are left to expire.
 | T2.1 | Server-side HMAC of E.164 numbers, pepper in secrets | Plaintext transits, is **never stored**. Pepper never reaches the client |
 | T2.2 | Cross-device normalization agreement tests | `utils/phoneNumber.ts` is now load-bearing for **correctness**, not display — a hash only matches if both devices normalize identically |
 | T2.3 | Rung 2: OTP binding flow | The screen, the send, the verify, the rate limit on attempts |
-| T2.4 | Rung 1: bind via invite-link token | **The point of the whole ladder.** Assert **no verification screen is shown** on this path — that is the older-parent case and it is the resolution to Known defects #8 |
-| T2.5 | Single-use token semantics | Three tests, one per trap: consumed on **claim, not `GET`** (the WhatsApp link-preview burn); a **second tap from the same device is idempotent**; a third device is **refused** |
+| T2.4 | Rung 1: bind via invite-link token | **DONE at the DB layer** as `bind_via_invite_token()`, 11 tests, every guard sabotage-checked. Adds `invitations.bind_token` (uuid, unique, unguessable — never read aloud, so it doesn't need to be short). **Deliberately narrow**: it only binds identity, and does not also claim mail — the caller calls `claim_invitations()` separately. The "no verification screen shown" assertion (Known defects #8) is a client/UI property and stays `BLOCKED` — see D34 |
+| T2.5 | Single-use token semantics | **Idempotent re-tap and third-device refusal DONE**, inside `bind_via_invite_token()` itself — a second call from the same account returns the same row with no duplicate; a different account is refused with `already bound`. **"Consumed on claim, not `GET`" is NOT this function's job** — it is a property of the HTTP endpoint WhatsApp's link-preview crawler fetches, which does not exist until Edge Functions do. `BLOCKED` on T1.1/T1.9 |
 | T2.6 | Rebind on re-verification, 45-day window | Inside 45 days recovers blocks and links; past it, a fresh account and the old row deleted. **Deleting state applies only to the fresh-account path** |
 | T2.7 | Token revocation + "recovered on a new device" notice | On **every** rebind to a new device key, regardless of window |
 | T2.8 | Three separate settings | Account existence / discoverable / accepting-reminders. Mute **keeps** the row, blocks and links (Known defects #7) |

@@ -112,6 +112,16 @@ which produces a bug that looks like something else:
 - **Consume the token on *claim by the app*, never on link resolution.** WhatsApp
   fetches URLs to build link previews, so a token consumed on `GET` is burned
   before the human ever taps. The symptom is "the invite link never works".
+
+  **Implemented 2026-09-07 as `bind_via_invite_token(token)`.** `invitations.bind_token`
+  is a uuid, generated per invitation, unguessable rather than short since it
+  is never read aloud — it only ever travels inside a URL. The function
+  refuses a second, *different* account trying to consume an already-bound
+  token, and treats that the same as an established account's number being
+  silently reassigned — one check, because both are the same shape of bug
+  from the database's point of view. It does not itself defend against the
+  `GET`-burns-the-token trap above; that property belongs to whichever Edge
+  Function endpoint WhatsApp's crawler actually fetches, not yet built.
 - **Re-taps must be idempotent.** People tap, get lost in the store, and tap
   again. Bind the token to the account it created so a second tap from the same
   device succeeds silently rather than locking the recipient out.

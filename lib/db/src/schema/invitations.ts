@@ -64,6 +64,20 @@ export const invitationsTable = pgTable(
       onDelete: "cascade",
     }),
 
+    /**
+     * The rung-1 verification credential: possession of the link that carries
+     * this token IS proof of number control, since WhatsApp/SMS delivered it
+     * to `recipientPhoneHash`. A uuid rather than a short code because it is
+     * never read aloud - it travels inside a URL - and unguessability is the
+     * whole security property; a short code here would make every pending
+     * invitation brute-forceable.
+     *
+     * Consumed by `bind_via_invite_token()`, which is the ONLY thing that may
+     * read this column across every account - see that function for the
+     * single-use and idempotent-re-tap rules.
+     */
+    bindToken: uuid("bind_token").notNull().defaultRandom().unique(),
+
     /** Nulled on accept or expiry - the mailbox is not an archive. The row
      * survives so "it never arrived" stays debuggable. */
     title: text("title"),

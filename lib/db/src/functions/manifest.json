@@ -1,4 +1,7 @@
 {
   "comment": "Server-side SQL applied after drizzle-kit push, in this order. Read by BOTH the test harness (functions/index.ts) and the deploy script (applyServerSql.mjs) so the two cannot drift. functions.test.ts fails if a .sql file here is unlisted.",
-  "functions": ["claimInvitations.sql"]
+  "functions": [
+    "bindViaInviteToken.sql",
+    "claimInvitations.sql"
+  ]
 }
