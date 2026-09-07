@@ -1257,3 +1257,67 @@ FIX FOR NEXT TIME: try building from `C:\p\artifacts\mobile` first before copyin
 **Do NOT assume `multiGet` is a free win for reducing native-call count** — it depends on the specific AsyncStorage version and platform's internal implementation. Measure on-device before batching AsyncStorage reads in this codebase; the intuitive "fewer round-trips = faster" reasoning did not hold here.
 
 **Where this was tried and reverted:** `RemindersContext.tsx`'s `loadFromStorage` / `ReminderService.ts`. No `loadStartupData`/`multiGet` function exists in the codebase — this was fully reverted, not merged.
+
+## 2026-09-07 — Two real bugs in a SECURITY DEFINER function survived my own sabotage-checked tests; an independent adversarial review caught both
+
+**Context:** `lib/db/src/functions/bindViaInviteToken.sql` (T2.4, M4 Tier 2 — rung 1 of
+the verification ladder: possession of an invite link proves phone-number
+control). Built TDD, 11 tests, every guard removed one at a time to confirm
+its test failed for the right reason. Committed and pushed on that basis.
+
+**Then reviewed by a fresh model instructed to be adversarial and not trust
+green tests.** It found two real bugs sabotage-checking could never have
+caught, plus a test that didn't test what it claimed:
+
+1. **"Single-use" was inferred, not enforced, and the inference was wrong.**
+   The function treated "some `users` row already holds this phone hash" as
+   proof the token was spent. That proxy is only as durable as the account —
+   accounts are user-deletable (a Play Store requirement) — and this
+   function's binding does not also claim the invitation, so
+   `recipient_id` stays null and the row never cascades on that delete.
+   **Reproduced by running it:** bind → delete the account → bind the SAME
+   token again from a different caller → **succeeds**, handing a deleted
+   user's phone identity to a stranger. Fix: give the invitation its own
+   `bound_by`/`bound_at`, a fact about the token that survives whatever
+   happens to the account it created — not something inferred from another
+   table's state.
+
+2. **No atomicity — a SELECT-then-branch-then-INSERT with no lock spanning
+   it, and a comment describing a mechanism that was never in the code.**
+   Two concurrent callers racing the same token could both pass every check
+   before either committed; only a `UNIQUE` constraint caught the collision,
+   with the wrong error (a raw constraint-violation message) leaking to the
+   client. A comment claimed "same caller, `ON CONFLICT` below handles it" —
+   there was no `ON CONFLICT` anywhere in the function. **PGlite runs one
+   transaction at a time, so no test in a suite like this one could ever
+   have exposed this** — it can only be found by reading the SQL and
+   reasoning about Postgres MVCC semantics, not by running tests. Fix: make
+   the claim a single atomic `UPDATE` whose `WHERE` clause folds in every
+   security-relevant condition, so the row lock it takes serializes
+   concurrent callers instead of letting them race independent reads.
+
+3. **The search_path-hijack test planted an EMPTY attacker table.** A
+   hijacked read (nothing found) and a correct read (the real row) both
+   satisfied the same assertion, so the test passed whether or not
+   schema-qualification was doing anything — sabotaging the real function
+   this session still left the test green. Fix: the planted row has to
+   answer *differently* from the real one (same `bind_token`, a different
+   phone hash) or the test cannot distinguish a hijack from success.
+
+**The general lesson, not specific to this function:** sabotage-checking a
+test only proves the test catches what it was written to check. It is
+exactly as blind as its author to (a) a security property the author didn't
+think to test at all, and (b) a race condition that the test harness is
+structurally incapable of expressing (anything serial-transaction, like
+PGlite here). Both bugs above are in those two blind spots, not in "wrote
+the assertion wrong."
+
+**Do this for every `SECURITY DEFINER` function (or any function bypassing
+RLS) in this codebase:** after building and sabotage-testing it yourself,
+get an independent adversarial read — a fresh context/model instructed
+explicitly not to trust the green suite — before treating it as done. This
+was the second such function in a row (after `claim_invitations()`, T1.8)
+where that step found something the author's own process missed. See
+`docs/superpowers/plans/2026-08-30-remind-someone-else-tier2.md` (search
+"an independent review found two real bugs") for the full incident writeup
+and the fixed SQL/tests.
