@@ -72,7 +72,7 @@ The spec's build-order step 0. The first draft folded this into "schema" and und
 
 | # | Task | Notes |
 |---|---|---|
-| T1.1 | Supabase project, `ap-south-1`, new (not `letsplan`) | **Needs a human.** Free tier for development. **Pro from the first real user** — a paused project silently drops invitations |
+| T1.1 | Supabase project, `ap-south-1`, new (not `letsplan`) | **DONE 2026-09-07.** `remindme-tier2`, ref `zeeanhbvcjslzirftass`, `CuriosMind` org, free tier ($0/mo — confirmed before creating). `letsplan` (the existing project) was left alone: it is `INACTIVE` — auto-paused from disuse, precisely the failure mode this row warns about. **Pro from the first real user**, same reasoning. See "Supabase project reference" below for URL/keys and what's still needed from a human |
 | T1.2 | `users` table + `insertUserSchema` | **DONE.** Adds `accepting_reminders` (the global mute, deliberately not the same switch as `discoverable`) and `last_active_at` (what the 45-day rebind window is measured from) |
 | T1.3 | `devices` table | **DONE.** `expo_push_token` is `UNIQUE` across all accounts — one handset, one home, so "forgot to clear the old row" is an error rather than a phone quietly receiving two people's reminders |
 | T1.4 | `blocks` table | **DONE.** Composite PK; unblock is a `DELETE`. Every policy keys on `blocker_id` and none on `blocked_id` — being on a list grants no sight of it |
@@ -81,7 +81,7 @@ The spec's build-order step 0. The first draft folded this into "schema" and und
 | T1.7 | RLS policies on every table | **DONE.** 41 tests. Plus two things the task did not anticipate — see below |
 | T1.8 | **`SECURITY DEFINER` claim function** | **DONE.** 13 tests, every guard sabotage-checked. The load-bearing decision: **it takes no argument** — it reads the caller's own `users.phone_hash`, which only the verified bind can write. A hash parameter would reinstate Known defects #1 wholesale *and* make the function an enumeration oracle for every number in India. See below for what the sabotage pass found |
 | T1.10 | **Bind must purge unclaimed invitations on a fresh account** | **NOT DONE — carried into Phase 2.** Found while building T1.8. An unclaimed invitation has a null `recipient_id`, so it does **not** cascade when the account for that number is deleted. A recycled number's new owner could otherwise claim mail addressed to their predecessor. `claim_invitations()` now refuses rows whose content has already been purged, which covers the realistic case (recycling takes 45+ days, content is gone by 30) — but the complete fix is deleting unclaimed rows for a hash when a **fresh** account binds it |
-| T1.9 | `drizzle-kit push` wired and documented | Blocked on T1.1. `drizzle.config.ts` now sets `entities.roles.provider = "supabase"`, without which drizzle-kit proposes managing `authenticated`/`anon` — roles it did not create — up to and including dropping them |
+| T1.9 | `drizzle-kit push` wired and documented | **Unblocked — needs `DATABASE_URL` from a human, then one command.** `drizzle.config.ts` now sets `entities.roles.provider = "supabase"`, without which drizzle-kit proposes managing `authenticated`/`anon` — roles it did not create — up to and including dropping them. See "Supabase project reference" below for the exact steps |
 
 ### Two things Phase 1 turned up that the plan did not have
 
@@ -236,6 +236,24 @@ that fetches the caller's hash; those rows are left to expire.
   test originally aimed at an existing user's hash, so it passed on the unique
   index whether the privilege held or not — and squatting an *unregistered*
   number is the actual attack.
+
+### Supabase project reference
+
+- **Project:** `remindme-tier2` (ref `zeeanhbvcjslzirftass`), `ap-south-1`, org `CuriosMind`, free tier.
+- **URL:** `https://zeeanhbvcjslzirftass.supabase.co`
+- **Publishable (anon) key:** `sb_publishable_ZKMC7VDK6_xnFoppRd7ViQ_7JyujWL_` — safe to embed client-side, this is what the mobile app's `supabase-js` client will use (T0.3).
+- **Service-role key and DB password were NOT fetched or stored anywhere in this repo.** Both are secrets; the service-role key bypasses RLS entirely (see ADR 0001's warning) and has no business existing outside Supabase's own dashboard and whatever secret store the eventual Edge Functions use.
+
+**What only a human can do next, to unblock T1.9:**
+1. Dashboard → this project → Project Settings → Database → copy the connection string (or reset the password if it was never saved — it is not retrievable after creation, only resettable).
+2. Set it as `DATABASE_URL` in the shell running the push commands.
+3. Run, in order, every time the schema or server SQL changes:
+   ```
+   pnpm --filter @workspace/db run push
+   pnpm --filter @workspace/db run push:sql
+   ```
+   The second step is not optional — it applies `claim_invitations()`, `bind_via_invite_token()`, and every table/column grant in `privileges.sql`. Skipping it leaves RLS enabled with **no policies actually applying the way the tests assume**, since `push` alone does not carry functions or grants.
+4. Confirm with `pnpm --filter @workspace/db run test` pointed at nothing (that suite is PGlite-only and untouched by this) — the real confirmation is `mcp__Supabase__list_tables` or the dashboard's Table Editor showing all five tables with RLS badges on.
 
 ## Phase 2 — Number binding and the verification ladder
 
