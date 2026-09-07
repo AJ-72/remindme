@@ -79,7 +79,8 @@ The spec's build-order step 0. The first draft folded this into "schema" and und
 | T1.5 | `invitations` table | **DONE.** `recipient_phone_hash` is not a foreign key, and is indexed because the claim lookup is the one query every new registration runs. Carries `content_expires_at` = `least(datetime, created_at + 30 days)` as a column, so the 30-day cap is structural rather than a predicate a cleanup job has to compute correctly |
 | T1.6 | `link_codes` table | **DONE.** Short-lived, single-use |
 | T1.7 | RLS policies on every table | **DONE.** 41 tests. Plus two things the task did not anticipate — see below |
-| T1.8 | **`SECURITY DEFINER` claim function** | **Highest-risk code in the build.** Ordinary RLS cannot protect it — it reads rows nobody owns yet. It is the function Known defects #1 abused. Test it adversarially: wrong hash, replayed token, concurrent claims |
+| T1.8 | **`SECURITY DEFINER` claim function** | **DONE.** 13 tests, every guard sabotage-checked. The load-bearing decision: **it takes no argument** — it reads the caller's own `users.phone_hash`, which only the verified bind can write. A hash parameter would reinstate Known defects #1 wholesale *and* make the function an enumeration oracle for every number in India. See below for what the sabotage pass found |
+| T1.10 | **Bind must purge unclaimed invitations on a fresh account** | **NOT DONE — carried into Phase 2.** Found while building T1.8. An unclaimed invitation has a null `recipient_id`, so it does **not** cascade when the account for that number is deleted. A recycled number's new owner could otherwise claim mail addressed to their predecessor. `claim_invitations()` now refuses rows whose content has already been purged, which covers the realistic case (recycling takes 45+ days, content is gone by 30) — but the complete fix is deleting unclaimed rows for a hash when a **fresh** account binds it |
 | T1.9 | `drizzle-kit push` wired and documented | Blocked on T1.1. `drizzle.config.ts` now sets `entities.roles.provider = "supabase"`, without which drizzle-kit proposes managing `authenticated`/`anon` — roles it did not create — up to and including dropping them |
 
 ### Two things Phase 1 turned up that the plan did not have
@@ -107,10 +108,42 @@ the rules on that transition. This is the correct trade (one place to get
 right, and RLS is default-deny behind it), but it is more surface than the plan
 costed, and each function is where a rule can be forgotten.
 
+### What the T1.8 sabotage pass found
+
+Every guard in the claim function was removed in turn to check its test fails
+*for the right reason*. Two did not:
+
+**1. The pinned `search_path` alone proves nothing.** Removing it broke no
+test, because every name in the function is schema-qualified. The two defences
+turn out to do different jobs: dropping `public.` while keeping the pin makes
+the function unable to resolve its tables at all (nine tests fail loudly),
+while dropping **both** makes it silently read a table the caller planted —
+and only the one hijack test catches that. So the pin converts a silent
+compromise into a crash; qualification is what makes it correct. Both stay,
+and the test comment now says which is which.
+
+**2. The in-body "not authenticated" check was unreachable.** `anon` has no
+`EXECUTE`, so the grant layer refuses first and the check could be deleted
+with nothing failing — a guard quietly rotting into a comment. Now covered by
+a test that grants `EXECUTE` to `anon` and proves the body still refuses. That
+is not hypothetical: a SECURITY DEFINER function called from a cron job or
+another function has no JWT either, so `auth.uid()` is null.
+
+A third thing surfaced rather than failed: **the global mute has to apply to
+mail that arrived before the switch was flipped**, or "don't let anyone remind
+me" reads as broken the moment it is turned on. Folded into the same lookup
+that fetches the caller's hash; those rows are left to expire.
+
 ### Also landed
 
 - **`schemaDdl`** — RLS tests generate their DDL from the Drizzle schema, so a
   test cannot pass against a hand-copied fixture the schema has since outgrown.
+- **One manifest for server SQL.** `drizzle-kit push` manages neither
+  functions nor grants, so both are applied by
+  `pnpm --filter @workspace/db run push:sql` — a **required second deploy
+  step**. `functions/manifest.json` is read by the test harness and the deploy
+  script alike, with a test asserting it lists every `.sql` file present, so
+  the two cannot drift into testing one thing and shipping another.
 - **A structural guard.** Drizzle enables RLS only on a table that declares a
   policy, so a new table with none is wide open and looks entirely ordinary in
   review. `tablesWithoutRls()` must be empty, and a second test pins the exact

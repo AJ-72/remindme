@@ -45,7 +45,11 @@ const GRANTS = `
 
 export interface RlsTestDb {
   /** Run SQL as an authenticated user with the given id. */
-  asUser(uid: string, sql: string): Promise<Record<string, unknown>[]>;
+  asUser(
+    uid: string,
+    sql: string,
+    options?: { searchPath?: string }
+  ): Promise<Record<string, unknown>[]>;
 
   /** Run SQL with no authenticated user - auth.uid() is null. */
   asAnon(sql: string): Promise<Record<string, unknown>[]>;
@@ -78,13 +82,24 @@ export interface RlsTestDb {
 
 /** Attach the role-switching interface to an already-prepared database. */
 export function wrapRlsTestDb(db: PGlite): RlsTestDb {
-  async function run(role: string, uid: string | null, sql: string) {
-    // set_config with is_local=true scopes both settings to this transaction,
+  async function run(
+    role: string,
+    uid: string | null,
+    sql: string,
+    searchPath?: string
+  ) {
+    // set_config with is_local=true scopes every setting to this transaction,
     // so one query can never leak its identity into the next.
     await db.exec("begin");
     try {
       await db.query("select set_config('role', $1, true)", [role]);
       await db.query("select set_config('request.jwt.claim.sub', $1, true)", [uid ?? ""]);
+      // A caller-controlled search_path is an attack, not a convenience: it is
+      // how a SECURITY DEFINER function gets fed a table the caller wrote.
+      // Tests need to be able to mount that attack.
+      if (searchPath !== undefined) {
+        await db.query("select set_config('search_path', $1, true)", [searchPath]);
+      }
       const result = await db.query(sql);
       return result.rows as Record<string, unknown>[];
     } finally {
@@ -93,7 +108,8 @@ export function wrapRlsTestDb(db: PGlite): RlsTestDb {
   }
 
   return {
-    asUser: (uid, sql) => run("authenticated", uid, sql),
+    asUser: (uid, sql, options) =>
+      run("authenticated", uid, sql, options?.searchPath),
     asAnon: (sql) => run("anon", null, sql),
 
     async asService(sql: string) {

@@ -26,8 +26,9 @@ pnpm --filter @workspace/api-spec run codegen
 
 # Push DB schema to dev database (requires DATABASE_URL env var)
 pnpm --filter @workspace/db run push
-# ...then the grants, which drizzle-kit push does NOT manage. Both, every time.
-pnpm --filter @workspace/db run push:privileges
+# ...then the functions and grants, which drizzle-kit push does NOT manage.
+# Both commands, every time.
+pnpm --filter @workspace/db run push:sql
 
 # RLS / schema tests (real Postgres via PGlite, in-process — no Docker needed)
 pnpm --filter @workspace/db run test
@@ -100,7 +101,11 @@ Five tables exist, all for M4 Tier 2 and none yet reachable by the app: `users`,
 
 **RLS policies live in the schema too**, via `pgPolicy` — and Drizzle enables RLS on a table *only* if that table declares a policy, so **a new table with no policy is wide open to every authenticated caller** while looking perfectly ordinary in review. Two things guard that: a test asserting `tablesWithoutRls()` is empty, and `privileges.sql` starting from `revoke all`.
 
-**RLS is row-level; some rules here are column-shaped.** Whoever can write `users.phone_hash` owns that phone number, whichever row they are permitted to write. No policy can say that, so table and column privileges live in `lib/db/src/schema/privileges.sql`. **`drizzle-kit push` does not manage grants** — `push:privileges` is a second, required deploy step, not an optional one.
+**RLS is row-level; some rules here are column-shaped.** Whoever can write `users.phone_hash` owns that phone number, whichever row they are permitted to write. No policy can say that, so table and column privileges live in `lib/db/src/schema/privileges.sql`.
+
+**`drizzle-kit push` manages neither grants nor functions** — `push:sql` is a second, required deploy step, not an optional one. It applies `lib/db/src/functions/*.sql` (in `manifest.json` order) then `privileges.sql`, and the manifest is read by the test harness too so the two cannot drift.
+
+**`SECURITY DEFINER` functions bypass RLS entirely** — that is what they are for here (an unclaimed invitation is owned by nobody, so no policy can reach it), and it is also why they are the most dangerous code in the package. Rules, learned the hard way in `claimInvitations.sql`: take **no argument the caller could lie about** (it reads `auth.uid()`'s own row); pin `search_path` **and** schema-qualify every name (the pin alone proves nothing — it turns a silent hijack into a crash, qualification is what makes it correct); `revoke all ... from public` before granting, since `EXECUTE` defaults to PUBLIC; and keep an in-body auth check with a test that actually reaches it, or it rots into a comment.
 
 **RLS tests** (`lib/db`, vitest + PGlite) run a real Postgres compiled to WASM, in-process: no Docker, no Supabase CLI, no daemon. Note a superuser bypasses RLS and PGlite's default connection *is* a superuser, which is why `rlsHarness.ts` exposes only `asUser`/`asAnon`/`asService` and documents `asService` as unusable for assertions. When adding a policy test, sabotage-check it: remove the protection and confirm the test fails *for the right reason*.
 

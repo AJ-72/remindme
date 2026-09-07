@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import * as schema from "../schema";
 import { COLUMN_PRIVILEGES } from "../schema/privileges";
+import { SERVER_FUNCTIONS } from "../functions";
 import { prepare } from "./rlsHarness";
 import { schemaDdl } from "./schemaDdl";
 
@@ -27,6 +28,9 @@ const SNAPSHOT_PATH = new URL(
 
 export async function buildSnapshot(): Promise<Buffer> {
   const db = await prepare(await schemaDdl(schema));
+  // Functions before privileges: the function file carries its own EXECUTE
+  // grants, and privileges.sql only touches tables and sequences.
+  await db.exec(SERVER_FUNCTIONS);
   await db.exec(COLUMN_PRIVILEGES);
   const dump = await db.dumpDataDir("none");
   await db.close();

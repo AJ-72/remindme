@@ -12,7 +12,7 @@
     "push-force": "drizzle-kit push --force --config ./drizzle.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "push:privileges": "node src/applyPrivileges.mjs"
+    "push:sql": "node src/applyServerSql.mjs"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",
