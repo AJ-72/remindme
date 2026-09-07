@@ -9,7 +9,7 @@
 --
 -- `drizzle-kit push` does NOT manage grants. Apply this after every push:
 --   pnpm --filter @workspace/db run push
---   pnpm --filter @workspace/db run push:privileges
+--   pnpm --filter @workspace/db run push:sql
 -- or paste it into the Supabase SQL editor. The schema tests apply this exact
 -- file, so what they exercise is what production runs.
 

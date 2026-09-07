@@ -97,7 +97,7 @@ Required env: `DATABASE_URL` — Postgres connection string (for api-server and 
 
 **DB schema source of truth**: `lib/db/src/schema/` — one file per table, each exporting a Drizzle table, `insertXSchema` (via `drizzle-zod`), and `InsertX`/`X` types. `lib/db/src/schema/index.ts` re-exports all tables; a table file that is never re-exported is absent from the generated DDL, so it goes both untested and unpushed (there is a test pinning the table list for exactly this reason).
 
-Five tables exist, all for M4 Tier 2 and none yet reachable by the app: `users`, `devices`, `blocks`, `invitations`, `link_codes`. `invitations.bind_token` (uuid, unique) is the rung-1 verification credential — possession of the link carrying it is proof of number control.
+Five tables exist, all for M4 Tier 2 and none yet reachable by the app: `users`, `devices`, `blocks`, `invitations`, `link_codes`. `invitations.bind_token` (uuid, unique) is the rung-1 verification credential — possession of the link carrying it is proof of number control. Consumption is tracked on `bound_by`/`bound_at` on the same row, not inferred from `users.phone_hash` — an account is user-deletable, so a proxy inferred from it dies with the account, which an independent review caught in the first version of `bind_via_invite_token()`.
 
 **RLS policies live in the schema too**, via `pgPolicy` — and Drizzle enables RLS on a table *only* if that table declares a policy, so **a new table with no policy is wide open to every authenticated caller** while looking perfectly ordinary in review. Two things guard that: a test asserting `tablesWithoutRls()` is empty, and `privileges.sql` starting from `revoke all`.
 

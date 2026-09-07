@@ -78,6 +78,23 @@ export const invitationsTable = pgTable(
      */
     bindToken: uuid("bind_token").notNull().defaultRandom().unique(),
 
+    /**
+     * Who consumed `bindToken`, and when. Deliberately NOT a foreign key to
+     * `users`.
+     *
+     * "Single-use" has to be a property of the TOKEN, not inferred from
+     * `users.phone_hash` being unique — that proxy only lasts as long as the
+     * account that bound it does, and the account is user-deletable (Play
+     * Store requires it). An unclaimed invitation's `recipient_id` stays null
+     * even after a bind (bind and claim are separate operations), so the row
+     * does not cascade when that account is deleted, and a stranger who taps
+     * the same old link afterwards would otherwise re-bind cleanly. Once
+     * `boundBy` is set it stays set regardless of what happens to that user
+     * row, which is what actually makes the token single-use.
+     */
+    boundBy: uuid("bound_by"),
+    boundAt: timestamp("bound_at", { withTimezone: true }),
+
     /** Nulled on accept or expiry - the mailbox is not an archive. The row
      * survives so "it never arrived" stays debuggable. */
     title: text("title"),

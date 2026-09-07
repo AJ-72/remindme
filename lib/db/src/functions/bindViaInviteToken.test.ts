@@ -131,20 +131,161 @@ describe("bind_via_invite_token", () => {
   });
 
   it("is not hijackable through the caller's search_path", async () => {
+    // A weaker version of this test once existed: an EMPTY planted table, so
+    // a hijack that read nothing and a correctly-qualified function that read
+    // the real row were indistinguishable - both returned "hash-amma" and the
+    // test passed either way. The only thing that catches a hijack is a
+    // planted row that would answer DIFFERENTLY if read.
     const { db, token } = await withInvitation();
     await db.asService(`
       create schema evil2;
       create table evil2.invitations (like public.invitations including all);
       create table evil2.users (like public.users including all);
       grant usage on schema evil2 to authenticated;
-      grant select on evil2.invitations, evil2.users to authenticated;
+      grant select, insert on evil2.invitations, evil2.users to authenticated;
+      insert into evil2.invitations
+        (sender_id, recipient_phone_hash, bind_token, title, datetime,
+         original_datetime, expires_at, content_expires_at)
+      values ('${ANAND}', 'hash-planted', '${token}', 'planted',
+              now() + interval '1 hour', now() + interval '1 hour',
+              now() + interval '1 hour', now() + interval '1 hour');
     `);
+
     const [bound] = await db.asUser(
       AMMA,
       `select * from public.bind_via_invite_token('${token}')`,
       { searchPath: "evil2, public" }
     );
+    expect(bound.phone_hash).toBe("hash-amma"); // not hash-planted
+
+    // And the mutation landed on the REAL invitation. If it had landed on the
+    // planted one instead, the real token would stay unconsumed and a second
+    // account could later bind it for free.
+    await expect(
+      db.asService(`select bound_by from invitations where bind_token = '${token}'`)
+    ).resolves.toEqual([{ bound_by: AMMA }]);
+    await db.close();
+  });
+
+  it("does not also claim - recipient_id stays null after a bind", async () => {
+    // The narrowness this function documents about itself: binding proves
+    // identity, it does not collect mail. A test that never checks this could
+    // let the two silently merge in a later edit with nothing failing.
+    const { db, token } = await withInvitation();
+    await db.asUser(AMMA, `select * from bind_via_invite_token('${token}')`);
+    await expect(
+      db.asService(`select recipient_id from invitations where bind_token = '${token}'`)
+    ).resolves.toEqual([{ recipient_id: null }]);
+    await db.close();
+  });
+
+  it("returns exactly the caller's own row, even with other users present", async () => {
+    const { db, token } = await withInvitation();
+    await db.asService(`insert into users (id, phone_hash) values ('${STRANGER}', 'hash-stranger')`);
+    const bound = await db.asUser(AMMA, `select * from bind_via_invite_token('${token}')`);
+    expect(bound).toHaveLength(1);
+    expect(bound[0].id).toBe(AMMA);
+    await db.close();
+  });
+
+  it("refuses to bind against an invitation whose content has already been purged", async () => {
+    // Mirrors claim_invitations()'s content-retention guard. A token bound
+    // against a row whose title/description are already gone would still
+    // mint a real identity from stale mail no reminder ever attaches to.
+    const { db } = await withInvitation();
+    const [row] = await db.asService(`
+      insert into invitations
+        (sender_id, recipient_phone_hash, title, datetime, original_datetime,
+         expires_at, content_expires_at)
+      values ('${ANAND}', 'hash-amma', null, now() + interval '60 days',
+              now() + interval '60 days', now() + interval '60 days',
+              now() - interval '1 day')
+      returning bind_token;
+    `);
+    await expect(
+      db.asUser(AMMA, `select * from bind_via_invite_token('${row.bind_token}')`)
+    ).rejects.toThrow(/expired/i);
+    await db.close();
+  });
+
+  it("is idempotent across two DIFFERENT invitations' tokens for the same number", async () => {
+    // The common case: a sender sends more than one reminder before the
+    // recipient ever installs. Each invitation carries its own bind_token,
+    // and the second one used must succeed silently rather than treating an
+    // already-bound account as a conflict.
+    const { db, token: firstToken } = await withInvitation();
+    await db.asUser(AMMA, `select * from bind_via_invite_token('${firstToken}')`);
+
+    const [row] = await db.asService(`
+      insert into invitations
+        (sender_id, recipient_phone_hash, title, datetime, original_datetime,
+         expires_at, content_expires_at)
+      values ('${ANAND}', 'hash-amma', 'Call the clinic', now() + interval '2 hours',
+              now() + interval '2 hours', now() + interval '2 hours',
+              now() + interval '2 hours')
+      returning bind_token;
+    `);
+    const [bound] = await db.asUser(
+      AMMA,
+      `select * from bind_via_invite_token('${row.bind_token}')`
+    );
     expect(bound.phone_hash).toBe("hash-amma");
     await db.close();
   });
+
+  it("does not care about the invitation's own status", async () => {
+    // Deliberate, and now explicit rather than silent: binding proves control
+    // of a NUMBER via a link that was genuinely delivered to it. Whether this
+    // particular reminder was since cancelled, declined or expired says
+    // nothing about whether the phone that received the link still controls
+    // that number - and claim_invitations() already refuses non-'invited'
+    // rows on the mail side, so a cancelled invitation cannot be exploited to
+    // collect anything through this door.
+    const { db } = await withInvitation();
+    const [row] = await db.asService(`
+      insert into invitations
+        (sender_id, recipient_phone_hash, status, title, datetime,
+         original_datetime, expires_at, content_expires_at)
+      values ('${ANAND}', 'hash-amma', 'cancelled', 'Take BP tablets',
+              now() + interval '1 hour', now() + interval '1 hour',
+              now() + interval '1 hour', now() + interval '1 hour')
+      returning bind_token;
+    `);
+    const [bound] = await db.asUser(
+      AMMA,
+      `select * from bind_via_invite_token('${row.bind_token}')`
+    );
+    expect(bound.phone_hash).toBe("hash-amma");
+    await db.close();
+  });
+
+  it("stays refused for a stranger even after the original binder deletes their account", async () => {
+    // The bug this whole rewrite exists to close. single-use used to be
+    // INFERRED from users.phone_hash being unique - a proxy that dies with
+    // the account, since account deletion is a stated Play Store requirement
+    // and binding does not claim (so the invitation has no recipient_id to
+    // cascade the delete through). bound_by lives on the invitation itself
+    // and must survive the bound account's deletion.
+    const { db, token } = await withInvitation();
+    await db.asUser(AMMA, `select * from bind_via_invite_token('${token}')`);
+    await db.asUser(AMMA, "delete from users");
+    await expect(
+      db.asService("select count(*)::int as n from users")
+    ).resolves.toEqual([{ n: 1 }]); // Anand only - Amma's row is gone.
+
+    await expect(
+      db.asUser(STRANGER, `select * from bind_via_invite_token('${token}')`)
+    ).rejects.toThrow(/already bound/i);
+    await db.close();
+  });
+
+  // Concurrency: two callers racing the same token cannot both be tested here
+  // - the PGlite harness runs one transaction at a time, so there is no way
+  // to construct a genuine race in this suite. The claim is a single atomic
+  // UPDATE whose WHERE clause is re-evaluated under the row lock Postgres
+  // takes for it, which is what makes two concurrent claims serialize rather
+  // than both reading a still-unbound row and both writing. See the comment
+  // above the UPDATE in bindViaInviteToken.sql for the reasoning; there is no
+  // test for it because there is no way to write one truthfully against this
+  // harness.
 });

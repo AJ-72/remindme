@@ -108,6 +108,57 @@ the rules on that transition. This is the correct trade (one place to get
 right, and RLS is default-deny behind it), but it is more surface than the plan
 costed, and each function is where a rule can be forgotten.
 
+### T2.4/T2.5 — an independent review found two real bugs in the first version
+
+The first `bind_via_invite_token()` passed 11 sabotage-checked tests and was
+committed and pushed. It was then reviewed independently (a fresh model, told
+to be adversarial, not to trust the tests just because they were green) —
+which is what caught what sabotage-checking my own tests could not, since
+sabotage only proves a test bites the thing it was written to check. It found:
+
+**1. "Single-use" was not actually implemented.** It was *inferred*: the
+function checked whether some `users` row already held the invitation's
+phone hash, and refused if a different account did. That proxy is only as
+durable as the account — and accounts are user-deletable (a Play Store
+requirement), while binding doesn't also claim, so the invitation's
+`recipient_id` stays null and the row never cascades on that delete. Reviewer
+confirmed by running it: bind, delete the account, then bind again from a
+different caller — **succeeds**, handing the deleted user's phone identity to
+a stranger. Fixed by giving the invitation its own `bound_by`/`bound_at`,
+which is a fact about the token and outlives whatever happens to the account
+it created.
+
+**2. There was no atomicity, and a comment claimed a mechanism that wasn't
+there.** The original was a `SELECT` into a variable, branching logic, then a
+plain `INSERT` — no lock across the read and the write. Two concurrent calls
+with the same token can both pass every check before either commits, and only
+`users_phone_hash_unique` catches the collision — with the wrong error
+message leaking a raw constraint name. A comment even said "same caller,
+`ON CONFLICT` below handles it," describing something the function never had.
+PGlite runs one transaction at a time, so no test in this suite could ever
+have caught this — it had to be reasoned about from Postgres MVCC semantics,
+which is exactly the kind of check a from-scratch adversarial read does and a
+green test suite cannot. Fixed by making the claim a single atomic `UPDATE`
+whose `WHERE` clause folds in every security-relevant condition, so the row
+lock it takes is what serializes concurrent callers.
+
+**A third finding was a test that didn't test what it claimed.** The
+search_path hijack test planted an *empty* attacker table — a hijacked read
+and a correct read both come back with nothing distinguishing them, so the
+test passed whether or not the qualification was doing anything. Sabotaging
+the real function via this session's own process still passed it, which is
+what exposed it. Fixed by planting a row that would answer *differently* if
+read: same `bind_token`, a different phone hash. Re-sabotaging now fails it,
+as it should have from the start.
+
+**Lesson for this codebase, not just this function:** sabotage-checking a
+test only proves the test detects the thing it was written to check. It
+cannot catch a bug the author didn't think to write a test for, and it is
+exactly as blind as the author to a race condition that a serial test harness
+structurally cannot express. Both are worth an independent, adversarial read
+before trusting `SECURITY DEFINER` code — this is now the second function in
+a row where that step found something the sabotage pass missed.
+
 ### T2.4/T2.5 — what building the bind function found
 
 `bind_via_invite_token()` is the same risk class as T1.8's claim function
@@ -193,8 +244,8 @@ that fetches the caller's hash; those rows are left to expire.
 | T2.1 | Server-side HMAC of E.164 numbers, pepper in secrets | Plaintext transits, is **never stored**. Pepper never reaches the client |
 | T2.2 | Cross-device normalization agreement tests | `utils/phoneNumber.ts` is now load-bearing for **correctness**, not display — a hash only matches if both devices normalize identically |
 | T2.3 | Rung 2: OTP binding flow | The screen, the send, the verify, the rate limit on attempts |
-| T2.4 | Rung 1: bind via invite-link token | **DONE at the DB layer** as `bind_via_invite_token()`, 11 tests, every guard sabotage-checked. Adds `invitations.bind_token` (uuid, unique, unguessable — never read aloud, so it doesn't need to be short). **Deliberately narrow**: it only binds identity, and does not also claim mail — the caller calls `claim_invitations()` separately. The "no verification screen shown" assertion (Known defects #8) is a client/UI property and stays `BLOCKED` — see D34 |
-| T2.5 | Single-use token semantics | **Idempotent re-tap and third-device refusal DONE**, inside `bind_via_invite_token()` itself — a second call from the same account returns the same row with no duplicate; a different account is refused with `already bound`. **"Consumed on claim, not `GET`" is NOT this function's job** — it is a property of the HTTP endpoint WhatsApp's link-preview crawler fetches, which does not exist until Edge Functions do. `BLOCKED` on T1.1/T1.9 |
+| T2.4 | Rung 1: bind via invite-link token | **DONE at the DB layer** as `bind_via_invite_token()`, 18 tests, sabotage-checked and independently reviewed (see below — that review found two real bugs in the first version, now fixed). Adds `invitations.bind_token` (uuid, unique, unguessable) plus `bound_by`/`bound_at` on the same table. **Deliberately narrow**: it only binds identity, and does not also claim mail — the caller calls `claim_invitations()` separately. The "no verification screen shown" assertion (Known defects #8) is a client/UI property and stays `BLOCKED` — see D34 |
+| T2.5 | Single-use token semantics | **DONE, on the second attempt.** The first version inferred "spent" from `users.phone_hash` being unique — a proxy that dies with the account (see below). Fixed by giving the invitation its own durable `bound_by`/`bound_at`, set by a single atomic `UPDATE` rather than a select-then-branch, which is also what makes two concurrent claims of the same token serialize instead of racing. **"Consumed on claim, not `GET`" is still NOT this function's job** — that is a property of the HTTP endpoint WhatsApp's link-preview crawler fetches, which does not exist until Edge Functions do. `BLOCKED` on T1.1/T1.9 |
 | T2.6 | Rebind on re-verification, 45-day window | Inside 45 days recovers blocks and links; past it, a fresh account and the old row deleted. **Deleting state applies only to the fresh-account path** |
 | T2.7 | Token revocation + "recovered on a new device" notice | On **every** rebind to a new device key, regardless of window |
 | T2.8 | Three separate settings | Account existence / discoverable / accepting-reminders. Mute **keeps** the row, blocks and links (Known defects #7) |
