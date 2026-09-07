@@ -1241,3 +1241,19 @@ FIX FOR NEXT TIME: try building from `C:\p\artifacts\mobile` first before copyin
 **Correct order of operations for a clean Windows local build:** fix JDK (#1) → fix CMake/Ninja version (#2) → delete stale `.cxx`/`build` caches → run `npx expo run:android`.
 
 **Do NOT conclude pnpm itself is broken or unsupported on Windows** — this was raised and correctly pushed back on. The actual bug is in the bundled Ninja version, which affects npm/yarn users too; pnpm just makes marginal cases fail slightly more often.
+
+---
+
+## 2026-09-07 — AsyncStorage.multiGet was SLOWER than parallel getItem calls on-device
+
+**Context:** hunting Android startup latency. `RemindersContext.loadFromStorage` fires 9-10 independent `AsyncStorage.getItem` calls via `Promise.all` on every cold start. The obvious-looking fix is to batch them into one `AsyncStorage.multiGet` call, on the theory that N native round-trips cost more than 1.
+
+**Measured the opposite.** On a real device (`@react-native-async-storage/async-storage` 2.2.0, OPPO/ColorOS), with a temporary `Date.now()` timing log around `loadFromStorage` and 5 cold-start runs each, back-to-back in the same session to control for thermal/background-load drift:
+- Original (9-10 parallel `getItem` calls via `Promise.all`): **289-334ms** (mean ~304ms)
+- Batched (`AsyncStorage.multiGet` for the same keys): **363-374ms** (mean ~369ms) — consistently ~20% *slower*, and more tightly clustered (less variance), so this isn't noise.
+
+**Root cause not fully diagnosed** — plausible explanation is that `Promise.all` over independent `getItem` calls lets RN's bridge/JSI dispatch all 9 native calls concurrently (each a fast independent SQLite read), while `multiGet`'s Android implementation may do its per-key reads sequentially inside one native call, or pay extra marshaling cost for the combined multi-key payload. Not confirmed by reading the native module source — only confirmed by the on-device timing.
+
+**Do NOT assume `multiGet` is a free win for reducing native-call count** — it depends on the specific AsyncStorage version and platform's internal implementation. Measure on-device before batching AsyncStorage reads in this codebase; the intuitive "fewer round-trips = faster" reasoning did not hold here.
+
+**Where this was tried and reverted:** `RemindersContext.tsx`'s `loadFromStorage` / `ReminderService.ts`. No `loadStartupData`/`multiGet` function exists in the codebase — this was fully reverted, not merged.
