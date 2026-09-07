@@ -9,6 +9,19 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-07 — `jest.resetModules()` + `await import()` crashes under this Babel/CJS Jest setup; use `require()` instead. Also: chained `.finally()` needs its own `.catch()`
+
+**WHAT:** Two footguns hit writing `services/DeviceIdentityService.test.ts` / `services/SessionService.test.ts` (T0.2/T0.3), which both need `jest.resetModules()` to get fresh module-level singleton state per test case (simulating an app restart, or a fresh `supabase-js` mock per case):
+
+1. `jest.resetModules()` followed by `await import("@/services/Whatever")` throws `TypeError: A dynamic import callback was invoked without --experimental-vm-modules`. This project's `jest.config.js` uses the `jest-expo` preset with Babel's CJS transform, not native ESM — dynamic `import()` isn't supported at runtime here regardless of TypeScript's own module syntax. Fix: use `require("@/services/Whatever")` instead (works fine with the `@/` moduleNameMapper too — it's a resolution-time mapping, not an ESM-only feature), and make the wrapping helper function synchronous instead of `async`.
+2. A module-level `let pending: Promise<T> | null` guard pattern (dedupe concurrent calls to an idempotent async operation — see both services above) that does `pending.finally(() => { pending = null })` with the result **not** re-assigned or awaited crashes the whole Jest worker process (`UnhandledPromiseRejection`) the moment the underlying operation rejects — even though the original `pending` promise, the one actually returned to callers, is being awaited and its rejection handled fine by them. `.finally()` returns a *new* derived promise that re-throws the same rejection, and that derived promise here was never assigned to anything or given a `.catch()`, so Node's unhandled-rejection detector reasonably flags it as orphaned. Fix: `pending.finally(() => { pending = null }).catch(() => {})` — the extra `.catch()` is on the throwaway derived promise, not on `pending` itself, so it doesn't suppress the rejection callers actually see.
+
+**WHY:** #1 is a project-config fact (CJS via Babel, not `--experimental-vm-modules`), not a bug in the code under test — worth knowing before reaching for `import()` inside any test that resets modules. #2 is a general JS footgun (chaining `.finally()`/`.then()` off a promise you don't otherwise hold onto silently creates an unhandled rejection whenever the source rejects), not specific to this repo, but easy to reproduce here since several services in this codebase use the same "module-level `pending` promise dedupes concurrent callers" pattern (`DeviceIdentityService.getOrCreateDeviceKey`, `SessionService.ensureSession`, and the `enqueue`/`queue` pattern in `DebugLogService.ts`) — the same mistake would recur anywhere a `.finally()` cleanup is bolted onto a shared pending promise without its own error handler.
+
+**WHERE:** [services/DeviceIdentityService.ts](artifacts/mobile/services/DeviceIdentityService.ts), [services/DeviceIdentityService.test.ts](artifacts/mobile/services/DeviceIdentityService.test.ts), [services/SessionService.ts](artifacts/mobile/services/SessionService.ts), [services/SessionService.test.ts](artifacts/mobile/services/SessionService.test.ts).
+
+---
+
 ## 2026-09-07 — Two deploy-time bugs a PGlite-only test suite could never have caught, found only by pushing to a real Supabase project
 
 **WHAT:** Two unrelated bugs surfaced the first time `lib/db`'s schema and SQL were actually deployed to a real Supabase project (`remindme-tier2`), rather than only exercised against the local PGlite harness:

@@ -63,8 +63,8 @@ The spec's build-order step 0. The first draft folded this into "schema" and und
 | # | Task | Notes |
 |---|---|---|
 | T0.1 | **Server-side test harness** | **DONE 2026-08-30.** `lib/db/src/testing/rlsHarness.ts`, run by `pnpm --filter @workspace/db run test`. **No Docker, no Supabase CLI** — see below. Every later RLS task depends on it. |
-| T0.2 | Device key generation + `expo-secure-store` | Key generated once, never leaves the device. Assert it survives app restart and is absent on a fresh install |
-| T0.3 | Session handling in the mobile client | Anonymous-by-default; a session exists only after binding. A user who never binds must make **zero** network calls — assert this |
+| T0.2 | Device key generation + `expo-secure-store` | **DONE 2026-09-07.** `services/DeviceIdentityService.ts` — `getOrCreateDeviceKey()` generates a uuid via `expo-crypto` (local, no network) on first call, persists it with `expo-secure-store`, and is idempotent under concurrent callers. Tests simulate a restart (fresh module instances, same underlying storage) and a fresh install (empty storage) — see `DeviceIdentityService.test.ts`. Device-only follow-up tracked as D38 (`device-tests/remind-others.md`) since Jest's SecureStore mock can't prove the real native keystore persists/doesn't-persist the same way |
+| T0.3 | Session handling in the mobile client | **DONE 2026-09-07.** `services/SessionService.ts` — the `supabase-js` client is constructed lazily and never at import time; `getCurrentSession()`/`hasSession()` only ever call `auth.getSession()` (local-storage read, no network for a user with no session); `ensureSession()` is the only function that can reach the network (`auth.signInAnonymously()`) and nothing calls it yet — it's meant to run at the moment binding actually begins, not at app launch. Concurrent `ensureSession()` callers share one in-flight sign-in rather than each minting a separate anonymous account. Tests mock `@supabase/supabase-js` per case and assert `signInAnonymously` is never called unless `ensureSession()` runs — see `SessionService.test.ts`. The device key (T0.2) is deliberately NOT threaded through this yet — see both files' headers |
 | T0.4 | OTP provider account + send/verify wrapper | Behind an interface so the provider is swappable. Check whether the chosen Indian provider is natively supported by Supabase Auth; if not, this lives in an Edge Function |
 | T0.5 | Decision record for the two questions above | Committed to the plan or an ADR before Phase 1 |
 
@@ -365,7 +365,7 @@ Both `push` and `push:sql` succeeded against `remindme-tier2` on 2026-09-07, but
 
 ## Verification
 
-**Mobile Jest** (`npx jest` from `artifacts/mobile`) — 830 passing as of the 2026-09-07 merge; all must stay green. Covers the client: normalization agreement, status transitions, reachability caching, UI sections, copy.
+**Mobile Jest** (`npx jest` from `artifacts/mobile`) — 843 passing as of T0.2/T0.3 landing (2026-09-07); all must stay green. Covers the client: normalization agreement, status transitions, reachability caching, UI sections, copy, and now device-key/session handling.
 
 **Server tests** — `pnpm --filter @workspace/db run test` (vitest + PGlite). RLS policies, the claim function, rate limiting. **This repo had never had these.** An untested RLS policy fails the way an untested alarm fails: silently, and only in production.
 
