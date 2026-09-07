@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-07 — Design skins kept as reference: warning stays amber (not red), and the selected skin reuses one hue for both accent and destructive
+
+**WHAT:** Add `design/skins/` — four candidate palettes from the visual refresh as a typed token set (`palettes.ts`, named to mirror `constants/colors.ts`) plus standalone HTML mockups of Home/Add Reminder/Settings in light and dark. Ink & Coral is the selected direction. Nothing is imported by the app; `constants/colors.ts` stays the live source of truth.
+
+**WHY:** Two decisions worth not re-litigating. (1) "All warnings and errors in red" was scoped to *errors only* — `warning` stays amber. The Android exact-alarm banner is advisory, not a failure report, and colouring it red makes a working app look broken; `colors.ts` already separates `warning` from `destructive` and the skins preserve that. (2) In the selected Ink & Coral skin, `accent` and `destructive` are the same hue family, so a Save button and an overdue row share a colour — the overdue state relies on its dot plus label wording to stay distinguishable. That is a deliberate character choice, not an oversight; `ink-sky` is the drop-in fix if it reads badly on a real screen, since it splits the two hues fully. Also note `palettes.ts` `accent`/`accentForeground` map to `primary`/`primaryForeground` in `colors.ts` — `colors.ts` has its own separate `accent` token meaning a lighter tint of primary, which is *not* the same thing.
+
+**WHERE:** [design/skins/](design/skins/) — see its README for the full token mapping. `design/` sits outside every tsconfig `include` (root has `"files": []`; the mobile config scopes to its own dir), so these files never enter a build. Any real palette swap must keep light/dark key sets identical — `hooks/useColors.test.ts` enforces it, because a missing key resolves to `undefined` and renders as no colour at all, only on dark-mode devices.
+
+---
+
 ## 2026-09-07 — Quick-add parser dropped the day when combined with "next/this month|year" ("23rd next month" → today's day-of-month, next month)
 
 **WHAT:** Detect the `<ordinal> (of)? next/this/last month|year` shape in English input before handing text to chrono-node, let chrono resolve month/year/time as before, then override the resolved date's day-of-month with the parsed ordinal (clamped to that month's actual length, e.g. "31st next month" from January → Feb 28). Also strips the ordinal phrase from the derived title so it doesn't leak into it. Added an optional `now` param to `parseNaturalLanguage` (default `new Date()`) for deterministic tests.
