@@ -9,6 +9,18 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-07 — Palette swap: six colour sites do NOT follow `useColors()`, and the colour literals in tests are deliberate
+
+**WHAT:** Apply the Ink & Coral skin to `constants/colors.ts`. 22 files read their colours through `useColors()` and needed no edit — including all five sheets/modals. Six sites do **not** follow the token and were changed by hand: `app.json` (splash `backgroundColor`, Android `adaptiveIcon.backgroundColor`, the expo-notifications plugin `color`), two `setNotificationChannelAsync` `lightColor` values in `ReminderService.ts`, and two **web-only** `boxShadow` rules in `ReminderCard.tsx`/`QuickAddInput.tsx` that hardcoded `rgba(99,102,241,…)` — the native branch of those same ternaries already used `colors.primary`, so the drift was invisible on device and only wrong on web.
+
+**WHY:** Two traps worth recording. (1) Grepping for `useColors` is *not* sufficient to find every colour: native config in `app.json`, runtime channel config, and the web half of a `Platform.OS === "web"` ternary all sit outside it. Grep for the literal old hex (`6366f1`, `99,102,241`) as the real completeness check. (2) The hardcoded hex literals in `settings.test.tsx` / `send-reminder.test.tsx` / `QuickAddInput.test.tsx` look like a smell but are **intentional** — the comment at `settings.test.tsx` records that the author verified a token-comparison version (`expect(x).toBe(colors.dark.foreground)`) still passes when the dark palette is given light-mode values, which is the exact bug the test exists to catch. Update those literals on a palette change; do **not** "improve" them into token comparisons, which silently removes the protection. The `not.toBe(otherPalette.…)` line beside each is the other half of that guard.
+
+**Also note:** the notification-channel `lightColor` change does **not** reach existing installs. Android caches channel config by ID for the life of the install (the same immutability already documented around the `reminders-alarm` channel IDs), so only a fresh install picks up the new LED colour.
+
+**WHERE:** [artifacts/mobile/constants/colors.ts](artifacts/mobile/constants/colors.ts), [app.json](artifacts/mobile/app.json), [services/ReminderService.ts](artifacts/mobile/services/ReminderService.ts), [components/ReminderCard.tsx](artifacts/mobile/components/ReminderCard.tsx), [components/QuickAddInput.tsx](artifacts/mobile/components/QuickAddInput.tsx). Device verification pending as D27 in [device-tests/visual-layout.md](device-tests/visual-layout.md) — Jest asserts token values, never rendered colour.
+
+---
+
 ## 2026-09-07 — Design skins kept as reference: warning stays amber (not red), and the selected skin reuses one hue for both accent and destructive
 
 **WHAT:** Add `design/skins/` — four candidate palettes from the visual refresh as a typed token set (`palettes.ts`, named to mirror `constants/colors.ts`) plus standalone HTML mockups of Home/Add Reminder/Settings in light and dark. Ink & Coral is the selected direction. Nothing is imported by the app; `constants/colors.ts` stays the live source of truth.

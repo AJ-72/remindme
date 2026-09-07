@@ -6,6 +6,51 @@
 | --- | --- | --- | --- | --- |
 | [D8](#d8) | Dark mode, visually | `PASS` | 2026-08-24 | SEMI |
 | [D14](#d14) | Seven 2026-08-24 device fixes | `PARTIAL` | 2026-08-29 | SEMI |
+| [D27](#d27) | Ink & Coral palette, on device | `PENDING` | — | NO |
+
+---
+
+<a id="d27"></a>
+## D27 — Ink & Coral palette, on device · `PENDING`
+
+The palette swapped from indigo to Ink & Coral (`bbb1b3e`). Jest asserts
+token *values*, never rendered colour, so none of this is provable in
+jsdom. **D8's full dark-mode walk should be re-run as part of this** — a
+palette change invalidates it exactly like a new screen does.
+
+**Setup.** One overdue reminder, one completed reminder, and one send
+reminder in the list, so destructive, muted and recipient states are all on
+screen. Run the walk twice: system theme dark, then light.
+
+**Steps.**
+1. **Every screen**, in D8's order: Home, Add/edit, Reminder detail, Send
+   reminder, Settings, Smart alerts, Backup, About, Why tasks slip.
+2. **Every sheet/modal** — these are easy to miss because they only appear
+   on interaction: delete confirmation (Confirm), name entry (Name), snooze
+   (Snooze), quiet hours (QuietHours), contact picker (ContactPicker).
+3. **Notification surfaces** — fire a reminder and check the tray/lock
+   screen accent, and the large-icon rendering.
+
+**What specifically to look for, beyond "does it look right":**
+- **Overdue vs. Save cannot be confused.** This skin puts `primary` and
+  `destructive` in the same hue family on purpose, so an overdue row and the
+  Save button share a colour. Confirm the overdue state still reads as urgent
+  rather than as a normal control — its icon and label wording are what carry
+  the distinction. **If this fails on a real screen, the fix is the `ink-sky`
+  skin in `design/skins/`, which splits the two hues fully.**
+- **The exact-alarm banner must still read as advisory, not as an error.**
+  It is deliberately amber, not red.
+- **Contrast on a real panel.** The light mode is a cool pale grey
+  (`#EDEFF3`), not white; on an OLED at low brightness confirm the card
+  (`#FBFCFD`) is still distinguishable from the background.
+- **Status-bar icons** in both themes, including the app-Light-on-phone-dark
+  case that D14 #2 left unverified.
+
+**Not covered by Jest and not covered above:** the notification channel
+`lightColor` changed, but **Android caches channel config by ID for the life
+of the install** — existing installs keep the old indigo LED colour. Only a
+fresh install (or a new channel ID) picks this up. Verify on a clean install
+if the LED colour matters; otherwise record it as known-stale.
 
 ---
 
