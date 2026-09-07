@@ -449,7 +449,7 @@ describe("QuickAddInput — mic toggle", () => {
       const flatStyle = Array.isArray(micButton.props.style)
         ? Object.assign({}, ...micButton.props.style)
         : micButton.props.style;
-      expect(flatStyle.backgroundColor).toBe("#ef4444");
+      expect(flatStyle.backgroundColor).toBe("#D64E2E");
     });
   });
 
@@ -504,7 +504,7 @@ describe("QuickAddInput — mic toggle", () => {
     const getMicColor = () =>
       UNSAFE_getAllByType(Feather).find((node) => node.props.name === "mic")?.props.color;
 
-    await waitFor(() => expect(getMicColor()).toBe("#ffffff"));
+    await waitFor(() => expect(getMicColor()).toBe("#FFFFFF"));
 
     // Now simulate a shared audio file starting to transcribe while the
     // live session is still active — this must NOT touch the live
@@ -523,7 +523,7 @@ describe("QuickAddInput — mic toggle", () => {
       </RemindersProvider>
     );
 
-    expect(getMicColor()).toBe("#ffffff");
+    expect(getMicColor()).toBe("#FFFFFF");
     expect(stopListeningSpy).not.toHaveBeenCalled();
 
     // ...and back to false again.
@@ -542,7 +542,7 @@ describe("QuickAddInput — mic toggle", () => {
     );
 
     // The live session survived the blip untouched: still active, never stopped.
-    expect(getMicColor()).toBe("#ffffff");
+    expect(getMicColor()).toBe("#FFFFFF");
     expect(stopListeningSpy).not.toHaveBeenCalled();
     stopListeningSpy.mockRestore();
   });

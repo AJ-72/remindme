@@ -449,7 +449,7 @@ describe("dark mode", () => {
     // so it would still pass if the dark palette were given light-mode
     // values. Verified by temporarily setting dark.foreground to the light
     // value — the token-comparison version passed, this one fails.
-    expect(flat.color).toBe("#e8e8f0");
+    expect(flat.color).toBe("#F4F1EA");
     expect(flat.color).not.toBe(darkColors.light.foreground);
   });
 
@@ -459,7 +459,7 @@ describe("dark mode", () => {
 
     const header = await findByText("Settings");
     const flat = StyleSheet.flatten(header.props.style);
-    expect(flat.color).toBe("#1a1a2e");
+    expect(flat.color).toBe("#131A28");
     expect(flat.color).not.toBe(darkColors.dark.foreground);
   });
 });
@@ -497,7 +497,7 @@ describe("appearance override", () => {
     const { findByTestId, findByText } = renderScreen();
 
     expect(StyleSheet.flatten((await findByText("Settings")).props.style).color).toBe(
-      "#1a1a2e"
+      "#131A28"
     );
 
     fireEvent.press(await findByTestId("theme-dark"));
@@ -505,7 +505,7 @@ describe("appearance override", () => {
     await waitFor(async () =>
       expect(
         StyleSheet.flatten((await findByText("Settings")).props.style).color
-      ).toBe("#e8e8f0")
+      ).toBe("#F4F1EA")
     );
   });
 
@@ -517,7 +517,7 @@ describe("appearance override", () => {
     await waitFor(async () =>
       expect(
         StyleSheet.flatten((await findByText("Settings")).props.style).color
-      ).toBe("#1a1a2e")
+      ).toBe("#131A28")
     );
 
     fireEvent.press(await findByTestId("theme-system"));
@@ -525,7 +525,7 @@ describe("appearance override", () => {
     await waitFor(async () =>
       expect(
         StyleSheet.flatten((await findByText("Settings")).props.style).color
-      ).toBe("#e8e8f0")
+      ).toBe("#F4F1EA")
     );
   });
 });
