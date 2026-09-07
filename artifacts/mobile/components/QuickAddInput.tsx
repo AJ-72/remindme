@@ -480,7 +480,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       paddingVertical: Platform.OS === "web" ? 12 : 10,
       gap: 8,
       ...(Platform.OS === "web"
-        ? { boxShadow: "0 2px 12px rgba(99,102,241,0.08)" }
+        ? { boxShadow: "0 2px 12px rgba(232,92,60,0.08)" }
         : {
             shadowColor: colors.primary,
             shadowOffset: { width: 0, height: 2 },

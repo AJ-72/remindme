@@ -127,7 +127,7 @@ function ReminderCard({ reminder, onDelete }: Props) {
     borderRadius: colors.radiusCard,
     borderColor: overdue && !reminder.completed ? colors.destructiveBorder : colors.border,
     ...(Platform.OS === "web"
-      ? { boxShadow: "0 2px 8px rgba(99,102,241,0.06)" }
+      ? { boxShadow: "0 2px 8px rgba(232,92,60,0.06)" }
       : {
           shadowColor: colors.primary,
           shadowOffset: { width: 0, height: 2 },
