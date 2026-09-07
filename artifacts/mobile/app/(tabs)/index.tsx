@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -56,9 +56,12 @@ export default function HomeScreen() {
     return { upcomingGroups, upcomingCount: upcoming.length, sending, completed };
   }, [reminders]);
 
-  const handleDelete = (id: string) => {
+  // Stable across renders (see ReminderCard's React.memo) so passing this
+  // down doesn't defeat memoization for every card whenever HomeScreen
+  // re-renders for an unrelated reason.
+  const handleDelete = useCallback((id: string) => {
     setPendingDelete({ kind: "single", id });
-  };
+  }, []);
 
   const handleClearCompleted = () => {
     setPendingDelete({ kind: "clear-completed" });
