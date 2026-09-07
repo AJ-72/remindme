@@ -25,7 +25,73 @@ interface Props {
   onDelete: (id: string) => void;
 }
 
-export default function ReminderCard({ reminder, onDelete }: Props) {
+// Static across every card and every render — hoisted out of the component
+// so a list of N cards re-renders without rebuilding N copies of these style
+// objects. Only the handful of values that actually vary per reminder/theme
+// (see dynamicCardStyles below) are computed inline.
+const staticStyles = StyleSheet.create({
+  card: {
+    padding: 16,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+  },
+  checkButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  content: {
+    flex: 1,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  title: {
+    fontSize: 15,
+  },
+  recipientChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 4,
+    marginTop: 6,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    maxWidth: "100%",
+  },
+  recipientChipText: {
+    fontSize: 11,
+    flexShrink: 1,
+  },
+  description: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  timeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 6,
+  },
+  timeText: {
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+  },
+  deleteBtn: {
+    padding: 6,
+  },
+});
+
+function ReminderCard({ reminder, onDelete }: Props) {
   const colors = useColors();
   const { toggleComplete } = useReminders();
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -53,87 +119,44 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
     toggleComplete(reminder.id);
   };
 
-  const styles = StyleSheet.create({
-    card: {
-      backgroundColor: colors.card,
-      borderRadius: colors.radiusCard,
-      padding: 16,
-      marginBottom: 10,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
-      ...(Platform.OS === "web"
-        ? { boxShadow: "0 2px 8px rgba(99,102,241,0.06)" }
-        : {
-            shadowColor: colors.primary,
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.06,
-            shadowRadius: 8,
-            elevation: 2,
-          }),
-      borderWidth: 1,
-      borderColor: overdue && !reminder.completed ? colors.destructiveBorder : colors.border,
-    },
-    checkButton: {
-      width: 24,
-      height: 24,
-      borderRadius: 12,
-      borderWidth: 2,
-      borderColor: reminder.completed ? colors.primary : colors.border,
-      backgroundColor: reminder.completed ? colors.primary : "transparent",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    content: {
-      flex: 1,
-    },
-    titleRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-    },
-    title: {
-      fontSize: 15,
-      color: reminder.completed ? colors.mutedForeground : colors.foreground,
-      textDecorationLine: reminder.completed ? "line-through" : "none",
-    },
-    recipientChip: {
-      flexDirection: "row",
-      alignItems: "center",
-      alignSelf: "flex-start",
-      gap: 4,
-      marginTop: 6,
-      paddingVertical: 3,
-      paddingHorizontal: 8,
-      borderRadius: 999,
-      backgroundColor: colors.primary + "1A",
-      maxWidth: "100%",
-    },
-    recipientChipText: {
-      fontSize: 11,
-      color: colors.primary,
-      flexShrink: 1,
-    },
-    description: {
-      fontSize: 13,
-      color: colors.mutedForeground,
-      marginTop: 2,
-    },
-    timeRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-      marginTop: 6,
-    },
-    timeText: {
-      fontSize: 12,
-      fontFamily: "Inter_500Medium",
-      color: overdue && !reminder.completed ? colors.destructive : colors.mutedForeground,
-    },
-    deleteBtn: {
-      padding: 6,
-    },
-  });
+  // Only the values that actually depend on props/theme, computed as plain
+  // objects (not StyleSheet.create — registering these with the native style
+  // manager buys nothing for objects that are already new every render).
+  const dynamicCardStyle = {
+    backgroundColor: colors.card,
+    borderRadius: colors.radiusCard,
+    borderColor: overdue && !reminder.completed ? colors.destructiveBorder : colors.border,
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0 2px 8px rgba(99,102,241,0.06)" }
+      : {
+          shadowColor: colors.primary,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+          elevation: 2,
+        }),
+  };
+  const dynamicCheckButtonStyle = {
+    borderColor: reminder.completed ? colors.primary : colors.border,
+    backgroundColor: reminder.completed ? colors.primary : "transparent",
+  };
+  const dynamicTitleStyle: { color: string; textDecorationLine: "line-through" | "none" } = {
+    color: reminder.completed ? colors.mutedForeground : colors.foreground,
+    textDecorationLine: reminder.completed ? "line-through" : "none",
+  };
+  const dynamicTimeTextStyle = {
+    color: overdue && !reminder.completed ? colors.destructive : colors.mutedForeground,
+  };
+  const styles = {
+    ...staticStyles,
+    card: [staticStyles.card, dynamicCardStyle],
+    checkButton: [staticStyles.checkButton, dynamicCheckButtonStyle],
+    title: [staticStyles.title, dynamicTitleStyle],
+    recipientChip: [staticStyles.recipientChip, { backgroundColor: colors.primary + "1A" }],
+    recipientChipText: [staticStyles.recipientChipText, { color: colors.primary }],
+    description: [staticStyles.description, { color: colors.mutedForeground }],
+    timeText: [staticStyles.timeText, dynamicTimeTextStyle],
+  };
 
   return (
     <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
@@ -212,6 +235,7 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
         </View>
 
         <Pressable
+          testID={`delete-reminder-${reminder.id}`}
           style={styles.deleteBtn}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -225,3 +249,9 @@ export default function ReminderCard({ reminder, onDelete }: Props) {
     </Animated.View>
   );
 }
+
+// Memoized: HomeScreen re-renders its whole card list on every reminders
+// change (add/edit/delete/toggle all replace the array reference), but only
+// the one changed reminder's props actually differ — this skips re-rendering
+// (and rebuilding dynamic styles for) every other card in the list.
+export default React.memo(ReminderCard);

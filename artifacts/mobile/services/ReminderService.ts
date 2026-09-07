@@ -32,6 +32,7 @@ try {
 
 export const STORAGE_KEY = "@reminders_v1";
 export const DEFAULT_ALARM_KEY = "@default_alarm_v1";
+export const DEFAULT_EXACT_TIMING_KEY = "@default_exact_timing_v1";
 export const SHOW_DESCRIPTION_KEY = "@show_description_v1";
 export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
 export const VIBRATION_KEY = "@vibration_v1";
@@ -64,12 +65,6 @@ export const SNOOZE_ACTION_ID = "SNOOZE_10";
 export const SNOOZE_MORE_ACTION_ID = "SNOOZE_MORE";
 export const MARK_DONE_ACTION_ID = "MARK_DONE";
 
-// Android's setExactAndAllowWhileIdle (used natively by expo-notifications)
-// is documented to defer delivery by up to ~1 minute under normal operation,
-// and longer under Doze. Scheduling the native trigger this much earlier
-// keeps the notification's actual arrival close to the time the user picked.
-export const ALARM_EARLY_OFFSET_MS = 60 * 1000;
-
 /**
  * Who a "send" reminder is about. Deliberately an object, not a flat phone
  * string, so Tier 2 can add appUserId/deliveryStatus/acknowledgedAt later as
@@ -92,6 +87,12 @@ export interface Reminder {
   completed: boolean;
   notificationId?: string;
   alarm?: boolean;
+  /**
+   * Whether this reminder gets a punctual (alarm-clock-backed) native trigger.
+   * `undefined` means on -- the same defensive default as `alarm`, so every
+   * record predating this field keeps working with no migration.
+   */
+  exactTiming?: boolean;
   recipient?: ReminderRecipient;
   /** When the reminder was created. Absent on records predating instrumentation. */
   createdAt?: string;
@@ -121,6 +122,7 @@ export interface NotificationData {
   title: string;
   body: string;
   alarm: boolean;
+  exactTiming: boolean;
   channelId: string;
 }
 
@@ -240,6 +242,23 @@ export async function getDefaultAlarmEnabled(): Promise<boolean> {
 
 export async function setDefaultAlarmEnabled(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(enabled));
+}
+
+/**
+ * Whether NEW reminders default to punctual delivery. Defaults ON: an
+ * unpunctual reminder is a broken reminder, and the cost of the setting is a
+ * status-bar alarm icon the user can turn off if it bothers them.
+ */
+export async function getDefaultExactTimingEnabled(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(DEFAULT_EXACT_TIMING_KEY);
+    if (raw !== null) return JSON.parse(raw) as boolean;
+  } catch {}
+  return true;
+}
+
+export async function setDefaultExactTimingEnabled(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(DEFAULT_EXACT_TIMING_KEY, JSON.stringify(enabled));
 }
 
 export async function getShowDescriptionEnabled(): Promise<boolean> {
@@ -539,7 +558,7 @@ export function channelIdForAlarm(alarm: boolean, vibrate: boolean = true): stri
 export async function scheduleNotification(
   reminder: Pick<
     Reminder,
-    "title" | "description" | "datetime" | "alarm" | "recipient"
+    "title" | "description" | "datetime" | "alarm" | "exactTiming" | "recipient"
   >,
   reminderId: string
 ): Promise<string | undefined> {
@@ -550,10 +569,8 @@ export async function scheduleNotification(
     const trigger = new Date(reminder.datetime);
     const now = new Date();
     if (trigger <= now) return undefined;
-    const earlyTrigger = new Date(
-      Math.max(now.getTime(), trigger.getTime() - ALARM_EARLY_OFFSET_MS)
-    );
     const alarmOn = reminder.alarm !== false;
+    const exactOn = reminder.exactTiming !== false;
     const channelId = channelIdForAlarm(alarmOn, await getVibrationEnabled());
     // A send reminder says who to message. This wins over the description,
     // which is consent-gated and would otherwise bury the one fact that makes
@@ -572,13 +589,14 @@ export async function scheduleNotification(
           title: reminder.title,
           body,
           alarm: alarmOn,
+          exactTiming: exactOn,
           channelId,
         } satisfies NotificationData,
         ...(Platform.OS === "ios" && !alarmOn ? { sound: false } : {}),
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: earlyTrigger,
+        date: trigger,
         ...(Platform.OS === "android" ? { channelId } : {}),
       },
     });
@@ -639,11 +657,9 @@ export async function scheduleSnoozeNotification(
   if (Platform.OS === "web" || !Notifications) return undefined;
   try {
     // Clamped like scheduleNotification: a DATE trigger in the past is
-    // delivered immediately by expo-notifications, which for a target inside
-    // the early-offset window would turn a snooze into an instant re-alert.
-    const snoozeDate = new Date(
-      Math.max(Date.now(), target.getTime() - ALARM_EARLY_OFFSET_MS)
-    );
+    // delivered immediately by expo-notifications, which would turn a snooze
+    // into an instant re-alert.
+    const snoozeDate = new Date(Math.max(Date.now(), target.getTime()));
     // Read the name here rather than threading it through NotificationData:
     // the headless snooze path builds that payload from a notification that
     // may predate this feature, so a payload field would be missing exactly
@@ -655,6 +671,10 @@ export async function scheduleSnoozeNotification(
         body: data.body,
         sound: data.alarm,
         categoryIdentifier: SNOOZE_CATEGORY_ID,
+        // A payload built before exactTiming existed has it undefined; the
+        // native side reads it with a default of true, so re-emitting it
+        // unchanged keeps such a snooze punctual rather than silently
+        // demoting it.
         data,
         ...(Platform.OS === "ios" && !data.alarm ? { sound: false } : {}),
       },
@@ -779,6 +799,23 @@ export async function deleteReminder(
   return reminders;
 }
 
+// Batch delete (e.g. "clear all completed"): cancels every affected
+// notification, then writes the result in one saveReminders call rather than
+// one per id — a "delete all completed" that instead called deleteReminder in
+// a loop would serialize N separate AsyncStorage writes for no benefit, since
+// they all resolve to the same final list.
+export async function deleteReminders(
+  current: Reminder[],
+  ids: string[]
+): Promise<Reminder[]> {
+  const idSet = new Set(ids);
+  const targets = current.filter((r) => idSet.has(r.id));
+  await Promise.all(targets.map((r) => cancelNotification(r.notificationId)));
+  const reminders = current.filter((r) => !idSet.has(r.id));
+  await saveReminders(reminders);
+  return reminders;
+}
+
 export async function toggleComplete(
   current: Reminder[],
   id: string
@@ -851,6 +888,7 @@ export async function snoozeReminder(
       title: target.title,
       body,
       alarm: alarmOn,
+      exactTiming: target.exactTiming !== false,
       channelId: channelIdForAlarm(alarmOn, await getVibrationEnabled()),
     },
     snoozeTarget
@@ -880,15 +918,12 @@ export async function rescheduleAllFutureReminders(): Promise<void> {
   let changed = false;
   const updated = await Promise.all(
     reminders.map(async (reminder) => {
-      // Notifications are scheduled ALARM_EARLY_OFFSET_MS before their
-      // datetime, so a reminder inside that window has ALREADY been delivered
-      // even though its datetime is still in the future. Rescheduling it here
-      // cancels nothing — cancelScheduledNotificationAsync only stops a
-      // pending trigger, it can't un-deliver a notification sitting in the
-      // tray — and shows a second copy, while overwriting notificationId so
-      // the first becomes an orphan nothing can cancel later.
-      const deliveryTime = new Date(reminder.datetime).getTime() - ALARM_EARLY_OFFSET_MS;
-      if (reminder.completed || deliveryTime <= now.getTime()) {
+      // A reminder whose datetime has passed has ALREADY been delivered.
+      // Rescheduling it cancels nothing — cancelScheduledNotificationAsync
+      // only stops a pending trigger, it can't un-deliver a notification
+      // sitting in the tray — and shows a second copy, while overwriting
+      // notificationId so the first becomes an orphan nothing can cancel.
+      if (reminder.completed || new Date(reminder.datetime).getTime() <= now.getTime()) {
         return reminder;
       }
       // Cancel by payload, not just by the stored id: a reminder that already
@@ -907,6 +942,75 @@ export async function rescheduleAllFutureReminders(): Promise<void> {
   if (changed) {
     await saveReminders(updated);
   }
+}
+
+/**
+ * True when a reminder is still eligible to have its alarm rewritten: not
+ * completed, and not already delivered.
+ *
+ * Rescheduling an already-delivered reminder cancels nothing —
+ * cancelScheduledNotificationAsync only stops a pending trigger — and shows a
+ * second copy while overwriting notificationId, orphaning the first. Same
+ * guard as rescheduleAllFutureReminders, and for the same reason.
+ */
+function isPendingForAlarmRewrite(reminder: Reminder, now: number): boolean {
+  if (reminder.completed) return false;
+  return new Date(reminder.datetime).getTime() > now;
+}
+
+/**
+ * How many pending reminders would actually change if the alarm default were
+ * flipped to `alarm`. Drives the retroactive prompt's copy, and its existence:
+ * zero means the Settings toggle stays a single silent tap.
+ */
+export function countPendingRemindersDisagreeingWithAlarm(
+  current: Reminder[],
+  alarm: boolean
+): number {
+  const now = Date.now();
+  return current.filter(
+    (r) => isPendingForAlarmRewrite(r, now) && (r.alarm !== false) !== alarm
+  ).length;
+}
+
+/**
+ * Rewrites the alarm value of every pending reminder that disagrees with
+ * `alarm`, rescheduling each onto the matching channel.
+ *
+ * The Settings toggle is only a DEFAULT for newly created reminders — nothing
+ * in the scheduling path reads it, so reminders created before a flip keep
+ * their own alarm value and keep ringing (or keep arriving late) forever. This
+ * is the opt-in retroactive half, invoked from the prompt shown when the
+ * setting changes; it is never applied automatically, since a per-reminder
+ * override is deliberate user intent.
+ *
+ * This changes SOUND only. Punctuality is carried independently by
+ * `exactTiming`, so silencing a reminder no longer makes it arrive late (see
+ * D7/D19/D25 in device-tests/).
+ */
+export async function setAlarmForPendingReminders(
+  current: Reminder[],
+  alarm: boolean
+): Promise<Reminder[]> {
+  const now = Date.now();
+  let changed = false;
+  const updated = await Promise.all(
+    current.map(async (reminder) => {
+      if (!isPendingForAlarmRewrite(reminder, now)) return reminder;
+      if ((reminder.alarm !== false) === alarm) return reminder;
+      // Cancel by payload as well as by stored id: a reminder that already
+      // picked up a duplicate has an orphan the stored id cannot reach.
+      await cancelScheduledForReminder(reminder.id);
+      await cancelNotification(reminder.notificationId);
+      const next = { ...reminder, alarm };
+      const notificationId = await scheduleNotification(next, next.id);
+      changed = true;
+      return { ...next, notificationId };
+    })
+  );
+  if (!changed) return current;
+  await saveReminders(updated);
+  return updated;
 }
 
 export async function loadReminderById(id: string): Promise<Reminder | undefined> {
@@ -957,6 +1061,7 @@ export async function buildBackupJson(): Promise<string> {
   const [
     reminders,
     defaultAlarmEnabled,
+    defaultExactTimingEnabled,
     showDescriptionEnabled,
     vibrationEnabled,
     dictationLanguage,
@@ -965,6 +1070,7 @@ export async function buildBackupJson(): Promise<string> {
   ] = await Promise.all([
     loadReminders(),
     getDefaultAlarmEnabled(),
+    getDefaultExactTimingEnabled(),
     getShowDescriptionEnabled(),
     getVibrationEnabled(),
     getDictationLanguage(),
@@ -974,6 +1080,7 @@ export async function buildBackupJson(): Promise<string> {
 
   return serializeBackup(reminders, {
     defaultAlarmEnabled,
+    defaultExactTimingEnabled,
     showDescriptionEnabled,
     vibrationEnabled,
     dictationLanguage,
@@ -1005,6 +1112,9 @@ export async function importRemindersFromJson(raw: string): Promise<ImportResult
   const settings = parsed.backup.settings;
   if (settings.defaultAlarmEnabled !== undefined) {
     await setDefaultAlarmEnabled(settings.defaultAlarmEnabled);
+  }
+  if (settings.defaultExactTimingEnabled !== undefined) {
+    await setDefaultExactTimingEnabled(settings.defaultExactTimingEnabled);
   }
   if (settings.showDescriptionEnabled !== undefined) {
     await setShowDescriptionEnabled(settings.showDescriptionEnabled);

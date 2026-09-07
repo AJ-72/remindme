@@ -1,0 +1,27 @@
+# Guards the 12-hour AM/PM time fix (backlog: "time shown under the input
+# textbox should be 12-hour with AM/PM, not 24-hour"). Checks both places a
+# time renders: the QuickAddInput suggestion pill (pre-save) and the
+# ReminderCard (post-save). Must never show 16:30/16.30 in either place.
+#
+# No clearState: some devices deny CLEAR_APP_USER_DATA to the adb shell user
+# (SecurityException from ActivityManagerService); not needed here anyway
+# since the assertions target this run's specific text, not an empty list.
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Time format check at 4.30 PM today"
+- assertVisible: "4:30 PM"
+- assertNotVisible: "16:30"
+- assertNotVisible: "16.30"
+- tapOn:
+    id: "quick-add-save"
+- assertVisible: "Today · 4:30 PM"
+- assertNotVisible: "16:30"
+- assertNotVisible: "16.30"
+

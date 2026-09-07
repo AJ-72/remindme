@@ -1,0 +1,22 @@
+# Guards the negated "Do not use Android Alarm feature" toggle (backlog:
+# "Arrive on time" was renamed and its polarity flipped in the UI while the
+# underlying exactTiming field kept its original meaning). Confirms the new
+# label renders and the row is reachable from a real device — Jest exercises
+# the storage-level negation, this confirms the actual rendered screen.
+appId: com.curios.remindme
+---
+- launchApp
+- tapOn: "Settings"
+- assertVisible: "Do not use Android Alarm feature"
+- assertNotVisible: "Arrive on time"
+- assertVisible: "Alarm sound"
+- scrollUntilVisible:
+    element:
+      text: "Backup & troubleshooting"
+    direction: DOWN
+- assertVisible: "Backup & troubleshooting"
+- assertNotVisible: "Debug logs"
+- tapOn: "Backup & troubleshooting"
+- assertVisible: "Debug logs"
+- assertVisible: "Back up reminders"
+- assertVisible: "Restore from backup"

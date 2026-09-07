@@ -2,7 +2,6 @@ import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getLocales } from "expo-localization";
 import {
-  ALARM_EARLY_OFFSET_MS,
   DEFAULT_ALARM_KEY,
   DICTATION_LANGUAGE_KEY,
   PERMISSION_ONBOARDING_KEY,
@@ -18,11 +17,13 @@ import {
   buildBackupJson,
   importRemindersFromJson,
   cancelScheduledForReminder,
+  scheduleNotification,
   channelIdForAlarm,
   getVibrationEnabled,
   setVibrationEnabled,
   VIBRATION_KEY,
   deleteReminder,
+  deleteReminders,
   editReminder,
   SNOOZE_PRESET_KEY,
   getDefaultAlarmEnabled,
@@ -36,6 +37,8 @@ import {
   markPermissionOnboardingComplete,
   requestNotificationPermissions,
   rescheduleAllFutureReminders,
+  setAlarmForPendingReminders,
+  countPendingRemindersDisagreeingWithAlarm,
   scheduleSnoozeNotification,
   USER_NAME_KEY,
   setupSnoozeCategory,
@@ -159,6 +162,28 @@ describe("deleteReminder", () => {
   });
 });
 
+describe("deleteReminders", () => {
+  it("removes every listed id and leaves the rest unchanged", async () => {
+    const r1 = makeReminder({ id: "r1" });
+    const r2 = makeReminder({ id: "r2" });
+    const r3 = makeReminder({ id: "r3" });
+    const result = await deleteReminders([r1, r2, r3], ["r1", "r3"]);
+    expect(result.map((r) => r.id)).toEqual(["r2"]);
+  });
+
+  it("does nothing for an empty id list", async () => {
+    const r1 = makeReminder({ id: "r1" });
+    const result = await deleteReminders([r1], []);
+    expect(result).toEqual([r1]);
+  });
+
+  it("ignores ids that don't match anything", async () => {
+    const r1 = makeReminder({ id: "r1" });
+    const result = await deleteReminders([r1], ["unknown"]);
+    expect(result).toEqual([r1]);
+  });
+});
+
 describe("toggleComplete", () => {
   it("flips the completed flag on the correct item", async () => {
     const r = makeReminder({ id: "r1", completed: false });
@@ -225,40 +250,83 @@ describe("toggleComplete", () => {
 });
 
 describe("notification scheduling", () => {
-  it("addReminder schedules the trigger ALARM_EARLY_OFFSET_MS before the reminder's datetime", async () => {
+  it("addReminder schedules the trigger at exactly the reminder's datetime", async () => {
     await addReminder([], {
       title: "A",
       description: "",
       datetime: FUTURE,
       alarm: true,
     });
-    const expectedTriggerDate = new Date(
-      new Date(FUTURE).getTime() - ALARM_EARLY_OFFSET_MS
-    );
     expect(scheduleNotificationAsync).toHaveBeenCalledWith(
       expect.objectContaining({
-        trigger: { type: "date", date: expectedTriggerDate },
+        trigger: { type: "date", date: new Date(FUTURE) },
       })
     );
   });
 
-  it("does not offset the trigger into the past for a reminder due sooner than the offset", async () => {
-    const almostNow = new Date(
-      Date.now() + ALARM_EARLY_OFFSET_MS / 2
-    ).toISOString();
-    const before = Date.now();
+  it("schedules an imminent reminder at its own datetime, never in the past", async () => {
+    const almostNow = new Date(Date.now() + 30 * 1000).toISOString();
     await addReminder([], {
       title: "A",
       description: "",
       datetime: almostNow,
       alarm: true,
     });
-    const after = Date.now();
     expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
     const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
-    const triggerMs = call.trigger.date.getTime();
-    expect(triggerMs).toBeGreaterThanOrEqual(before);
-    expect(triggerMs).toBeLessThanOrEqual(after);
+    expect(call.trigger.date.getTime()).toBe(new Date(almostNow).getTime());
+  });
+
+  // The `exactTiming` flag in content.data is the ONLY thing the native patch
+  // reads to decide between setAlarmClock() (punctual) and
+  // setExactAndAllowWhileIdle() (silently downgraded to inexact by ColorOS --
+  // see D7/D19/D25). If it stops reaching the payload, reminders go back to
+  // arriving minutes late with every JS test still green, so pin it here.
+  it("marks the notification payload exact by default", async () => {
+    await addReminder([], {
+      title: "A",
+      description: "",
+      datetime: FUTURE,
+      alarm: false,
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.data.exactTiming).toBe(true);
+  });
+
+  it("carries exactTiming: false through to the notification payload", async () => {
+    await addReminder([], {
+      title: "A",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+      exactTiming: false,
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.data.exactTiming).toBe(false);
+  });
+
+  // Records written before this field existed have it undefined. They must
+  // stay punctual rather than silently regressing, which is why every read is
+  // `!== false` and not a plain truthiness check.
+  it("treats a reminder with no exactTiming field as exact", async () => {
+    const legacy = makeReminder({ datetime: FUTURE });
+    delete (legacy as Partial<Reminder>).exactTiming;
+    await scheduleNotification(legacy, legacy.id);
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.data.exactTiming).toBe(true);
+  });
+
+  // exactTiming and alarm are independent: a silent reminder is still punctual.
+  it("keeps a silent reminder exact", async () => {
+    await addReminder([], {
+      title: "A",
+      description: "",
+      datetime: FUTURE,
+      alarm: false,
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.data.alarm).toBe(false);
+    expect(call.content.data.exactTiming).toBe(true);
   });
 
   it("addReminder does not schedule for past-dated reminders", async () => {
@@ -281,12 +349,9 @@ describe("notification scheduling", () => {
       alarm: true,
     });
     expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("old-notif");
-    const expectedTriggerDate = new Date(
-      new Date(NEW_FUTURE).getTime() - ALARM_EARLY_OFFSET_MS
-    );
     expect(scheduleNotificationAsync).toHaveBeenCalledWith(
       expect.objectContaining({
-        trigger: { type: "date", date: expectedTriggerDate },
+        trigger: { type: "date", date: new Date(NEW_FUTURE) },
       })
     );
   });
@@ -310,22 +375,21 @@ describe("notification scheduling", () => {
     expect(scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 
-  it("scheduleSnoozeNotification schedules at the given target minus the early offset", async () => {
+  it("scheduleSnoozeNotification schedules at exactly the given target", async () => {
     const target = new Date(Date.now() + 30 * 60 * 1000);
     const data: NotificationData = {
       reminderId: "r1",
       title: "Snoozed",
       body: "body",
       alarm: true,
+      exactTiming: true,
       channelId: "reminders-alarm",
     };
     await scheduleSnoozeNotification(data, target);
 
     expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
     const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
-    expect(call.trigger.date.getTime()).toBe(
-      target.getTime() - ALARM_EARLY_OFFSET_MS
-    );
+    expect(call.trigger.date.getTime()).toBe(target.getTime());
   });
 });
 
@@ -335,6 +399,7 @@ describe("snooze re-nudge personalization", () => {
     title: "Call the plumber",
     body: "body",
     alarm: true,
+    exactTiming: true,
     channelId: "reminders-alarm",
   };
 
@@ -495,15 +560,14 @@ describe("rescheduleAllFutureReminders", () => {
     expect(scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 
-  // The duplicate-notification bug: notifications fire ALARM_EARLY_OFFSET_MS
-  // before their datetime, so for that last minute a reminder has already been
-  // delivered while datetime is still in the future. Rescheduling it there
-  // cancels nothing (the notification is delivered, not pending) and shows a
-  // second copy — the stored id is overwritten, orphaning the first.
-  it("skips a reminder already delivered inside the early-trigger window", async () => {
+  // The duplicate-notification bug: a reminder whose datetime has passed has
+  // already been delivered. Rescheduling it cancels nothing (the notification
+  // is delivered, not pending) and shows a second copy — the stored id is
+  // overwritten, orphaning the first.
+  it("skips a reminder whose datetime has already passed", async () => {
     const r = makeReminder({
       completed: false,
-      datetime: new Date(Date.now() + ALARM_EARLY_OFFSET_MS / 2).toISOString(),
+      datetime: new Date(Date.now() - 30 * 1000).toISOString(),
     });
     (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
       JSON.stringify([r])
@@ -512,16 +576,192 @@ describe("rescheduleAllFutureReminders", () => {
     expect(scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 
-  it("still reschedules a reminder beyond the early-trigger window", async () => {
+  it("still reschedules a reminder whose datetime is in the future", async () => {
     const r = makeReminder({
       completed: false,
-      datetime: new Date(Date.now() + ALARM_EARLY_OFFSET_MS + 60 * 1000).toISOString(),
+      datetime: new Date(Date.now() + 2 * 60 * 1000).toISOString(),
     });
     (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
       JSON.stringify([r])
     );
     await rescheduleAllFutureReminders();
     expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("setAlarmForPendingReminders", () => {
+  // The whole point of the retroactive prompt: the Settings toggle is only a
+  // default for NEW reminders, so reminders created before the flip keep their
+  // own alarm value and keep ringing (or keep arriving late) until something
+  // rewrites them. This is that something.
+  it("silences pending reminders whose alarm disagrees", async () => {
+    const r = makeReminder({ id: "r1", alarm: true, datetime: FUTURE });
+
+    const result = await setAlarmForPendingReminders([r], false);
+
+    expect(result[0].alarm).toBe(false);
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns alarm on for pending silent reminders", async () => {
+    const r = makeReminder({ id: "r1", alarm: false, datetime: FUTURE });
+
+    const result = await setAlarmForPendingReminders([r], true);
+
+    expect(result[0].alarm).toBe(true);
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // A reminder with no alarm field predates the field (or came from a backup
+  // missing it) and is treated as alarm-on everywhere else — `!== false`, not
+  // `=== true`. Silencing must reach it; turning alarm on must not touch it.
+  it("treats a missing alarm field as alarm-on", async () => {
+    const legacy = makeReminder({ id: "r1", datetime: FUTURE });
+    delete (legacy as Partial<Reminder>).alarm;
+
+    const silenced = await setAlarmForPendingReminders([legacy], false);
+    expect(silenced[0].alarm).toBe(false);
+
+    jest.clearAllMocks();
+    const unchanged = await setAlarmForPendingReminders([legacy], true);
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+    expect(unchanged[0]).toBe(legacy);
+  });
+
+  it("leaves reminders that already agree untouched", async () => {
+    const r = makeReminder({ id: "r1", alarm: false, datetime: FUTURE });
+
+    const result = await setAlarmForPendingReminders([r], false);
+
+    expect(result[0]).toBe(r);
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+    expect(cancelScheduledNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it("skips completed reminders", async () => {
+    const r = makeReminder({ id: "r1", alarm: true, completed: true });
+
+    const result = await setAlarmForPendingReminders([r], false);
+
+    expect(result[0]).toBe(r);
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it("skips past-dated reminders", async () => {
+    const r = makeReminder({ id: "r1", alarm: true, datetime: PAST });
+
+    const result = await setAlarmForPendingReminders([r], false);
+
+    expect(result[0]).toBe(r);
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  // Same trap rescheduleAllFutureReminders guards: a past-dated reminder has
+  // already been DELIVERED, so rescheduling cancels nothing and shows a
+  // second copy.
+  it("skips a reminder whose datetime has already passed", async () => {
+    const r = makeReminder({
+      id: "r1",
+      alarm: true,
+      datetime: new Date(Date.now() - 30 * 1000).toISOString(),
+    });
+
+    const result = await setAlarmForPendingReminders([r], false);
+
+    expect(result[0]).toBe(r);
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it("cancels by payload as well as by stored id before rescheduling", async () => {
+    (getAllScheduledNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      { identifier: "orphan", content: { data: { reminderId: "r1" } } },
+    ]);
+    const r = makeReminder({ id: "r1", alarm: true, datetime: FUTURE });
+
+    await setAlarmForPendingReminders([r], false);
+
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("orphan");
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("notif-r1");
+  });
+
+  it("reschedules onto the silent channel when switching off", async () => {
+    jest.replaceProperty(Platform, "OS", "android");
+    const r = makeReminder({ id: "r1", alarm: true, datetime: FUTURE });
+
+    await setAlarmForPendingReminders([r], false);
+
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.data.alarm).toBe(false);
+    expect(call.content.data.channelId).toBe(channelIdForAlarm(false));
+  });
+
+  it("stores the new notification id so the reminder stays cancellable", async () => {
+    (scheduleNotificationAsync as jest.Mock).mockResolvedValueOnce("notif-new");
+    const r = makeReminder({ id: "r1", alarm: true, datetime: FUTURE });
+
+    const result = await setAlarmForPendingReminders([r], false);
+
+    expect(result[0].notificationId).toBe("notif-new");
+  });
+
+  it("changes only the disagreeing reminders in a mixed list", async () => {
+    const loud = makeReminder({ id: "r1", alarm: true, datetime: FUTURE });
+    const quiet = makeReminder({ id: "r2", alarm: false, datetime: FUTURE });
+    const done = makeReminder({ id: "r3", alarm: true, completed: true });
+
+    const result = await setAlarmForPendingReminders([loud, quiet, done], false);
+
+    expect(result.map((r) => r.alarm)).toEqual([false, false, true]);
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists the updated list", async () => {
+    const r = makeReminder({ id: "r1", alarm: true, datetime: FUTURE });
+
+    await setAlarmForPendingReminders([r], false);
+
+    const saved = (AsyncStorage.setItem as jest.Mock).mock.calls.find(
+      ([key]) => key === STORAGE_KEY
+    );
+    expect(saved).toBeDefined();
+    expect(JSON.parse(saved![1])[0].alarm).toBe(false);
+  });
+
+  it("does not write storage when nothing changed", async () => {
+    const r = makeReminder({ id: "r1", alarm: false, datetime: FUTURE });
+
+    await setAlarmForPendingReminders([r], false);
+
+    const saved = (AsyncStorage.setItem as jest.Mock).mock.calls.find(
+      ([key]) => key === STORAGE_KEY
+    );
+    expect(saved).toBeUndefined();
+  });
+});
+
+describe("countPendingRemindersDisagreeingWithAlarm", () => {
+  it("counts pending reminders that would change", () => {
+    const list = [
+      makeReminder({ id: "r1", alarm: true, datetime: FUTURE }),
+      makeReminder({ id: "r2", alarm: false, datetime: FUTURE }),
+      makeReminder({ id: "r3", alarm: true, completed: true }),
+      makeReminder({ id: "r4", alarm: true, datetime: PAST }),
+    ];
+
+    expect(countPendingRemindersDisagreeingWithAlarm(list, false)).toBe(1);
+    expect(countPendingRemindersDisagreeingWithAlarm(list, true)).toBe(1);
+  });
+
+  it("counts a missing alarm field as alarm-on", () => {
+    const legacy = makeReminder({ id: "r1", datetime: FUTURE });
+    delete (legacy as Partial<Reminder>).alarm;
+
+    expect(countPendingRemindersDisagreeingWithAlarm([legacy], false)).toBe(1);
+    expect(countPendingRemindersDisagreeingWithAlarm([legacy], true)).toBe(0);
+  });
+
+  it("returns zero for an empty list", () => {
+    expect(countPendingRemindersDisagreeingWithAlarm([], false)).toBe(0);
   });
 });
 

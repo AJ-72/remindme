@@ -1,0 +1,19 @@
+# Part 2 of 2 of the Malayalam-typing example. Runs after the driver script
+# has broadcast Malayalam text into the field focused by
+# malayalam_flow_a_focus.yaml via ADBKeyboard. Continues from wherever that
+# left the field: save, then assert on both the Malayalam script itself and
+# the numeral-clock-time parse it drove ("11.30" -> 11:30 AM), proving read
+# and write both work once the text is actually in the field.
+#
+# Expected input text (set by the driver script): "ആധാരം എഴുത്ത് ഇന്ന് 11.30"
+# ("deed writing today 11.30") -- the exact adversarial-sweep example from
+# system_learnings.md's 2026-09-01 numeral-clock-time entry.
+#
+# Run via the driver script, not directly: ..\run-malayalam-maestro-flow.ps1
+appId: com.curios.remindme
+---
+- tapOn:
+    id: "quick-add-save"
+- assertVisible: "ആധാരം എഴുത്ത്"
+- assertVisible: "Today · 11:30 AM"
+- assertNotVisible: "11:30 PM"

@@ -23,6 +23,7 @@ import type { PickableContact } from "@/services/ContactsService";
 import type { ReminderRecipient } from "@/services/ReminderService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import { getFontFamily } from "@/utils/getFontFamily";
+import { formatTime12h } from "@/utils/formatDatetime";
 
 type DateTimePickerEvent = { type: string; nativeEvent: object };
 const DateTimePicker: React.ComponentType<any> | null =
@@ -81,6 +82,11 @@ export default function AddReminderScreen() {
   const [alarm, setAlarm] = useState<boolean>(defaultAlarmEnabled);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  // Auto-grow height for the description box, driven by onContentSizeChange
+  // rather than a fixed minHeight — a fixed height either wastes space for a
+  // one-line description or clips a long one, unlike the quick-add bar's
+  // input which grows with its content up to a cap.
+  const [descriptionHeight, setDescriptionHeight] = useState(80);
   // The editor had no mic at all: dictation was reachable only from the
   // quick-add bar, so correcting a mis-heard reminder meant typing it out.
   const editDictation = useDictation(editTitle, setEditTitle);
@@ -104,7 +110,7 @@ export default function AddReminderScreen() {
     setRecipient(existing.recipient);
   }, [isEditing, existing]);
 
-  // Re-parse whenever input changes (not in edit mode — just use existing values)
+  // Re-parse whenever input changes (add mode)
   useEffect(() => {
     if (isEditing) return;
     const { title, date } = parseNaturalLanguage(input);
@@ -116,6 +122,26 @@ export default function AddReminderScreen() {
       setDateWasParsed(false);
     }
   }, [input, isEditing]);
+
+  // Re-parse the title in edit mode too, so typing e.g. "...tomorrow at 5pm"
+  // into an existing reminder's title updates the Date/Time preview instead
+  // of silently leaving the old datetime in place. Skipped until the initial
+  // seed from `existing` has landed (seededFromExisting), so the seed's own
+  // setEditTitle doesn't immediately re-parse and fight with the stored
+  // datetime. Only a title that actually contains a date phrase updates
+  // parsedDate — a title edited back to something dateless keeps whatever
+  // time was set last, since every edited reminder already has a real time
+  // and blanking it would be destructive rather than helpful.
+  useEffect(() => {
+    if (!isEditing || !seededFromExisting.current) return;
+    const { date } = parseNaturalLanguage(editTitle);
+    if (date) {
+      setParsedDate(date);
+      setDateWasParsed(true);
+    } else {
+      setDateWasParsed(false);
+    }
+  }, [editTitle, isEditing]);
 
   const handlePickerChange = (event: DateTimePickerEvent, selected: Date | undefined) => {
     if (Platform.OS === "android") setPickerMode(null);
@@ -169,10 +195,7 @@ export default function AddReminderScreen() {
     day: "numeric",
     year: "numeric",
   });
-  const formattedTime = parsedDate.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const formattedTime = formatTime12h(parsedDate);
 
   const canSave = !saving && !!(isEditing ? editTitle.trim() : parsedTitle || input.trim());
 
@@ -267,6 +290,17 @@ export default function AddReminderScreen() {
       color: colors.foreground,
       minHeight: 80,
       textAlignVertical: "top",
+    },
+    descriptionInput: {
+      fontSize: 16,
+      fontFamily: "Inter_400Regular",
+      color: colors.foreground,
+      textAlignVertical: "top",
+      // Grows to fit content (see descriptionHeight/onContentSizeChange)
+      // between a one-line minimum and a scrollable cap, matching the
+      // quick-add bar's feel instead of a fixed empty box.
+      minHeight: 24,
+      maxHeight: 200,
     },
     examplesWrap: {
       flexDirection: "row",
@@ -479,8 +513,10 @@ export default function AddReminderScreen() {
                   placeholderTextColor={colors.mutedForeground}
                   value={editTitle}
                   onChangeText={setEditTitle}
+                  multiline
                   maxLength={300}
                   returnKeyType="done"
+                  blurOnSubmit
                   testID="edit-title-input"
                 />
                 <Pressable
@@ -573,68 +609,24 @@ export default function AddReminderScreen() {
           <View style={styles.inputCard}>
             <Text style={styles.inputHint}>Description (optional)</Text>
             <TextInput
-              style={[styles.input, { fontFamily: getFontFamily(description, "400Regular") }]}
+              style={[
+                styles.descriptionInput,
+                { fontFamily: getFontFamily(description, "400Regular") },
+                { height: Math.min(Math.max(descriptionHeight, 24), 200) },
+              ]}
               placeholder="Add extra details…"
               placeholderTextColor={colors.mutedForeground}
               value={description}
               onChangeText={setDescription}
+              onContentSizeChange={(e) =>
+                setDescriptionHeight(e.nativeEvent.contentSize.height)
+              }
               multiline
               maxLength={1000}
               returnKeyType="done"
               blurOnSubmit
               testID="description-input"
             />
-          </View>
-
-          {/* Sending - deliberately worded as "message someone", never
-              "remind someone else": Tier 1 rings the SENDER's phone and the
-              recipient is never contacted unless the sender acts. */}
-          <View>
-            <Text style={styles.sectionLabel}>Remind Someone</Text>
-            <Pressable
-              testID="recipient-row"
-              style={styles.recipientRow}
-              onPress={() => setPickerVisible(true)}
-            >
-              <Feather
-                name={recipient ? "user-check" : "user-plus"}
-                size={16}
-                color={recipient ? colors.primary : colors.mutedForeground}
-              />
-              <View style={{ flex: 1 }}>
-                {recipient ? (
-                  <>
-                    <Text
-                      style={[
-                        styles.recipientName,
-                        { fontFamily: getFontFamily(recipient.name, "600SemiBold") },
-                      ]}
-                    >
-                      {recipient.name}
-                    </Text>
-                    <Text style={styles.recipientHint}>{recipient.phone}</Text>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.recipientName}>
-                      Remind me to message someone
-                    </Text>
-                    <Text style={styles.recipientHint}>
-                      Your phone rings; you send the message
-                    </Text>
-                  </>
-                )}
-              </View>
-              {recipient ? (
-                <Pressable
-                  testID="recipient-clear"
-                  hitSlop={10}
-                  onPress={() => setRecipient(undefined)}
-                >
-                  <Feather name="x" size={16} color={colors.mutedForeground} />
-                </Pressable>
-              ) : null}
-            </Pressable>
           </View>
 
           {/* Parsed preview */}
@@ -765,7 +757,9 @@ export default function AddReminderScreen() {
               )}
             </View>
           </View>
-          {/* Alarm toggle */}
+          {/* Alarm toggle — label/sublabel text kept identical to the Settings
+              screen's "Alarm sound" row (same setting, same wording, so it
+              doesn't read as a different control here). */}
           <View style={styles.alarmCard}>
             <Feather
               name={alarm ? "bell" : "bell-off"}
@@ -773,9 +767,9 @@ export default function AddReminderScreen() {
               color={alarm ? colors.primary : colors.mutedForeground}
             />
             <View style={{ flex: 1 }}>
-              <Text style={styles.alarmLabel}>Play alarm sound</Text>
+              <Text style={styles.alarmLabel}>Alarm sound</Text>
               <Text style={styles.alarmSubLabel}>
-                {alarm ? "Notification will play a sound" : "Notification will be silent"}
+                {alarm ? "Rings out loud" : "Silent — arrives without a sound"}
               </Text>
             </View>
             <Switch
@@ -787,6 +781,59 @@ export default function AddReminderScreen() {
               trackColor={{ false: colors.muted, true: colors.primary + "66" }}
               thumbColor={alarm ? colors.primary : colors.mutedForeground}
             />
+          </View>
+
+          {/* Sending - deliberately worded as "message someone", never
+              "remind someone else": Tier 1 rings the SENDER's phone and the
+              recipient is never contacted unless the sender acts. Placed last
+              so the primary reminder fields (title/description/date/time/
+              alarm) are settled before this less-common option. */}
+          <View>
+            <Text style={styles.sectionLabel}>Remind Someone</Text>
+            <Pressable
+              testID="recipient-row"
+              style={styles.recipientRow}
+              onPress={() => setPickerVisible(true)}
+            >
+              <Feather
+                name={recipient ? "user-check" : "user-plus"}
+                size={16}
+                color={recipient ? colors.primary : colors.mutedForeground}
+              />
+              <View style={{ flex: 1 }}>
+                {recipient ? (
+                  <>
+                    <Text
+                      style={[
+                        styles.recipientName,
+                        { fontFamily: getFontFamily(recipient.name, "600SemiBold") },
+                      ]}
+                    >
+                      {recipient.name}
+                    </Text>
+                    <Text style={styles.recipientHint}>{recipient.phone}</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.recipientName}>
+                      Remind me to message someone
+                    </Text>
+                    <Text style={styles.recipientHint}>
+                      Your phone rings; you send the message
+                    </Text>
+                  </>
+                )}
+              </View>
+              {recipient ? (
+                <Pressable
+                  testID="recipient-clear"
+                  hitSlop={10}
+                  onPress={() => setRecipient(undefined)}
+                >
+                  <Feather name="x" size={16} color={colors.mutedForeground} />
+                </Pressable>
+              ) : null}
+            </Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

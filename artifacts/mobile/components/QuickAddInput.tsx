@@ -27,7 +27,9 @@ import {
 } from "@/services/SpeechService";
 import type { PickableContact } from "@/services/ContactsService";
 import type { ReminderRecipient } from "@/services/ReminderService";
+import { formatTime12h } from "@/utils/formatDatetime";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
+import type { ParsedAmbiguity } from "@/utils/malayalamDateParser";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
 import { detectVagueOpener } from "@/utils/vagueTask";
 import { getFontFamily } from "@/utils/getFontFamily";
@@ -85,7 +87,7 @@ function formatDatePill(d: Date): string {
 }
 
 function formatTimePill(d: Date): string {
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return formatTime12h(d);
 }
 
 function formatSuggestedTime(d: Date): string {
@@ -122,6 +124,13 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [recipient, setRecipient] = useState<ReminderRecipient | undefined>(undefined);
   const [contactPickerVisible, setContactPickerVisible] = useState(false);
   const [quietPrompt, setQuietPrompt] = useState<Date | null>(null);
+  // A ref, not state: it is read inside the quiet-hours handlers on a later
+  // turn and never rendered, so a re-render for it would be noise.
+  const pendingTitleRef = useRef<string | undefined>(undefined);
+  // The parse the user still has to disambiguate, and the prompt showing it.
+  // Kept apart so a stale prompt cannot outlive the text that produced it.
+  const [ambiguity, setAmbiguity] = useState<ParsedAmbiguity | null>(null);
+  const [ambiguityPrompt, setAmbiguityPrompt] = useState<ParsedAmbiguity | null>(null);
   const [dismissedVagueText, setDismissedVagueText] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [listening, setListening] = useState(false);
@@ -185,9 +194,10 @@ export default function QuickAddInput({ onSaved }: Props) {
   }, [defaultAlarmEnabled]);
 
   useEffect(() => {
-    const { title, date } = parseNaturalLanguage(input);
+    const { title, date, ambiguity: parsedAmbiguity } = parseNaturalLanguage(input);
     setParsedTitle(title);
     setParsedDate(date);
+    setAmbiguity(parsedAmbiguity ?? null);
 
     if (date) {
       Animated.parallel([
@@ -202,31 +212,39 @@ export default function QuickAddInput({ onSaved }: Props) {
     }
   }, [input]);
 
-  const doSave = async (dateToUse: Date) => {
+  const doSave = async (dateToUse: Date, titleOverride?: string) => {
     // Ask, never block. The app defers its OWN alerts out of quiet hours
     // silently, but a time the user chose deliberately is a different thing -
     // refusing to set it is the only genuinely wrong move here.
     if (isQuietAt(dateToUse, quietHours)) {
       setQuietPrompt(dateToUse);
+      // The quiet-hours sheet resolves on its own turn of the loop, so the
+      // chosen title has to survive until then; parsedTitle is the wrong one
+      // whenever the user picked the "it's part of the reminder" reading.
+      pendingTitleRef.current = titleOverride;
       return;
     }
-    await performSave(dateToUse);
+    await performSave(dateToUse, titleOverride);
   };
 
   const handleQuietKeep = async () => {
     const target = quietPrompt;
+    const title = pendingTitleRef.current;
     setQuietPrompt(null);
-    if (target) await performSave(target);
+    pendingTitleRef.current = undefined;
+    if (target) await performSave(target, title);
   };
 
   const handleQuietMove = async () => {
     const target = quietPrompt;
+    const title = pendingTitleRef.current;
     setQuietPrompt(null);
-    if (target) await performSave(quietHoursEndAfter(target, quietHours));
+    pendingTitleRef.current = undefined;
+    if (target) await performSave(quietHoursEndAfter(target, quietHours), title);
   };
 
-  const performSave = async (dateToUse: Date) => {
-    const title = parsedTitle || input.trim();
+  const performSave = async (dateToUse: Date, titleOverride?: string) => {
+    const title = titleOverride ?? (parsedTitle || input.trim());
     if (!title.trim()) return;
     setSaving(true);
     try {
@@ -243,6 +261,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       setInput("");
       setParsedTitle("");
       setParsedDate(null);
+      setAmbiguity(null);
       // Back to the user's Settings default, not a hardcoded true — resetting
       // to true left a lit bell after every save even with sound turned off.
       alarmTouchedRef.current = false;
@@ -263,6 +282,15 @@ export default function QuickAddInput({ onSaved }: Props) {
     const title = parsedTitle || input.trim();
     if (!title.trim()) return;
 
+    // A numeral that could be the hour or could be part of the reminder is a
+    // coin flip the app must not call on the user's behalf: guessing "time"
+    // silently deletes the number from what they typed. Ask once, then save.
+    if (ambiguity) {
+      setAmbiguityPrompt(ambiguity);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      return;
+    }
+
     if (parsedDate) {
       await doSave(parsedDate);
     } else {
@@ -277,6 +305,17 @@ export default function QuickAddInput({ onSaved }: Props) {
     setPickerMode(null);
     setShowNoTimeSheet(false);
     await doSave(suggestedTime);
+  };
+
+  const handleAmbiguityChoice = async (reading: ParsedAmbiguity["asTime"]) => {
+    setAmbiguityPrompt(null);
+    setAmbiguity(null);
+    if (reading.date) {
+      await doSave(reading.date, reading.title);
+    } else {
+      setSuggestedTime(roundToNextHour(new Date()));
+      setShowNoTimeSheet(true);
+    }
   };
 
   const handleCancelNoTime = () => {
@@ -641,6 +680,31 @@ export default function QuickAddInput({ onSaved }: Props) {
       fontFamily: "Inter_600SemiBold",
       color: colors.primary,
     },
+    // One tappable row per reading: the resulting time on the left, the title
+    // it would save on the right, so the choice is shown rather than described.
+    choiceRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      marginTop: 10,
+    },
+    choiceLabel: {
+      fontFamily: "Inter_600SemiBold",
+      fontSize: 15,
+      color: colors.primary,
+    },
+    choiceDetail: {
+      flex: 1,
+      fontSize: 14,
+      color: colors.mutedForeground,
+      textAlign: "right",
+    },
     sheetBtnRow: {
       flexDirection: "row",
       gap: 12,
@@ -815,6 +879,21 @@ export default function QuickAddInput({ onSaved }: Props) {
         </View>
       </View>
 
+      {/* Shown only when the reminder being composed will actually be silent
+          AND that came from the Settings default rather than a deliberate tap.
+          Keyed off `alarm` (state) rather than alarmTouchedRef, since a ref
+          does not re-render — the hint has to clear the moment the bell is
+          tapped. Silence only: punctuality is carried independently by
+          exactTiming, so a silent reminder is no longer a late one. */}
+      {!defaultAlarmEnabled && !alarm && (
+        <View style={styles.vagueHint} testID="quick-add-silent-hint">
+          <Text style={styles.vagueHintText}>
+            Silent — arrives on time, without a sound. Tap the bell to make it
+            ring.
+          </Text>
+        </View>
+      )}
+
       {showVagueHint && (
         <View style={styles.vagueHint} testID="vague-task-hint">
           <Text style={styles.vagueHintText}>
@@ -920,6 +999,80 @@ export default function QuickAddInput({ onSaved }: Props) {
           </>
         )}
       </Animated.View>
+
+      <Modal
+        visible={ambiguityPrompt !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setAmbiguityPrompt(null)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setAmbiguityPrompt(null)}>
+          <Pressable onPress={() => {}} style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>
+              Is &quot;{ambiguityPrompt?.numberText}&quot; the time?
+            </Text>
+            <Text style={styles.sheetSubtitle}>
+              It could be the hour, or part of what you are reminding yourself about.
+            </Text>
+
+            {ambiguityPrompt && (
+              <>
+                <Pressable
+                  style={styles.choiceRow}
+                  onPress={() => handleAmbiguityChoice(ambiguityPrompt.asTime)}
+                  disabled={saving}
+                >
+                  <Text style={styles.choiceLabel}>
+                    {ambiguityPrompt.asTime.date
+                      ? formatTimePill(ambiguityPrompt.asTime.date)
+                      : "Pick a time"}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.choiceDetail,
+                      { fontFamily: getFontFamily(ambiguityPrompt.asTime.title, "400Regular") },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {ambiguityPrompt.asTime.title}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.choiceRow}
+                  onPress={() => handleAmbiguityChoice(ambiguityPrompt.asText)}
+                  disabled={saving}
+                >
+                  <Text style={styles.choiceLabel}>
+                    {ambiguityPrompt.asText.date
+                      ? formatTimePill(ambiguityPrompt.asText.date)
+                      : "Pick a time"}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.choiceDetail,
+                      { fontFamily: getFontFamily(ambiguityPrompt.asText.title, "400Regular") },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {ambiguityPrompt.asText.title}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+
+            <View style={styles.sheetBtnRow}>
+              <Pressable
+                style={styles.sheetCancelBtn}
+                onPress={() => setAmbiguityPrompt(null)}
+              >
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={showNoTimeSheet}

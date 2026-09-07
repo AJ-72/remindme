@@ -1,0 +1,4 @@
+appId: com.curios.remindme
+---
+- launchApp:
+    clearState: true

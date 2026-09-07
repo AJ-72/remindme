@@ -308,7 +308,7 @@ Anand cancels at 07:59; Amma reschedules to 09:00 in the same minute.
 
 **Cancel wins whenever it reaches the device.** A cancelled appointment ringing anyway is the actively harmful outcome, and last-write-wins produces it. Amma is then told her edit was discarded because the sender cancelled.
 
-**But cancel is not absolute, and the spec must not claim it is.** The reminder is armed locally — that is the whole point of the mailbox architecture — so a cancel needs a push to reach the device. An offline or dozing phone will not get it. D27 tests that an accepted reminder fires correctly *in aeroplane mode*, so the first draft of this spec shipped a device test verifying the exact condition under which its strongest promise fails (see "Known defects" #2).
+**But cancel is not absolute, and the spec must not claim it is.** The reminder is armed locally — that is the whole point of the mailbox architecture — so a cancel needs a push to reach the device. An offline or dozing phone will not get it. D29 tests that an accepted reminder fires correctly *in aeroplane mode*, so the first draft of this spec shipped a device test verifying the exact condition under which its strongest promise fails (see "Known defects" #2).
 
 **Mechanism.** The alarm **fires immediately and is never blocked on the
 network.** In parallel the device checks the server; if the reminder was
@@ -386,6 +386,8 @@ Every table gets an RLS policy. RLS was a primary reason for choosing Supabase o
 
 `Reminder` gains `deliveryStatus?`, `remoteInvitationId?`, and reuses the existing `originalDatetime`.
 
+**It does not gain the sender's `alarm` or `exactTiming`, and the invitation does not carry them.** Those became two independent settings on 2026-09-05, and an accepted reminder is a local record created on the *recipient's* device, so the recipient's own defaults apply — `RemindersContext` already reads them at creation. Letting a sender set either would mean choosing whether a stranger's phone plays an alarm tone at 6am, which is precisely what accept-first exists to prevent, and it would break the rule that nobody can silently alter another person's device.
+
 ---
 
 ## Privacy and retention
@@ -441,7 +443,7 @@ That revisit is now, and the cap is in conflict with itself: on the fourth send 
 
 ## UI
 
-The Tier 1 "Sending" section is renamed **"Reminders for others"** — which is now *accurate*, since the recipient's phone genuinely rings. It holds both Tier 2 rows and Tier 1 fallback rows, and the heading is honest for both.
+The Tier 1 section — shipped as **"Remind Someone"** since 2026-09-06, not "Sending" as this spec originally said — is renamed **"Reminders for others"**, which is now *accurate*, since the recipient's phone genuinely rings. It holds both Tier 2 rows and Tier 1 fallback rows, and the heading is honest for both.
 
 Within it, **status is position, not decoration**: split into **"Waiting"** (invited) and **"Scheduled with them"** (accepted). The sender's actual question is "has this landed or not?" — a binary that position answers at a glance and a per-row chip does not. It also gives expiry somewhere honest to live: an expired invitation visibly drops out of "Waiting" instead of sitting there looking fine.
 
@@ -530,7 +532,7 @@ An adversarial review of the first draft ([`docs/reviews/tier2-adversarial-revie
 
 **#3 No identity recovery.** *Valid, and the same bug as #1.* Root cause in one sentence: **without number verification you cannot distinguish "Amma reinstalling" from "an attacker claiming Amma's number."** The review listed these separately; seeing them as one made both resolvable. Also a fair hit on inconsistent reasoning — the first draft rejected E2E *because* device state is routinely lost, then built identity on a device key anyway. **Resolved** by rebind-on-reverify, bounded at 45 days. See "Reinstall, migration, and recycled numbers".
 
-**#2 Cancel unenforceable offline.** *Valid.* The review did not notice how explicit the contradiction already was: **D27 tests the exact failing condition.** **Resolved** by fire-first-check-in-parallel plus honest copy — but *not* by the review's proposed blocking server check, which would put a network round-trip inside the alarm window and trade away this app's hardest-won property. See "Concurrent edits".
+**#2 Cancel unenforceable offline.** *Valid.* The review did not notice how explicit the contradiction already was: **D29 tests the exact failing condition.** **Resolved** by fire-first-check-in-parallel plus honest copy — but *not* by the review's proposed blocking server check, which would put a network round-trip inside the alarm window and trade away this app's hardest-won property. See "Concurrent edits".
 
 ### P1/P2 — accepted
 
@@ -565,4 +567,4 @@ An adversarial review of the first draft ([`docs/reviews/tier2-adversarial-revie
 
 Green Jest proves nothing here — most of this feature's failure modes are "never arrived", "arrived at the wrong time", or "arrived after the app was killed", none of which jsdom can observe.
 
-Device-test items land in `device-tests.md` in the same change as the feature, per that file's own maintenance rule. See **D25–D31**.
+Device-test items land in [`device-tests/remind-others.md`](../../../device-tests/remind-others.md) in the same change as the feature, per that folder's own maintenance rule. See **D27–D37**.

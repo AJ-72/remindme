@@ -6,6 +6,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from "react-native";
@@ -38,6 +39,7 @@ export default function ReminderDetailScreen() {
     deleteReminder,
     snoozePreset,
     setSnoozePreset,
+    editReminder,
   } = useReminders();
   const { id, openSnooze } = useLocalSearchParams<{
     id: string;
@@ -58,6 +60,21 @@ export default function ReminderDetailScreen() {
   const handleSnooze = () => {
     setSnoozeSheetVisible(true);
   };
+
+  // Per-reminder override of the Settings default. Goes through editReminder
+  // so the notification is cancelled and re-armed on the new API -- writing
+  // the field alone would leave the old, already-registered alarm in place.
+  // `exactTiming` keeps its original polarity in storage; only the switch
+  // below negates it for display, to match the Settings screen's "Do not use
+  // Android Alarm feature" framing.
+  const handleToggleExactTiming = async (value: boolean) => {
+    if (!reminder) return;
+    const { id: _id, completed, notificationId, ...rest } = reminder;
+    await editReminder(reminder.id, { ...rest, exactTiming: value });
+  };
+
+  const handleToggleDisableExactAlarm = (disable: boolean) =>
+    handleToggleExactTiming(!disable);
 
   const handleSelectSnoozePreset = async (preset: SnoozePreset) => {
     setSnoozeSheetVisible(false);
@@ -142,6 +159,27 @@ export default function ReminderDetailScreen() {
       fontSize: 14,
       fontFamily: "Inter_500Medium",
       color: colors.mutedForeground,
+    },
+    settingRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      marginBottom: 16,
+      borderRadius: 12,
+      backgroundColor: colors.muted,
+    },
+    settingLabel: {
+      fontSize: 14,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.foreground,
+    },
+    settingSubLabel: {
+      fontSize: 12,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginTop: 2,
     },
     actionsWrap: { gap: 12 },
     actionBtn: {
@@ -244,6 +282,41 @@ export default function ReminderDetailScreen() {
             <Feather name="clock" size={14} color={colors.mutedForeground} />
             <Text style={styles.timeText}>{formatDatetime(reminder.datetime)}</Text>
           </View>
+
+          {/* Completed reminders have nothing pending to re-arm, so the
+              control would be inert -- hidden rather than shown disabled. */}
+          {!reminder.completed && (
+            <View style={styles.settingRow}>
+              <Feather
+                name={reminder.exactTiming === false ? "watch" : "clock"}
+                size={14}
+                color={
+                  reminder.exactTiming === false
+                    ? colors.mutedForeground
+                    : colors.primary
+                }
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingLabel}>Do not use Android Alarm feature</Text>
+                <Text style={styles.settingSubLabel}>
+                  {reminder.exactTiming === false
+                    ? "Your phone may delay this by several minutes"
+                    : "Fires at exactly the time you set"}
+                </Text>
+              </View>
+              <Switch
+                testID="detail-exact-timing-switch"
+                value={reminder.exactTiming === false}
+                onValueChange={handleToggleDisableExactAlarm}
+                trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+                thumbColor={
+                  reminder.exactTiming === false
+                    ? colors.primary
+                    : colors.mutedForeground
+                }
+              />
+            </View>
+          )}
 
           <View style={styles.actionsWrap}>
             <Pressable

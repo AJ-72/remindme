@@ -175,7 +175,7 @@ costed, and each function is where a rule can be forgotten.
 | T5.3 | Decline = "not this one" | **Never overload decline with "never again"** — that is what blocking is for |
 | T5.4 | Expiry at the reminder's datetime, sender told | "I sent it and assumed it landed" is the failure this whole tier exists to remove |
 
-> **At this point, stop and run D26, D27 and D32.** D27 in particular — an accepted reminder firing correctly in aeroplane mode after a reboot — is the claim that justifies the entire architecture. If it fails, the mailbox design bought nothing and the shape is wrong. Finding that out here is cheap; finding it out after Phase 10 is not.
+> **At this point, stop and run D28, D29 and D34.** D29 in particular — an accepted reminder firing correctly in aeroplane mode after a reboot — is the claim that justifies the entire architecture. If it fails, the mailbox design bought nothing and the shape is wrong. Finding that out here is cheap; finding it out after Phase 10 is not.
 
 ## Phase 6 — Status flow back and UI
 
@@ -227,20 +227,81 @@ costed, and each function is where a rule can be forgotten.
 
 ## Verification
 
-**Mobile Jest** (`npx jest` from `artifacts/mobile`) — 567 passing at Tier 1; all must stay green. Covers the client: normalization agreement, status transitions, reachability caching, UI sections, copy.
+**Mobile Jest** (`npx jest` from `artifacts/mobile`) — 830 passing as of the 2026-09-07 merge; all must stay green. Covers the client: normalization agreement, status transitions, reachability caching, UI sections, copy.
 
 **Server tests** — `pnpm --filter @workspace/db run test` (vitest + PGlite). RLS policies, the claim function, rate limiting. **This repo had never had these.** An untested RLS policy fails the way an untested alarm fails: silently, and only in production.
 
 **Typecheck** — `pnpm run typecheck` from root.
 
-**Device — Jest cannot see any of this.** D25–D35 in `device-tests.md`, all `BLOCKED` until the backend exists. **Six need two handsets with two numbers**, which is a setup cost to plan for, not discover. D30 needs two people.
+**Device — Jest cannot see any of this.** D27–D37 in [`device-tests/remind-others.md`](../../../device-tests/remind-others.md), all `BLOCKED` until the backend exists. **Six need two handsets with two numbers**, which is a setup cost to plan for, not discover. D32 needs two people.
 
-Highest-value early runs: **D32** (rung 1 shows no verification screen), **D33** (the WhatsApp link-preview token burn), **D27** (offline firing after reboot).
+Highest-value early runs: **D34** (rung 1 shows no verification screen), **D35** (the WhatsApp link-preview token burn), **D29** (offline firing after reboot).
 
 ## Before Phase 0 — two cheap things worth more than they cost
 
 1. **Run D1.** Android Auto Backup restoring reminders after a phone migration. `PENDING`, cheap, and now relevant to two features.
 2. **Test onboarding with one real target user.** The cheapest suggestion in the adversarial review. Rung 1 is a *theory* that an older parent goes from WhatsApp message to bound account without friction. Watching one person do it would confirm or destroy that in twenty minutes, before any of this is built.
+
+## What changed on `main` while this was being built (merged 2026-09-07)
+
+Eighteen commits landed on `main` between the spec being written and Phase 1
+finishing. Four of them touch this design.
+
+**1. Punctuality and sound are now separate settings, and the spec answers
+neither for a transferred reminder.** `88b60f4` added `exactTiming` (default
+ON) alongside `alarm`, because ColorOS/OxygenOS was silently demoting
+`setExactAndAllowWhileIdle()` to an inexact alarm — a silent reminder arrived
+up to 20 minutes late with no error anywhere. Non-alarm reminders now route
+through `setAlarmClock()` too. `Reminder` therefore carries **two**
+independent flags, and an accepted Tier 2 reminder is a local record on the
+recipient's device that needs both.
+
+**Decision: the recipient's own defaults apply, and the sender cannot set
+either flag.** This follows directly from the design's existing principle
+that *nobody can silently alter another person's device*. A sender who could
+force `alarm: true` could make a stranger's phone play an alarm tone at 6am,
+which is the same hole accept-first exists to close. `RemindersContext`
+already reads `getDefaultAlarmEnabled()`/`getDefaultExactTimingEnabled()` at
+creation, so the accept path gets this by doing nothing special — but only if
+nobody "helpfully" threads the sender's flags through the invitation. **The
+invitation schema deliberately carries neither**, and should not gain them.
+
+Second-order: every accepted reminder now claims the system's
+next-alarm-clock display slot (that is the trade `88b60f4` documents). A
+recipient with several accepted reminders has more contention for that slot
+than a Tier 1 user ever did. Not a blocker; worth watching in D29.
+
+**2. The home section shipped as "Remind Someone", not "Reminders for
+others".** The spec's UI section says Tier 1's section is renamed to
+"Reminders for others" at Tier 2. `ad4ac84` shipped it as **"Remind
+Someone"**. The rename is still right for the reason the spec gives — at
+Tier 2 the recipient's phone genuinely does ring — but it is now a *rename of
+shipped copy*, not a naming decision, and the strings live in
+`app/(tabs)/index.tsx`.
+
+**3. Settings has a real section structure now**, also from `ad4ac84`: "You",
+"When reminders go off", "What notifications show", "Voice input", then
+ungrouped rows. Tier 2's settings — "Let people remind you", discoverability,
+the blocked list, account deletion — need a home. **Put them under "You"**,
+which is where identity already lives; a separate "People" section would
+split account settings across two places.
+
+**4. There is a device-test harness now.** `951ab66` added Maestro flows, a
+`device-test` skill, and split `device-tests.md` into `device-tests/`. Two
+consequences: the Tier 2 checks moved to
+[`device-tests/remind-others.md`](../../../device-tests/remind-others.md) and
+were **renumbered D25-D35 → D27-D37** (main had taken D24-D26 for other
+things), and several of them are more automatable than "two handsets" implied
+— the setup halves at least. Also note `clearState: true` and `pm clear` both
+fail on the test device with a `CLEAR_APP_USER_DATA` permission error, so no
+Tier 2 flow can assume a clean install.
+
+**Not affecting this plan, but worth knowing:** `app/backup.tsx` now exists,
+which gives T10.1 (in-app account deletion) somewhere obvious to live; the
+mobile suite is at **830** tests, not the 567 quoted in the Verification
+section below.
+
+---
 
 ## Risks
 

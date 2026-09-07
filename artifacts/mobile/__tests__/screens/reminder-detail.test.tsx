@@ -79,6 +79,52 @@ describe("ReminderDetailScreen", () => {
     expect(await findByText("Some details")).toBeTruthy();
   });
 
+  // The per-reminder override of the global "Do not use Android Alarm
+  // feature" default. The switch is negated relative to the stored
+  // `exactTiming` field (switch ON means the alarm feature is disabled), so a
+  // reminder with no stored preference (exactTiming defaults to precise/on)
+  // shows the switch OFF. Writing the field is not enough on its own -- the
+  // notification has to be re-armed so the already-registered alarm is
+  // replaced, which editReminder does.
+  it("defaults the exact-timing switch off (alarm feature enabled) for a reminder with no stored preference", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("detail-exact-timing-switch");
+    expect(switchEl.props.value).toBe(false);
+  });
+
+  it("reflects a stored exactTiming: false as the switch ON (alarm feature disabled)", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ exactTiming: false })])
+    );
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("detail-exact-timing-switch");
+    expect(switchEl.props.value).toBe(true);
+  });
+
+  it("persists an exact-timing override without disturbing the reminder's other fields", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("detail-exact-timing-switch");
+
+    // Switching the (negated) "disable alarm feature" toggle ON is what
+    // writes exactTiming: false to storage.
+    await act(async () => {
+      fireEvent(switchEl, "valueChange", true);
+    });
+
+    await waitFor(async () => {
+      const stored = JSON.parse(
+        (await AsyncStorage.getItem(STORAGE_KEY)) as string
+      );
+      expect(stored[0].exactTiming).toBe(false);
+      expect(stored[0].title).toBe("Test reminder");
+      expect(stored[0].description).toBe("Some details");
+      expect(stored[0].datetime).toBe(FUTURE);
+    });
+  });
+
   it("shows the already-handled message when the reminder is missing", async () => {
     const { findByText } = renderScreen();
     expect(

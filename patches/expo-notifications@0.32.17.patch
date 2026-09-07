@@ -15,19 +15,28 @@ index eddd1422c5048da9aa2cecb6445d4781b62767c4..eb5d9fb3041b771639557b28c9a90f6c
        }
      }
    }
-@@ -102,21 +106,77 @@ class ExpoSchedulingDelegate(protected val context: Context) : SchedulingDelegat
+@@ -102,21 +106,89 @@ class ExpoSchedulingDelegate(protected val context: Context) : SchedulingDelegat
      }
    }
  
 -  private fun setupAlarm(triggerAtMillis: Long, operation: PendingIntent) {
 -    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()) {
 +  /**
-+   * PATCH (remindme, see device-tests.md D7/D19). True when the JS side marked
-+   * this reminder as an alarm (`data.alarm`), which maps to NotificationContent
-+   * body. Only these use setAlarmClock().
++   * PATCH (remindme, see device-tests/ D7/D19/D25). True when this reminder
++   * should get a punctual, alarm-clock-backed trigger.
++   *
++   * Two independent JS flags, both reaching native as NotificationContent
++   * body (Expo maps JS `content.data` onto `body`):
++   *   - `alarm`      -- rings out loud. Absent => false.
++   *   - `exactTiming`-- arrives on time. Absent => TRUE, so notifications
++   *                     scheduled before this field existed (and any already
++   *                     sitting in the tray across the upgrade) stay punctual
++   *                     rather than silently regressing to inexact.
 +   */
-+  private fun isAlarmReminder(request: NotificationRequest): Boolean =
-+    request.content?.body?.optBoolean("alarm", false) ?: false
++  private fun isAlarmReminder(request: NotificationRequest): Boolean {
++    val body = request.content?.body ?: return true
++    return body.optBoolean("alarm", false) || body.optBoolean("exactTiming", true)
++  }
 +
 +  /**
 +   * PATCH (remindme, see device-tests.md D7/D19).
@@ -38,10 +47,13 @@ index eddd1422c5048da9aa2cecb6445d4781b62767c4..eb5d9fb3041b771639557b28c9a90f6c
 +   * and Doze then deferred delivery by 2-5 minutes. setAlarmClock() is honoured
 +   * (window=0, delivered 0ms late in forced Doze).
 +   *
-+   * It is applied ONLY to alarm-type reminders, because setAlarmClock() takes
-+   * over the system's single "next alarm clock" slot -- the one driving the
-+   * status-bar icon and the lock screen's next-alarm text. Using it for every
-+   * reminder would overwrite the user's real wake-up alarm in that display.
++   * setAlarmClock() takes over the system's single "next alarm clock" slot --
++   * the one driving the status-bar icon and the lock screen's next-alarm text.
++   * That slot is a DISPLAY slot, not a scheduling slot: every registered alarm
++   * still fires on time, so the user's real wake-up alarm is hidden from that
++   * one readout, never cancelled. Since an unpunctual reminder is a broken
++   * reminder, that trade is made by default and surfaced as the user-facing
++   * "Arrive on time" setting (global default + per-reminder override).
 +   */
 +  private fun setupAlarm(triggerAtMillis: Long, operation: PendingIntent, useAlarmClock: Boolean) {
 +    if (useAlarmClock) {

@@ -179,6 +179,121 @@ describe("HomeScreen", () => {
   });
 });
 
+describe("HomeScreen — Upcoming grouped by date", () => {
+  const iso = (daysFromNow: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + daysFromNow);
+    d.setHours(9, 0, 0, 0);
+    return d.toISOString();
+  };
+
+  it("labels a same-day reminder Today", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ id: "r1", title: "Today task", datetime: iso(0) })])
+    );
+    const { findByText } = renderScreen();
+    expect(await findByText("Today")).toBeTruthy();
+    expect(await findByText("Today task")).toBeTruthy();
+  });
+
+  it("labels a next-day reminder Tomorrow", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ id: "r1", title: "Tomorrow task", datetime: iso(1) })])
+    );
+    const { findByText } = renderScreen();
+    expect(await findByText("Tomorrow")).toBeTruthy();
+  });
+
+  it("labels a reminder 7+ days out as Later", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ id: "r1", title: "Distant task", datetime: iso(30) })])
+    );
+    const { findByText } = renderScreen();
+    expect(await findByText("Later")).toBeTruthy();
+  });
+
+  it("groups reminders across several buckets under one Upcoming section", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({ id: "r1", title: "Today task", datetime: iso(0) }),
+        makeReminder({ id: "r2", title: "Tomorrow task", datetime: iso(1) }),
+        makeReminder({ id: "r3", title: "Distant task", datetime: iso(30) }),
+      ])
+    );
+    const { findByText } = renderScreen();
+    expect(await findByText("Upcoming")).toBeTruthy();
+    expect(await findByText("Today")).toBeTruthy();
+    expect(await findByText("Tomorrow")).toBeTruthy();
+    expect(await findByText("Later")).toBeTruthy();
+  });
+});
+
+describe("HomeScreen — clear all completed", () => {
+  it("shows a Clear all action next to the Completed section", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ id: "r1", title: "Done task", completed: true })])
+    );
+    const { findByTestId } = renderScreen();
+    expect(await findByTestId("clear-completed-button")).toBeTruthy();
+  });
+
+  it("does not show Clear all when there are no completed reminders", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ id: "r1", title: "Pending task", completed: false })])
+    );
+    const { queryByTestId, findByText } = renderScreen();
+    await findByText("Pending task");
+    expect(queryByTestId("clear-completed-button")).toBeNull();
+  });
+
+  it("deletes every completed reminder, and none of the incomplete ones, on confirm", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({ id: "r1", title: "Done one", completed: true }),
+        makeReminder({ id: "r2", title: "Done two", completed: true }),
+        makeReminder({ id: "r3", title: "Still pending", completed: false }),
+      ])
+    );
+    const { findByText, findByTestId, queryByText } = renderScreen();
+    await findByText("Done one");
+
+    fireEvent.press(await findByTestId("clear-completed-button"));
+    expect(await findByText("Delete All Completed")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(await findByTestId("confirm-sheet-confirm"));
+    });
+
+    await waitFor(() => expect(queryByText("Done one")).toBeNull());
+    expect(queryByText("Done two")).toBeNull();
+    expect(await findByText("Still pending")).toBeTruthy();
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored.map((r: Reminder) => r.id)).toEqual(["r3"]);
+  });
+
+  it("cancelling the clear-all confirm sheet keeps every completed reminder", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ id: "r1", title: "Done task", completed: true })])
+    );
+    const { findByText, findByTestId } = renderScreen();
+    await findByText("Done task");
+
+    fireEvent.press(await findByTestId("clear-completed-button"));
+    fireEvent.press(await findByTestId("confirm-sheet-cancel"));
+
+    expect(await findByText("Done task")).toBeTruthy();
+  });
+});
+
 describe("HomeScreen — Remind Someone section", () => {
   it("puts an incomplete send reminder in Remind Someone, not Upcoming", async () => {
     await AsyncStorage.setItem(

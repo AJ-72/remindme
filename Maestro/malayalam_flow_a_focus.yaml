@@ -1,0 +1,20 @@
+# Part 1 of 2 of the Malayalam-typing example (see CLAUDE.md's Testing >
+# End-to-end tests (Maestro) section for why this is split). Pure Maestro,
+# nothing Unicode: launch and focus the input field so the ADBKeyboard
+# broadcast in between the two flows has somewhere to land.
+#
+# No clearState: some devices deny CLEAR_APP_USER_DATA to the adb shell user
+# (SecurityException from ActivityManagerService) -- and it isn't needed
+# here anyway, since flow B's assertions target the specific Malayalam text
+# just typed, not a known-empty list.
+#
+# Run via the driver script, not directly: ..\run-malayalam-maestro-flow.ps1
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+- tapOn:
+    id: "quick-add-input"
