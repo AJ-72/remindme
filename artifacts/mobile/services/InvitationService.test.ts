@@ -1,4 +1,4 @@
-import { sendInvitation } from "./InvitationService";
+import { sendInvitation, claimPendingInvitations } from "./InvitationService";
 import * as SessionService from "./SessionService";
 
 jest.mock("./SessionService");
@@ -44,5 +44,42 @@ describe("sendInvitation", () => {
     mockFetch.mockRejectedValue(new Error("network down"));
     const result = await sendInvitation("user-1", "X", "Y", "2026-09-09T08:00:00.000Z");
     expect(result).toEqual({ ok: false, error: "network_error" });
+  });
+});
+
+describe("claimPendingInvitations", () => {
+  const mockFetch = jest.fn();
+  beforeEach(() => {
+    mockFetch.mockReset();
+    // @ts-ignore
+    global.fetch = mockFetch;
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue({
+      access_token: "test-token",
+    });
+  });
+
+  it("returns the claimed invitations", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        claimed: [{ id: "inv-1", title: "X", description: "Y", datetime: "2026-09-09T08:00:00Z", senderId: "sender-1" }],
+      }),
+    });
+    const result = await claimPendingInvitations();
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("inv-1");
+  });
+
+  it("returns an empty array when there is no session, without calling fetch", async () => {
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(null);
+    const result = await claimPendingInvitations();
+    expect(result).toEqual([]);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty array (not a throw) on failure", async () => {
+    mockFetch.mockRejectedValue(new Error("network down"));
+    const result = await claimPendingInvitations();
+    expect(result).toEqual([]);
   });
 });

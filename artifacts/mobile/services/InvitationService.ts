@@ -40,3 +40,39 @@ export async function sendInvitation(
     return { ok: false, error: "network_error" };
   }
 }
+
+export interface ClaimedInvitation {
+  id: string;
+  title: string | null;
+  description: string | null;
+  datetime: string;
+  senderId: string;
+}
+
+/**
+ * Collects every pending invitation addressed to this account's bound
+ * number (T4.4). Call this right after a successful bind - that is why no
+ * deferred deep-linking is needed anywhere in this feature: the invitation
+ * is addressed to a number, not a device or install session, so it finds
+ * the recipient the moment binding proves ownership of that number.
+ */
+export async function claimPendingInvitations(): Promise<ClaimedInvitation[]> {
+  const session = await getCurrentSession();
+  if (!session) return [];
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/claim-invitations`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: SUPABASE_ANON_KEY,
+      },
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.claimed ?? [];
+  } catch {
+    return [];
+  }
+}
