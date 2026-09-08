@@ -105,5 +105,12 @@ begin
 end;
 $$;
 
-revoke all on function public.bind_via_invite_token(uuid) from public;
+-- `from public` alone is NOT enough on Supabase: every new project ships an
+-- ALTER DEFAULT PRIVILEGES that grants EXECUTE directly to `anon` and
+-- `authenticated` on any function created in schema public by `postgres`/
+-- `supabase_admin` - a grant to those roles by name, independent of the
+-- PUBLIC pseudo-role, which `revoke ... from public` cannot touch. Confirmed
+-- 2026-09-07 on the real project: anon had EXECUTE despite this line, saved
+-- only by the in-body auth check above. Name every role explicitly instead.
+revoke all on function public.bind_via_invite_token(uuid) from public, anon, authenticated;
 grant execute on function public.bind_via_invite_token(uuid) to authenticated;

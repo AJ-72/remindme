@@ -2,10 +2,12 @@
 
 [← index](README.md)
 
-Everything here is `BLOCKED` until the backend exists: there is no Supabase
-project and no Edge Functions yet, so none of it can be run today. They are
-written now because the design decisions they check are being made now, and a
-check written after the fact tends to be a check shaped to pass.
+Everything here is `BLOCKED` until the backend exists — there is no Supabase
+project and no Edge Functions yet, so none of it can be run today — **except
+D38**, which is pure on-device local storage and needs no backend at all.
+The `BLOCKED` ones are written now because the design decisions they check
+are being made now, and a check written after the fact tends to be a check
+shaped to pass.
 
 **Six of these need two handsets with two real phone numbers** — a setup cost
 worth planning for rather than discovering. D32 needs a second person.
@@ -23,6 +25,7 @@ worth planning for rather than discovering. D32 needs a second person.
 | [D33](#d33) | Tier 1 fallback for an unreachable recipient | `BLOCKED` | — | SEMI |
 | [D36](#d36) | Rebind on a new phone, and the 45-day cliff | `BLOCKED` | — | SEMI |
 | [D37](#d37) | Cancel while the recipient is offline | `BLOCKED` | — | SEMI |
+| [D38](#d38) | Device key persists across restart, absent on fresh install | `PENDING` | — | SEMI |
 
 Highest-value first runs once the backend lands: **D34** (rung 1 shows no
 verification screen at all — the claim the whole onboarding rests on),
@@ -289,3 +292,37 @@ marked cancelled. A's copy shows cancelled throughout.
 **Fails if.** The alarm is **late** (a blocking network check was added at alarm
 time - the thing this design explicitly refuses), or the notification survives
 reconnection, or B's copy stays live.
+
+<a id="d38"></a>
+## D38 — Device key persists across restart, absent on fresh install · `PENDING`
+T0.2/T0.3 (`services/DeviceIdentityService.ts`, `services/SessionService.ts`).
+Unlike the rest of this file, **this one needs no backend** - it's pure
+`expo-secure-store`, and Jest's manual mock of it (an in-memory `Map`) cannot
+prove the real native keystore-backed implementation behaves the same way on
+hardware. Run this as soon as a dev-client build with these files exists;
+don't wait for the rest of Tier 2.
+
+**Setup.** A dev-client build with `expo-secure-store` linked. No account, no
+binding UI exists yet - this checks the key alone.
+
+**Steps.**
+1. Fresh install. Before anything else runs, confirm no device key exists
+   (log it once from `app/_layout.tsx` during development, or inspect via
+   `adb shell` if rooted/emulator).
+2. Launch the app once - `getOrCreateDeviceKey()` should run and generate a
+   key. Record it.
+3. Force-stop the app (not just background it) and relaunch.
+4. Uninstall and reinstall the app, then launch again.
+
+**Pass.** Step 2 generates a key. Step 3's key is **identical** to step 2's -
+survives an app restart. Step 4's key is **different** from step 2/3's -
+absent on a fresh install, because SecureStore's backing keystore entry does
+not survive an uninstall.
+
+**Fails if.** The key changes across an ordinary restart (something is
+regenerating it instead of reading what's stored - Jest's concurrency test
+for this passes and would not catch a real double-write racing SecureStore's
+actual native call), or it survives an uninstall (would mean it leaked into
+something like Android Auto Backup, which is a privacy problem for an
+identity key - see `docs/superpowers/specs/2026-08-30-remind-someone-else-tier2-design.md`,
+"An account is not a bound phone number").

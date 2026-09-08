@@ -21,7 +21,7 @@ ships it.**
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14 |
 | [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete | D17, D18, D21, D23 |
 | [malayalam-parsing.md](malayalam-parsing.md) | On-device Malayalam input/parsing (numerals, ambiguous readings, AM/PM) | D24, + 2 unnumbered checklists |
-| [remind-others.md](remind-others.md) | M4 Tier 2, app-to-app delivery — all `BLOCKED` on a backend that does not exist yet | D27-D37 |
+| [remind-others.md](remind-others.md) | M4 Tier 2, app-to-app delivery — all `BLOCKED` on a backend that does not exist yet, except D38 (local-only) | D27-D38 |
 
 ## Status legend
 
@@ -93,6 +93,7 @@ discovering.
 | D33 | Tier 2: Tier 1 fallback for an unreachable recipient | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d33) |
 | D36 | Tier 2: rebind on a new phone, and the 45-day cliff | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d36) |
 | D37 | Tier 2: cancel while the recipient is offline | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d37) |
+| D38 | Tier 2: device key persists across restart, absent on fresh install | `PENDING` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d38) |
 
 **2026-09-04 note:** D4, D11, D16, D17, D18 moved from `PENDING` to
 `PARTIAL` — new Maestro flows (`Maestro/d4_*`, `d11_*`, `d16_*`, `d17_*`,
