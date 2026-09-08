@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { getLocales } from "expo-localization";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -21,6 +22,8 @@ import ContactPickerModal from "@/components/ContactPickerModal";
 import { useDictation } from "@/hooks/useDictation";
 import type { PickableContact } from "@/services/ContactsService";
 import type { ReminderRecipient } from "@/services/ReminderService";
+import { checkReachability, isReachabilityStale } from "@/services/RecipientLookupService";
+import { sendInvitation } from "@/services/InvitationService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { formatTime12h } from "@/utils/formatDatetime";
@@ -65,6 +68,10 @@ export default function AddReminderScreen() {
     undefined
   );
   const [pickerVisible, setPickerVisible] = useState(false);
+  // Low-key, additive Tier 2 status - never blocks the existing WhatsApp/
+  // local-reminder save (see handleSave). Intentionally minimal UI, expected
+  // to iterate; see report.
+  const [invitationError, setInvitationError] = useState<string | null>(null);
 
   // Natural language input (add mode only)
   const [input, setInput] = useState("");
@@ -165,11 +172,14 @@ export default function AddReminderScreen() {
       return;
     }
     setSaving(true);
+    setInvitationError(null);
     try {
+      const trimmedDescription = description.trim();
+      const datetimeIso = parsedDate.toISOString();
       const payload = {
         title: title.trim(),
-        description: description.trim(),
-        datetime: parsedDate.toISOString(),
+        description: trimmedDescription,
+        datetime: datetimeIso,
         alarm,
         // Spread rather than `recipient` so an unset value omits the key
         // entirely - `'recipient' in obj` is true even when it holds undefined.
@@ -180,6 +190,22 @@ export default function AddReminderScreen() {
       } else {
         await addReminder(payload);
       }
+
+      // Additive Tier 2 send - never blocks the Tier 1 save above, which has
+      // already completed by this point. A failure here degrades silently to
+      // the existing WhatsApp-link flow; only a low-key inline notice shows.
+      if (recipient?.appUserId && !isReachabilityStale(recipient.lookedUpAt)) {
+        const result = await sendInvitation(
+          recipient.appUserId,
+          title.trim(),
+          trimmedDescription,
+          datetimeIso
+        );
+        if (!result.ok) {
+          setInvitationError("Couldn't send in-app — you can still message via WhatsApp.");
+        }
+      }
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
     } catch {
@@ -812,6 +838,14 @@ export default function AddReminderScreen() {
                       {recipient.name}
                     </Text>
                     <Text style={styles.recipientHint}>{recipient.phone}</Text>
+                    {recipient.appUserId ? (
+                      <View style={[styles.parsedBadge, { alignSelf: "flex-start", marginTop: 6 }]}>
+                        <Feather name="zap" size={10} color={colors.primary} />
+                        <Text style={styles.parsedBadgeText} testID="recipient-in-app-badge">
+                          Has the app — will also send in-app
+                        </Text>
+                      </View>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -834,6 +868,11 @@ export default function AddReminderScreen() {
                 </Pressable>
               ) : null}
             </Pressable>
+            {invitationError ? (
+              <Text style={styles.micNoticeText} testID="invitation-error">
+                {invitationError}
+              </Text>
+            ) : null}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -844,8 +883,26 @@ export default function AddReminderScreen() {
         onSelect={(c: PickableContact) => {
           // Name is a SNAPSHOT - never re-resolved from contacts, so a deleted
           // contact or a revoked permission cannot break an existing reminder.
-          setRecipient({ name: c.name, phone: c.phone, contactId: c.contactId });
+          const picked: ReminderRecipient = {
+            name: c.name,
+            phone: c.phone,
+            contactId: c.contactId,
+          };
+          setRecipient(picked);
           setPickerVisible(false);
+          setInvitationError(null);
+          // Additive Tier 2 check - never blocks or delays showing the picked
+          // contact; the existing Tier 1 WhatsApp-link flow keeps working
+          // unmodified whether this resolves, fails, or is still in flight.
+          const deviceRegion = getLocales()[0]?.regionCode ?? null;
+          checkReachability(picked, deviceRegion).then((result) => {
+            if (!result) return;
+            setRecipient((current) =>
+              current && current.phone === picked.phone
+                ? { ...current, appUserId: result.appUserId, lookedUpAt: result.lookedUpAt }
+                : current
+            );
+          });
         }}
       />
 

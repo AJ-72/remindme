@@ -7,6 +7,8 @@ import AddReminderScreen from "@/app/add-reminder";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { STORAGE_KEY, type Reminder } from "@/services/ReminderService";
 import * as SpeechService from "@/services/SpeechService";
+import * as RecipientLookupService from "@/services/RecipientLookupService";
+import * as InvitationService from "@/services/InvitationService";
 
 jest.mock("expo-haptics");
 
@@ -188,6 +190,98 @@ describe("AddReminderScreen — recipient", () => {
     const { queryByText, findByText } = renderScreen();
     await findByText("Remind me to message someone");
     expect(queryByText("Remind someone else")).toBeNull();
+  });
+});
+
+// T4.1: wiring the reachability check (Task 5) and invitation send (Task 7's
+// Edge Function) into the existing Tier 1 flow. Additive only - a recipient
+// with no app must behave exactly as before these tests were added.
+describe("AddReminderScreen — Tier 2 reachability + invitation send", () => {
+  it("stores appUserId on the recipient when the picked contact is reachable", async () => {
+    jest.spyOn(RecipientLookupService, "checkReachability").mockResolvedValue({
+      appUserId: "user-1",
+      lookedUpAt: new Date().toISOString(),
+    });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText } = renderScreen();
+
+    fireEvent.press(await findByTestId("recipient-row"));
+    fireEvent.press(await findByText("Priya Menon"));
+
+    expect(await findByTestId("recipient-in-app-badge")).toBeTruthy();
+  });
+
+  it("calls sendInvitation with the reminder's fields when saving a reachable recipient", async () => {
+    jest.spyOn(RecipientLookupService, "checkReachability").mockResolvedValue({
+      appUserId: "user-1",
+      lookedUpAt: new Date().toISOString(),
+    });
+    const sendInvitation = jest
+      .spyOn(InvitationService, "sendInvitation")
+      .mockResolvedValue({ ok: true, invitationId: "inv-1" });
+
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText } = renderScreen();
+
+    fireEvent.press(await findByTestId("recipient-row"));
+    fireEvent.press(await findByText("Priya Menon"));
+    await findByTestId("recipient-in-app-badge");
+
+    fireEvent.changeText(await findByTestId("edit-title-input"), "Take BP tablets");
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    expect(sendInvitation).toHaveBeenCalledWith(
+      "user-1",
+      "Take BP tablets",
+      "Original description",
+      expect.any(String)
+    );
+  });
+
+  it("still saves the local reminder and does not block on a sendInvitation failure", async () => {
+    jest.spyOn(RecipientLookupService, "checkReachability").mockResolvedValue({
+      appUserId: "user-1",
+      lookedUpAt: new Date().toISOString(),
+    });
+    jest
+      .spyOn(InvitationService, "sendInvitation")
+      .mockResolvedValue({ ok: false, error: "network_error" });
+
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText } = renderScreen();
+
+    fireEvent.press(await findByTestId("recipient-row"));
+    fireEvent.press(await findByText("Priya Menon"));
+    await findByTestId("recipient-in-app-badge");
+    fireEvent.press(await findByTestId("save-button"));
+
+    // The Tier 1 save must complete (router.back called) even though the
+    // Tier 2 send failed - never a blocking modal or a thrown exception.
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].recipient.appUserId).toBe("user-1");
+  });
+
+  it("does not call sendInvitation for a recipient with no app", async () => {
+    jest.spyOn(RecipientLookupService, "checkReachability").mockResolvedValue({
+      appUserId: null,
+      lookedUpAt: new Date().toISOString(),
+    });
+    const sendInvitation = jest.spyOn(InvitationService, "sendInvitation");
+
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText, queryByTestId } = renderScreen();
+
+    fireEvent.press(await findByTestId("recipient-row"));
+    fireEvent.press(await findByText("Priya Menon"));
+    await findByText("Priya Menon");
+
+    fireEvent.press(await findByTestId("save-button"));
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+
+    expect(queryByTestId("recipient-in-app-badge")).toBeNull();
+    expect(sendInvitation).not.toHaveBeenCalled();
   });
 });
 
