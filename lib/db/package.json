@@ -12,7 +12,9 @@
     "push-force": "drizzle-kit push --force --config ./drizzle.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "push:sql": "node src/applyServerSql.mjs"
+    "push:sql": "node src/applyServerSql.mjs",
+    "verify:rls": "vitest run --config vitest.rls-gate.config.ts",
+    "deploy": "pnpm run push && pnpm run push:sql && pnpm run verify:rls"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",
