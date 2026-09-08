@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-08 — MSG91 (the spec's preferred low-cost Indian OTP provider) is not a Supabase Auth native SMS provider
+
+**WHAT:** Built `artifacts/mobile/services/OtpService.ts` (T0.4) as a provider-agnostic `OtpProvider` interface (`send`/`verify`) with a placeholder `unconfiguredOtpProvider` that refuses every call, rather than picking or wiring a live SMS provider. Documented the finding and the two Phase-0 boundary decisions this closes in `docs/adr/0002-phase-0-decision-record.md` (T0.5).
+
+**WHY:** Confirmed against Supabase's own docs that Supabase Auth's *native* SMS provider support is Twilio, MessageBird, Vonage, and TextLocal (community-supported) only — MSG91, the spec's ~₹0.15-0.20/OTP domestic pick, is not on that list, and a docs search for "msg91" across Supabase's docs returns zero hits for native config. The only path to MSG91 is Supabase's Send SMS Hook (routing to a custom Edge Function), which Supabase's own docs name Msg91 as the worked example for — so this is the vendor's documented pattern, not a workaround being invented here. Twilio's India route stays available natively but at ~3x the per-OTP cost the spec budgets against. This is a real billing/vendor decision (which provider, whose account) left for a human rather than defaulted into — do not assume "wire up MSG91" is a mechanical task; it requires an account creation and either Twilio-native config or a new Edge Function before T2.3 (rung 2 OTP binding flow) can be built end-to-end. Also: fixed a first-draft ADR sentence that said "the app uses `unconfiguredOtpProvider`" in present tense — nothing calls it yet since no consumer exists until T2.3; caught by an independent adversarial review pass, not by the original author.
+
+**WHERE:** [artifacts/mobile/services/OtpService.ts](artifacts/mobile/services/OtpService.ts), [docs/adr/0002-phase-0-decision-record.md](docs/adr/0002-phase-0-decision-record.md), [docs/superpowers/plans/2026-08-30-remind-someone-else-tier2.md](docs/superpowers/plans/2026-08-30-remind-someone-else-tier2.md) (T0.4/T0.5 rows).
+
+---
+
 ## 2026-09-07 — Quick-add parser dropped the day when combined with "next/this month|year" ("23rd next month" → today's day-of-month, next month)
 
 **WHAT:** Detect the `<ordinal> (of)? next/this/last month|year` shape in English input before handing text to chrono-node, let chrono resolve month/year/time as before, then override the resolved date's day-of-month with the parsed ordinal (clamped to that month's actual length, e.g. "31st next month" from January → Feb 28). Also strips the ordinal phrase from the derived title so it doesn't leak into it. Added an optional `now` param to `parseNaturalLanguage` (default `new Date()`) for deterministic tests.
