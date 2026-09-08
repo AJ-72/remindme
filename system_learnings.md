@@ -9,6 +9,17 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-08 — `deno test` from the repo root mutates root `package.json`, and fails on `npm:@types/node` unless run with `--no-check`
+
+**WHAT:** Two gotchas hit scaffolding the new `supabase/functions/` Edge Functions project (Deno was not previously installed in this repo).
+
+1. **Running `deno test` from the repo root silently rewrites the root `package.json`**, injecting a `workspaces`/`catalog` block migrated from `pnpm-workspace.yaml` (Deno's own config auto-discovery "helpfully" imports pnpm workspace config it found nearby). This happened twice in a row, both reverted via `git checkout -- package.json`. Check `git status`/`git diff package.json` after every `deno test` invocation in this repo until this is worked around structurally (e.g. a `supabase/deno.json` that stops the upward config walk, or always invoking with a `--config` pointed inside `supabase/` — neither was found to work in the time spent; `--no-check` below was the actual fix for the second problem and coincidentally sidesteps needing to solve this one carefully, but the package.json mutation risk remains real on any bare `deno test`/`deno check` run from root).
+2. **`deno test` fails to resolve `npm:@types/node`** on any file importing `@supabase/supabase-js` via the `esm.sh` CDN (as `supabase/functions/_shared/supabaseClient.ts` does) — the esm.sh `.d.ts` files carry triple-slash `@types/node` references Deno's typechecker can't resolve without a node_modules dir, and adding one is not appropriate for a Deno-native Edge Functions project. Fixed by skipping typecheck at test time: **`deno test --no-check --allow-env --allow-net <file>`** is the correct invocation for every test in `supabase/functions/`. Runtime type safety for these files still comes from `tsc` elsewhere in the pipeline; `--no-check` here only skips Deno's own pass at test time.
+
+**WHY:** Both are Deno's config/dependency resolution reaching outside its own project directory into this repo's pnpm-workspace root, which Deno was never meant to see. No `supabase/deno.json` was found necessary or sufficient during this investigation — the working fix was the flag, not a config file.
+
+**WHERE:** `supabase/functions/_shared/supabaseClient.test.ts` (Task 1 of `docs/superpowers/plans/2026-09-08-tier2-phases-3-5.md`) is the first place this was hit; every later Edge Function task in that plan (`lookup`, `send-invitation`, `claim-invitations`, `respond-invitation`, `expire-invitations-cron`) needs the same `--no-check --allow-env --allow-net` invocation and the same post-run `git status` check.
+
 ## 2026-09-08 — Building an RLS deploy-verification script found three of its own bugs, each caught only by actually running it, not by inspection
 
 **WHAT:** `lib/db/src/verifyRls.ts` (see the entry below for why it exists) went through three real bugs during construction, none of which review alone caught — each was found by actually executing the script against the live Supabase project or a pure unit test, then fixed:
