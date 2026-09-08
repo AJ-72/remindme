@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-08 — `exists` is a reserved PostgreSQL keyword; a bare `returns table(..., exists boolean)` fails to parse
+
+**WHAT:** `hash_lookup()`'s intended signature — `returns table(app_user_id uuid, exists boolean)` — does not parse: `exists` is reserved in PostgreSQL (it's the `EXISTS (subquery)` operator keyword) and can't be used as a bare column name in a `returns table(...)` clause. Fixed by quoting it: `returns table(app_user_id uuid, "exists" boolean)`. This does NOT change the column's name from a JS/TS client's point of view — `supabase-js`'s `.rpc(...)` result still exposes the field as `row.exists`; the quoting is purely a DDL-parser requirement, not a rename.
+
+**WHY:** Non-obvious because the column name looks like ordinary English ("does it exist") and the failure is a hard parse error at function-creation time, not a runtime bug — easy to hit again the next time a boolean "does X exist" column is named naturally.
+
+**WHERE:** `lib/db/src/functions/hashLookup.sql`. Any future SQL function returning a bare `exists`, `end`, `order`, `user`, `table`, etc. column will hit the same class of error — quote the identifier, don't rename it, to keep client-side field names stable.
+
 ## 2026-09-08 — T1.10 closed: `bind_via_invite_token()` now purges stale unclaimed mail on a FRESH bind, not just via claim's content-expiry guard
 
 **WHAT:** `bind_via_invite_token()` (`lib/db/src/functions/bindViaInviteToken.sql`) previously left a real gap: an unclaimed invitation (`recipient_id is null`) does not cascade when the account holding its `recipient_phone_hash` is deleted, so a phone number recycled to a new owner could still have their predecessor's old unclaimed invitations sitting there. `claim_invitations()`'s `content_expires_at` guard only closed the case where 30+ days had passed since send; a number recycled faster than that was still exposed. Fixed by computing `was_fresh` (no prior `users` row for the caller) BEFORE the `insert into users ... on conflict` upsert, then — only when fresh — deleting every other unclaimed invitation under that same hash (excluding the just-bound row itself, `i.id <> inv.id`). A re-tap or rebind by an EXISTING account never purges, by construction (`was_fresh` is false).
