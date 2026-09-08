@@ -45,7 +45,8 @@ account is an operational/billing decision for a human, not something to
 default into while executing the plan. `artifacts/mobile/services/OtpService.ts`
 (T0.4) is built against a provider-agnostic `OtpProvider` interface
 (`send`/`verify`) so either choice — or the custom Edge Function path — slots
-in without changing call sites. Until that choice is made, the app uses
+in without changing call sites. No call site exists yet — that is T2.3's job.
+Until the provider choice is made, T2.3 wires the client to
 `unconfiguredOtpProvider`, which refuses every call rather than silently
 pretending to send an SMS.
 
