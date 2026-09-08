@@ -4,6 +4,7 @@
     "bindViaInviteToken.sql",
     "claimInvitations.sql",
     "hashLookup.sql",
-    "checkLookupRateLimit.sql"
+    "checkLookupRateLimit.sql",
+    "sendInvitation.sql"
   ]
 }
