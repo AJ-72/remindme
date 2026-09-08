@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-08 — T1.10 closed: `bind_via_invite_token()` now purges stale unclaimed mail on a FRESH bind, not just via claim's content-expiry guard
+
+**WHAT:** `bind_via_invite_token()` (`lib/db/src/functions/bindViaInviteToken.sql`) previously left a real gap: an unclaimed invitation (`recipient_id is null`) does not cascade when the account holding its `recipient_phone_hash` is deleted, so a phone number recycled to a new owner could still have their predecessor's old unclaimed invitations sitting there. `claim_invitations()`'s `content_expires_at` guard only closed the case where 30+ days had passed since send; a number recycled faster than that was still exposed. Fixed by computing `was_fresh` (no prior `users` row for the caller) BEFORE the `insert into users ... on conflict` upsert, then — only when fresh — deleting every other unclaimed invitation under that same hash (excluding the just-bound row itself, `i.id <> inv.id`). A re-tap or rebind by an EXISTING account never purges, by construction (`was_fresh` is false).
+
+**WHY:** Order matters here specifically because the upsert would otherwise make every caller look "not fresh" by the time the check ran — this is the kind of ordering bug this codebase's own SECURITY DEFINER conventions exist to catch via sabotage-testing (guard removed, confirm the specific new test fails for the right reason, not just any failure).
+
+**WHERE:** `lib/db/src/functions/bindViaInviteToken.sql`, tests in the sibling `.test.ts`. Part of `docs/superpowers/plans/2026-09-08-tier2-phases-3-5.md` Task 2, executed via subagent-driven-development. Local PGlite suite green (81 passed / 1 skipped); **not yet deployed** to the live `remindme-tier2` project — needs `DATABASE_URL` and explicit human confirmation before `pnpm --filter @workspace/db run deploy`, per this plan's deploy-gate convention.
+
 ## 2026-09-08 — `deno test` from the repo root mutates root `package.json`, and fails on `npm:@types/node` unless run with `--no-check`
 
 **WHAT:** Two gotchas hit scaffolding the new `supabase/functions/` Edge Functions project (Deno was not previously installed in this repo).
