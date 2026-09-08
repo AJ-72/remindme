@@ -21,13 +21,16 @@ describe("check_lookup_rate_limit", () => {
   });
 
   it("refuses the 21st call from the same account within a minute", async () => {
+    // device_key and ip vary per call so this isolates the per-account
+    // ceiling alone - reusing a fixed device/ip here would let the
+    // per-device or per-IP ceiling mask a broken per-account check.
     const db = await withUser();
     for (let i = 0; i < 20; i++) {
-      await db.asUser(AMMA, `select check_lookup_rate_limit('device-1', '1.2.3.4')`);
+      await db.asUser(AMMA, `select check_lookup_rate_limit('device-${i}', 'ip-${i}')`);
     }
     const result = await db.asUser(
       AMMA,
-      `select check_lookup_rate_limit('device-1', '1.2.3.4') as allowed`
+      `select check_lookup_rate_limit('device-final', 'ip-final') as allowed`
     );
     expect(result).toEqual([{ allowed: false }]);
     await db.close();
