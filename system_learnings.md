@@ -9,6 +9,22 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-08 — A rate-limit ceiling's own dedicated test can pass without exercising it, if the fixture also (coincidentally) trips a different ceiling
+
+**WHAT:** `check_lookup_rate_limit()`'s "refuses the 21st call from the same account within a minute" test originally reused the same `device_key`/`ip` for all 21 calls. That means the (real, correct) per-device ceiling independently trips at call 21 too — so sabotaging ONLY the per-account comparison (`per_account_minute <= 20` → `true`) left the test green, since the device check alone still failed the request. The account-ceiling logic itself was never broken; only its dedicated test wasn't actually isolating it. Verified via a temporary diagnostic test (same account, varying device/IP) that failed cleanly when the account check alone was sabotaged. Fixed by varying `device_key`/`ip` per call in the real test (matching how the device/IP tests already vary the OTHER two params), so each of the four ceiling tests now isolates its own dimension.
+
+**WHY:** When multiple independent guards can each cause the same observable failure (here: "call N is refused"), a test built by holding "the interesting" dimension constant and varying nothing else can pass for the wrong reason if another guard's default fixture values happen to also cross its own threshold at the same call count. Sabotage-checking a guard's OWN test isn't enough if the test's fixture doesn't hold every OTHER guard's inputs safely below their own thresholds.
+
+**WHERE:** `lib/db/src/functions/checkLookupRateLimit.test.ts`. General lesson for any future multi-dimensional rate-limit/guard test in this codebase: vary every dimension NOT under test per iteration, don't just reuse one fixed value, or a sabotage-check can pass by accident.
+
+## 2026-09-08 — Adding a 6th Drizzle table requires updating `schema.test.ts`'s pinned table-list guard, not just `schema/index.ts`
+
+**WHAT:** Adding `lookupRateLimitsTable` and re-exporting it from `lib/db/src/schema/index.ts` was not sufficient — `lib/db/src/schema/schema.test.ts` has an `"exposes every table the schema defines"` test that pins the exact table list as an array literal. A new table absent from that array fails the full suite even though the schema itself is correctly wired. Not called out as its own step anywhere in the task brief that added this table; found only by running the full suite and reading the failure.
+
+**WHY:** This is a deliberate guard (per CLAUDE.md: "a table file never re-exported from schema/index.ts is absent from the DDL... goes both untested and unpushed") — but its enforcement mechanism is a second, separate pinned list, not just the re-export. Anyone adding a table should expect to touch both files.
+
+**WHERE:** `lib/db/src/schema/schema.test.ts`. Relevant any time a new table is added to `lib/db/src/schema/`.
+
 ## 2026-09-08 — `exists` is a reserved PostgreSQL keyword; a bare `returns table(..., exists boolean)` fails to parse
 
 **WHAT:** `hash_lookup()`'s intended signature — `returns table(app_user_id uuid, exists boolean)` — does not parse: `exists` is reserved in PostgreSQL (it's the `EXISTS (subquery)` operator keyword) and can't be used as a bare column name in a `returns table(...)` clause. Fixed by quoting it: `returns table(app_user_id uuid, "exists" boolean)`. This does NOT change the column's name from a JS/TS client's point of view — `supabase-js`'s `.rpc(...)` result still exposes the field as `row.exists`; the quoting is purely a DDL-parser requirement, not a rename.
