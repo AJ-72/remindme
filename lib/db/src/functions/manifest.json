@@ -5,6 +5,7 @@
     "claimInvitations.sql",
     "hashLookup.sql",
     "checkLookupRateLimit.sql",
-    "sendInvitation.sql"
+    "sendInvitation.sql",
+    "getPushTokensForUser.sql"
   ]
 }
