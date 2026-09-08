@@ -279,6 +279,80 @@ describe("bind_via_invite_token", () => {
     await db.close();
   });
 
+  it("purges unclaimed invitations for the hash on a FRESH bind (recycled-number gap)", async () => {
+    const { db } = await withInvitation();
+    const staleToken = "11111111-1111-1111-1111-111111111111";
+    await db.asService(`
+      insert into invitations
+        (sender_id, recipient_phone_hash, bind_token, title, status, datetime,
+         original_datetime, expires_at, content_expires_at)
+      values
+        ('${ANAND}', 'hash-recycled', '${staleToken}', 'Old message for the previous owner',
+         'invited', now() + interval '1 hour', now() + interval '1 hour',
+         now() + interval '1 hour', now() + interval '1 hour');
+    `);
+
+    // A DIFFERENT token, bound by STRANGER (a fresh account, never bound before),
+    // to the SAME recycled hash.
+    const freshToken = "22222222-2222-2222-2222-222222222222";
+    await db.asService(`
+      insert into invitations
+        (sender_id, recipient_phone_hash, bind_token, title, status, datetime,
+         original_datetime, expires_at, content_expires_at)
+      values
+        ('${ANAND}', 'hash-recycled', '${freshToken}', 'Welcome message',
+         'invited', now() + interval '1 hour', now() + interval '1 hour',
+         now() + interval '1 hour', now() + interval '1 hour');
+    `);
+
+    await db.asUser(STRANGER, `select * from bind_via_invite_token('${freshToken}')`);
+
+    // The stale invitation (addressed to whoever held the number before) must
+    // no longer be claimable by the new owner.
+    const remaining = await db.asService(
+      `select bind_token from invitations where bind_token = '${staleToken}'`
+    );
+    expect(remaining).toEqual([]);
+    await db.close();
+  });
+
+  it("does NOT purge other invitations when the SAME account re-binds (idempotent re-tap)", async () => {
+    const { db } = await withInvitation();
+    const token = "33333333-3333-3333-3333-333333333333";
+    await db.asService(`
+      insert into invitations
+        (sender_id, recipient_phone_hash, bind_token, title, status, datetime,
+         original_datetime, expires_at, content_expires_at)
+      values
+        ('${ANAND}', 'hash-repeat', '${token}', 'Message', 'invited',
+         now() + interval '1 hour', now() + interval '1 hour',
+         now() + interval '1 hour', now() + interval '1 hour');
+    `);
+    await db.asUser(STRANGER, `select * from bind_via_invite_token('${token}')`);
+
+    // A second, unrelated pending invitation for the SAME hash, arriving after
+    // the bind. Re-tapping the same token again must not purge this - it is
+    // not "fresh", the account already exists.
+    const secondToken = "44444444-4444-4444-4444-444444444444";
+    await db.asService(`
+      insert into invitations
+        (sender_id, recipient_phone_hash, bind_token, title, status, datetime,
+         original_datetime, expires_at, content_expires_at)
+      values
+        ('${ANAND}', 'hash-repeat', '${secondToken}', 'Newer message', 'invited',
+         now() + interval '1 hour', now() + interval '1 hour',
+         now() + interval '1 hour', now() + interval '1 hour');
+    `);
+
+    await db.asUser(STRANGER, `select * from bind_via_invite_token('${token}')`); // re-tap
+
+    const stillThere = await db.asService(
+      `select bind_token from invitations where bind_token = '${secondToken}'`
+    );
+    expect(stillThere).toEqual([{ bind_token: secondToken }]);
+    await db.close();
+  });
+
   // Concurrency: two callers racing the same token cannot both be tested here
   // - the PGlite harness runs one transaction at a time, so there is no way
   // to construct a genuine race in this suite. The claim is a single atomic

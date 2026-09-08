@@ -95,11 +95,36 @@ begin
     end if;
   end if;
 
-  -- last_active_at bumps on a re-tap too - a re-tap is an unambiguous "I am
-  -- here" signal, and it is what the 45-day rebind window is measured from.
-  insert into public.users (id, phone_hash)
-  values (caller, inv.recipient_phone_hash)
-  on conflict (id) do update set last_active_at = now();
+  -- Whether this account existed BEFORE this call determines whether this is
+  -- a fresh bind (purge stale mail for the recycled hash) or a re-tap/rebind
+  -- of an existing account (never purge - an established account's own
+  -- pending mail must survive a repeat tap of the same link).
+  declare
+    was_fresh boolean;
+  begin
+    select not exists(select 1 from public.users u where u.id = caller)
+      into was_fresh;
+
+    -- last_active_at bumps on a re-tap too - a re-tap is an unambiguous "I am
+    -- here" signal, and it is what the 45-day rebind window is measured from.
+    insert into public.users (id, phone_hash)
+    values (caller, inv.recipient_phone_hash)
+    on conflict (id) do update set last_active_at = now();
+
+    if was_fresh then
+      -- T1.10: purge unclaimed invitations under this hash that predate this
+      -- bind. A fresh account binding a recycled number must not inherit mail
+      -- addressed to whoever held the number before - claim_invitations()'s
+      -- content_expires_at guard only covers the 30+-day case; this closes
+      -- the gap for a number recycled faster than that. The just-bound
+      -- invitation itself (inv.id) is excluded - it is this caller's own mail,
+      -- not stale mail from a predecessor.
+      delete from public.invitations i
+       where i.recipient_phone_hash = inv.recipient_phone_hash
+         and i.recipient_id is null
+         and i.id <> inv.id;
+    end if;
+  end;
 
   return query select * from public.users where id = caller;
 end;
