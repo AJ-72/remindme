@@ -65,8 +65,8 @@ The spec's build-order step 0. The first draft folded this into "schema" and und
 | T0.1 | **Server-side test harness** | **DONE 2026-08-30.** `lib/db/src/testing/rlsHarness.ts`, run by `pnpm --filter @workspace/db run test`. **No Docker, no Supabase CLI** — see below. Every later RLS task depends on it. |
 | T0.2 | Device key generation + `expo-secure-store` | Key generated once, never leaves the device. Assert it survives app restart and is absent on a fresh install |
 | T0.3 | Session handling in the mobile client | Anonymous-by-default; a session exists only after binding. A user who never binds must make **zero** network calls — assert this |
-| T0.4 | OTP provider account + send/verify wrapper | Behind an interface so the provider is swappable. Check whether the chosen Indian provider is natively supported by Supabase Auth; if not, this lives in an Edge Function |
-| T0.5 | Decision record for the two questions above | Committed to the plan or an ADR before Phase 1 |
+| T0.4 | OTP provider account + send/verify wrapper | **Wrapper DONE 2026-09-08** as `artifacts/mobile/services/OtpService.ts` — `OtpProvider` interface (`send`/`verify`), swappable, plus `unconfiguredOtpProvider` which refuses every call. **Provider account NOT chosen** — confirmed MSG91 (the spec's ~₹0.15-0.20 pick) is not one of Supabase Auth's native providers (Twilio/MessageBird/Vonage/TextLocal only), so it needs the Edge Function fallback the spec already names. See ADR 0002 |
+| T0.5 | Decision record for the two questions above | **DONE 2026-09-08** — [ADR 0002](../../adr/0002-phase-0-decision-record.md) closes this, pointing at ADR 0001 (question 1) and T0.1/PGlite (question 2), and records the T0.4 OTP-provider finding as a non-blocking follow-up before T2.3 |
 
 ## Phase 1 — Schema and RLS
 
