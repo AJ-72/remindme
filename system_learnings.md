@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-09 — PGlite returns a numeric `epoch` delta as a string, not a number; `toBe(0)` fails even when the value is truly zero
+
+**WHAT:** A test asserting `extract(epoch from (a - b))` equals zero via `expect(result[0].delta).toBe(0)` fails with `expected '0.000000' to be +0` — PGlite serializes the numeric result as a string. Fix: `Number(result[0].delta)).toBe(0)`, which asserts the same intended value correctly.
+
+**WHY:** Non-obvious because the underlying value genuinely is zero — the test LOOKS like it should pass, and the failure reads as a logic bug rather than a serialization quirk unless you check the actual returned type.
+
+**WHERE:** Hit in `lib/db/src/functions/sendInvitation.test.ts` (Task 6 of `docs/superpowers/plans/2026-09-08-tier2-phases-3-5.md`). General lesson: any PGlite test asserting a numeric SQL expression result with `.toBe(<number>)` should coerce with `Number(...)` first, not assume node-postgres/PGlite auto-coerces numeric types to JS numbers (see also the earlier `name[]`-not-coerced finding in the 2026-09-08 verifyRls entry — same class of issue, different type).
+
 ## 2026-09-08 — A rate-limit ceiling's own dedicated test can pass without exercising it, if the fixture also (coincidentally) trips a different ceiling
 
 **WHAT:** `check_lookup_rate_limit()`'s "refuses the 21st call from the same account within a minute" test originally reused the same `device_key`/`ip` for all 21 calls. That means the (real, correct) per-device ceiling independently trips at call 21 too — so sabotaging ONLY the per-account comparison (`per_account_minute <= 20` → `true`) left the test green, since the device check alone still failed the request. The account-ceiling logic itself was never broken; only its dedicated test wasn't actually isolating it. Verified via a temporary diagnostic test (same account, varying device/IP) that failed cleanly when the account check alone was sabotaged. Fixed by varying `device_key`/`ip` per call in the real test (matching how the device/IP tests already vary the OTHER two params), so each of the four ceiling tests now isolates its own dimension.
