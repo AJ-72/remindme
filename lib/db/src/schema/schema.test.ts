@@ -37,6 +37,7 @@ describe("schema-wide guarantees", () => {
       "devices",
       "invitations",
       "link_codes",
+      "lookup_rate_limits",
       "users",
     ]);
     await db.close();

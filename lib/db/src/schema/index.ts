@@ -20,4 +20,5 @@ export * from "./blocks";
 export * from "./devices";
 export * from "./invitations";
 export * from "./linkCodes";
+export * from "./lookupRateLimits";
 export * from "./users";

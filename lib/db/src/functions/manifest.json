@@ -3,6 +3,7 @@
   "functions": [
     "bindViaInviteToken.sql",
     "claimInvitations.sql",
-    "hashLookup.sql"
+    "hashLookup.sql",
+    "checkLookupRateLimit.sql"
   ]
 }
