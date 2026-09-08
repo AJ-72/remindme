@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-09 — A caller-scoped client can never read another user's row through per-owner RLS, even server-side in an Edge Function — needs its own SECURITY DEFINER function
+
+**WHAT:** The `send-invitation` Edge Function needed to read the RECIPIENT's `devices.expo_push_token` rows to deliver a push notification, but was built using the SENDER's own JWT-scoped `supabase-js` client (`getAuthedClient`, per ADR 0001's "act as the calling user" rule). `devices_select_own` RLS (`t.userId = auth.uid()`) means that client can only ever see the SENDER's own device rows — a cross-user read via `client.from("devices").select(...).eq("user_id", recipientId)` silently returns `[]` in production (not an error), so push delivery was dead code with no failure signal anywhere. A hand-written unit test with a fake Supabase client didn't catch it because the fake doesn't model RLS at all — it just returns whatever the test tells it to.
+
+**WHY:** This is the SAME structural shape as `claim_invitations()`/`bind_via_invite_token()`/`hash_lookup()` — a legitimate need to read a row RLS deliberately keeps another user from seeing directly. The fix follows the established pattern exactly: a new, narrow `SECURITY DEFINER` function (`get_push_tokens_for_user`, returns ONLY `expo_push_token`, nothing else about the recipient's devices) rather than reaching for a service-role client (which ADR 0001 correctly restricts to the cases that structurally need it). **Lesson for every future Edge Function in this repo: before writing `client.from(...)` against ANY table for a user id that isn't necessarily the caller, check that table's RLS policies first** — a caller-scoped client silently returning an empty result set (not an error) is the single hardest failure mode to notice, because everything "works" until a real second account is involved.
+
+**WHERE:** `lib/db/src/functions/getPushTokensForUser.sql`, `supabase/functions/send-invitation/index.ts`. Found reviewing Task 7 of `docs/superpowers/plans/2026-09-08-tier2-phases-3-5.md`. Relevant again for Task 11's invitation-preview screen, which needs to display the SENDER's display_name to the recipient — check `users` RLS (`users_select_self`, same `id = auth.uid()` shape) before assuming a direct client read works there too.
+
 ## 2026-09-09 — PGlite returns a numeric `epoch` delta as a string, not a number; `toBe(0)` fails even when the value is truly zero
 
 **WHAT:** A test asserting `extract(epoch from (a - b))` equals zero via `expect(result[0].delta).toBe(0)` fails with `expected '0.000000' to be +0` — PGlite serializes the numeric result as a string. Fix: `Number(result[0].delta)).toBe(0)`, which asserts the same intended value correctly.
