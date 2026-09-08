@@ -38,17 +38,25 @@ export async function handleSendInvitation(
   const invitation = data?.[0];
   if (!invitation) throw new Error("send_invitation returned no row");
 
-  const { data: devices } = await client
-    .from("devices")
-    .select("expo_push_token")
-    .eq("user_id", body.recipientAppUserId);
+  const { data: deviceRows } = await client.rpc("get_push_tokens_for_user", {
+    p_user_id: body.recipientAppUserId,
+  });
 
-  const tokens = (devices ?? []).map((d: { expo_push_token: string }) => d.expo_push_token);
+  const tokens = (deviceRows ?? []).map((d: { expo_push_token: string }) => d.expo_push_token);
   if (tokens.length > 0) {
-    await pushSender(tokens, {
-      title: "New reminder",
-      body: body.title,
-    });
+    try {
+      await pushSender(tokens, {
+        title: "New reminder",
+        body: body.title,
+      });
+    } catch {
+      // A push-delivery failure (e.g. fetch itself throwing on a network
+      // error inside sendExpoPush, which its own !res.ok check does not
+      // catch) must never fail the invitation send - the invitation is
+      // already created by this point via send_invitation() above, and
+      // T4.4's self-claiming registration means the recipient picks it up
+      // on next auth regardless of push.
+    }
   }
 
   return { invitation };

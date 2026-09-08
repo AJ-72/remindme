@@ -8,16 +8,14 @@ function fakeClient(opts: {
   return {
     rpc: async (fn: string) => {
       if (fn === "send_invitation") return { data: [opts.invitation], error: null };
-      throw new Error(`unexpected rpc ${fn}`);
-    },
-    from: (table: string) => ({
-      select: () => ({
-        eq: async () => ({
+      if (fn === "get_push_tokens_for_user") {
+        return {
           data: opts.deviceTokens.map((t) => ({ expo_push_token: t })),
           error: null,
-        }),
-      }),
-    }),
+        };
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    },
     // deno-lint-ignore no-explicit-any
   } as any;
 }
@@ -63,4 +61,24 @@ Deno.test("still returns the invitation when the recipient has no registered dev
   );
   assertEquals(result.invitation, { id: "inv-2" });
   assertEquals(pushCalled, false);
+});
+
+Deno.test("still returns the invitation when pushSender throws", async () => {
+  const client = fakeClient({
+    invitation: { id: "inv-3", title: "X" },
+    deviceTokens: ["ExponentPushToken[abc]"],
+  });
+  const result = await handleSendInvitation(
+    client,
+    {
+      recipientAppUserId: "user-3",
+      title: "X",
+      description: "Y",
+      datetime: new Date().toISOString(),
+    },
+    async () => {
+      throw new Error("network error");
+    }
+  );
+  assertEquals(result.invitation, { id: "inv-3", title: "X" });
 });
