@@ -1,4 +1,4 @@
-import { getCurrentSession } from "./SessionService";
+import { getCurrentSession, ensureSession, getSupabaseClient } from "./SessionService";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/constants/supabase";
 
 export type SendInvitationResult =
@@ -75,4 +75,29 @@ export async function claimPendingInvitations(): Promise<ClaimedInvitation[]> {
   } catch {
     return [];
   }
+}
+
+export type BindResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Rung 1 of the verification ladder (T2.4/T2.5, done at the DB layer; this
+ * wires it to the client for the first time). Establishes a session via
+ * ensureSession() - the ONE place in this codebase that call was always
+ * meant to run from, per SessionService's own header - then calls
+ * bind_via_invite_token() directly as an RPC. No Edge Function wrapper: the
+ * SQL function alone is the complete interface (no extra request-shaping,
+ * rate limiting, or push delivery needed here, unlike send-invitation).
+ */
+export async function bindViaInviteToken(token: string): Promise<BindResult> {
+  try {
+    await ensureSession();
+  } catch {
+    return { ok: false, error: "network_error" };
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client.rpc("bind_via_invite_token", { token });
+  if (error) return { ok: false, error: error.message };
+  if (!data || data.length === 0) return { ok: false, error: "bind_failed" };
+  return { ok: true };
 }

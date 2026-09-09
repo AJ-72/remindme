@@ -63,6 +63,22 @@ export async function hasSession(): Promise<boolean> {
   return (await getCurrentSession()) !== null;
 }
 
+/**
+ * The raw supabase-js client, for the rare caller that needs something this
+ * module doesn't wrap (e.g. an RPC call - see InvitationService.bindViaInviteToken).
+ * Per ADR 0001 this is NOT for reaching PostgREST/Realtime tables directly;
+ * it exists only for direct RPC calls to SECURITY DEFINER functions that are
+ * themselves the complete interface (no Edge Function wrapper needed).
+ *
+ * Same lazy-singleton client as every other accessor in this module - calling
+ * this does not itself make a network call or violate "zero calls until
+ * binding starts" (see module header); only whatever the caller does with it
+ * can.
+ */
+export function getSupabaseClient(): SupabaseClient {
+  return getClient();
+}
+
 let pendingEnsure: Promise<Session> | null = null;
 
 /**

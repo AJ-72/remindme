@@ -1,4 +1,4 @@
-import { sendInvitation, claimPendingInvitations } from "./InvitationService";
+import { sendInvitation, claimPendingInvitations, bindViaInviteToken } from "./InvitationService";
 import * as SessionService from "./SessionService";
 
 jest.mock("./SessionService");
@@ -81,5 +81,44 @@ describe("claimPendingInvitations", () => {
     mockFetch.mockRejectedValue(new Error("network down"));
     const result = await claimPendingInvitations();
     expect(result).toEqual([]);
+  });
+});
+
+describe("bindViaInviteToken", () => {
+  beforeEach(() => {
+    (SessionService.ensureSession as jest.Mock).mockReset();
+    (SessionService.getSupabaseClient as jest.Mock).mockReset();
+  });
+
+  it("establishes a session and returns ok:true on a successful bind", async () => {
+    (SessionService.ensureSession as jest.Mock).mockResolvedValue({ access_token: "t" });
+    const rpcMock = jest.fn().mockResolvedValue({ data: [{ id: "user-1" }], error: null });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+    const result = await bindViaInviteToken("some-token");
+
+    expect(result).toEqual({ ok: true });
+    expect(rpcMock).toHaveBeenCalledWith("bind_via_invite_token", { token: "some-token" });
+  });
+
+  it("returns ok:false with the server error when the token is invalid or spent", async () => {
+    (SessionService.ensureSession as jest.Mock).mockResolvedValue({ access_token: "t" });
+    const rpcMock = jest.fn().mockResolvedValue({
+      data: null,
+      error: { message: "invalid token" },
+    });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+    const result = await bindViaInviteToken("bad-token");
+
+    expect(result).toEqual({ ok: false, error: "invalid token" });
+  });
+
+  it("returns ok:false when ensureSession itself fails", async () => {
+    (SessionService.ensureSession as jest.Mock).mockRejectedValue(new Error("network down"));
+
+    const result = await bindViaInviteToken("some-token");
+
+    expect(result).toEqual({ ok: false, error: "network_error" });
   });
 });
