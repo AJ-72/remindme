@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-09 — Assigning a plain `text` parameter into an enum column needs an explicit cast in plpgsql, even inside an UPDATE's SET clause
+
+**WHAT:** `respond_to_invitation(p_response text)`'s `UPDATE ... SET status = p_response` failed until written as `status = p_response::public.invitation_status`. Caught by the TDD test run itself, not by inspection — the brief's own draft SQL was missing the cast.
+
+**WHY:** Postgres doesn't implicitly coerce `text` into a user-defined enum type on assignment, even when the enum's labels are valid text values matching the parameter — this is a real type-safety feature (catches a typo'd status string at the boundary), but it means every plpgsql function taking a `text` parameter that's meant to land in an enum column needs the explicit `::schema.enum_type` cast, or Postgres raises a type-mismatch error at that statement.
+
+**WHERE:** `lib/db/src/functions/respondToInvitation.sql`, Task 12 of `docs/superpowers/plans/2026-09-08-tier2-phases-3-5.md`. General lesson for this repo: check every future `SECURITY DEFINER` function writing into `invitations.status` (`invitationStatusEnum` in `lib/db/src/schema/invitations.ts`) or any other enum column for this exact pattern before trusting a first-draft SQL snippet.
+
 ## 2026-09-09 — Not every cross-user SECURITY DEFINER lookup needs a trusted-call-site guarantee — display_name got a deliberately relaxed authorization model
 
 **WHAT:** `get_sender_display_name(sender_id)` (Task 11, same RLS-gap shape as `get_push_tokens_for_user` — see the entry below) has NO check that the caller actually has an invitation from `sender_id`. Any authenticated user can resolve any other user's `display_name` given their id. This is a DELIBERATE, documented ruling, not an oversight.
