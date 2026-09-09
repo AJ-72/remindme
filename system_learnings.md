@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-09 — PGlite's RLS test harness needs a `service_role` role created (nologin, never authenticated-as) before any function's SQL can `grant execute ... to service_role`
+
+**WHAT:** `expire_invitations()` is the first function in this codebase granted only to `service_role` (not `authenticated`) — correct, since it's a maintenance sweep meant to run only from a scheduled Edge Function holding the service-role key, never client-triggered. Building its schema snapshot failed until `create role service_role nologin;` was added to `lib/db/src/testing/rlsHarness.ts`'s shared `AUTH_SHIM` — `GRANT ... TO service_role` is invalid DDL if that role doesn't exist yet, and PGlite starts with no such role (only `authenticated`/`anon` were ever created there).
+
+**WHY:** Non-obvious because this harness role is a pure DDL-validity stand-in, not a real capability — `nologin`, and nothing in the harness (`asUser`/`asAnon`/`asService`) ever actually switches into it, since Supabase's real `service_role` JWT claim has no equivalent PGlite auth path. Consequence for testing: **a "service_role-only" function's access-control guard cannot be positively sabotage-checked by authenticating AS service_role in this harness** — the only testable proxy is the negative case ("an ordinary `authenticated` caller has no EXECUTE grant, is refused"), which is what `expireInvitations.test.ts` does. This is the correct and only available test for this property here, not a weaker substitute chosen out of convenience.
+
+**WHERE:** `lib/db/src/testing/rlsHarness.ts` (`AUTH_SHIM`), `lib/db/src/functions/expireInvitations.sql`. Found in Task 14 of `docs/superpowers/plans/2026-09-08-tier2-phases-3-5.md`. Applies to any FUTURE function that should be `service_role`-only (a scheduled/cron sweep, a maintenance operation) — the role already exists in the harness now, no need to re-add it.
+
 ## 2026-09-09 — `RemindersContext.addReminder` always resolves `exactTiming` to a concrete boolean before calling the service — a spy on the service level can never see it absent
 
 **WHAT:** A test asserting `expect(data).not.toHaveProperty("exactTiming")` on a `jest.spyOn(ReminderService, "addReminder")` call fails even for correct code that never explicitly set `exactTiming`, because `RemindersContext.addReminder` (`contexts/RemindersContext.tsx` ~line 271) unconditionally computes `exactTiming: data.exactTiming !== undefined ? data.exactTiming : defaultExactTimingEnabled` before forwarding to the service — so the service-level call always has a concrete `exactTiming: boolean`, never `undefined`/absent. `alarm` has NO equivalent context-level injection (it stays optional and its default is applied later, at read time, inside `ReminderService` itself) — so an absence assertion on `alarm` is valid, but the same pattern on `exactTiming` is not.
