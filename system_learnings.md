@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-09 — Not every cross-user SECURITY DEFINER lookup needs a trusted-call-site guarantee — display_name got a deliberately relaxed authorization model
+
+**WHAT:** `get_sender_display_name(sender_id)` (Task 11, same RLS-gap shape as `get_push_tokens_for_user` — see the entry below) has NO check that the caller actually has an invitation from `sender_id`. Any authenticated user can resolve any other user's `display_name` given their id. This is a DELIBERATE, documented ruling, not an oversight.
+
+**WHY:** `get_push_tokens_for_user` (Task 7) is safe with no relationship check because it's ONLY ever called from inside the `send-invitation` Edge Function, immediately after `send_invitation()` has already succeeded — the trust boundary is the call site, not the function. `get_sender_display_name` is called directly from the recipient's own client with no equivalent trusted intermediary, so there's no call-site guarantee to lean on. The ruling: accept the wider blast radius anyway, because (a) `display_name` is not sensitive — it's literally shown to the recipient on invite regardless, and (b) the caller must already possess a valid `sender_id` (an unguessable uuid, not enumerable from this function alone). **Do not extend this function, or copy its no-relationship-check pattern, to return anything more sensitive than a name** — the ruling is specific to this one low-sensitivity field, not a general "skip the relationship check" precedent.
+
+**WHERE:** `lib/db/src/functions/getSenderDisplayName.sql`. Decided by the controller before dispatching Task 11 of `docs/superpowers/plans/2026-09-08-tier2-phases-3-5.md` (brief's original text only said "note this as a gap"; the controller resolved it directly since it was the same shape as an already-solved problem).
+
 ## 2026-09-09 — A caller-scoped client can never read another user's row through per-owner RLS, even server-side in an Edge Function — needs its own SECURITY DEFINER function
 
 **WHAT:** The `send-invitation` Edge Function needed to read the RECIPIENT's `devices.expo_push_token` rows to deliver a push notification, but was built using the SENDER's own JWT-scoped `supabase-js` client (`getAuthedClient`, per ADR 0001's "act as the calling user" rule). `devices_select_own` RLS (`t.userId = auth.uid()`) means that client can only ever see the SENDER's own device rows — a cross-user read via `client.from("devices").select(...).eq("user_id", recipientId)` silently returns `[]` in production (not an error), so push delivery was dead code with no failure signal anywhere. A hand-written unit test with a fake Supabase client didn't catch it because the fake doesn't model RLS at all — it just returns whatever the test tells it to.
