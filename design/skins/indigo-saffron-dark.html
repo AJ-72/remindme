@@ -1,0 +1,323 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; background: #080D18; font-family: 'Inter', system-ui, sans-serif; }
+    a { color: #E6B84A; } a:hover { color: #b8901f; }
+    .serif { font-family: 'Fraunces', Georgia, serif; }
+    .phone { width: 372px; background: #111827; border-radius: 30px; overflow: hidden; box-shadow: 0 24px 60px -18px rgba(0,0,0,0.8); }
+    .screen { display: flex; flex-direction: column; min-height: 900px; }
+    .lbl { font-size:11px; font-weight:700; letter-spacing:0.11em; text-transform:uppercase; color:#94A3B8; }
+    .grp { background:#1C2638; border-radius:16px; overflow:hidden; }
+    .rowdiv { border-top:1px solid #2B3750; }
+  </style>
+</helmet>
+<div style="padding: 48px; display:flex; gap: 36px; align-items:flex-start; background:#080D18;">
+
+  <!-- HOME -->
+  <div style="display:flex; flex-direction:column; gap:14px;">
+    <div class="serif" style="font-size:15px; font-weight:600; color:#E6B84A;">Midnight Indigo &amp; Saffron &middot; Dark</div>
+    <div class="phone">
+      <div class="screen">
+        <div style="padding:30px 22px 20px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div style="flex:1;">
+              <div class="serif" style="font-size:28px; font-weight:500; color:#F8F5ED; letter-spacing:-0.01em; line-height:1.15;">Good morning, Anand</div>
+              <div style="display:flex; gap:6px; align-items:center; margin-top:7px;">
+                <span style="font-size:13px; color:#94A3B8;">Sunday, 7 September</span>
+                <span style="font-size:13px; color:#697A96;">&middot;</span>
+                <span style="font-size:13px; color:#94A3B8;">4 upcoming</span>
+              </div>
+            </div>
+            <div style="width:38px; height:38px; border-radius:19px; background:#1C2638; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              <span class="serif" style="font-size:14px; font-weight:600; color:#E6B84A;">A</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- quick add: one container, not a card -->
+        <div style="padding:0 22px 20px;">
+          <div style="display:flex; align-items:center; gap:11px; background:#1C2638; border-radius:14px; padding:12px 14px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#697A96" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            <div style="flex:1; font-size:14px; color:#697A96;">Call dentist tomorrow at 3pm</div>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#E6B84A" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4"/></svg>
+          </div>
+        </div>
+
+        <div style="padding:0 22px 26px; flex:1;">
+          <div class="lbl" style="margin-bottom:2px;">Upcoming &middot; 4</div>
+
+          <!-- De-boxed list: hairline separators, no per-item card -->
+          <div style="display:flex; align-items:center; gap:9px; margin:16px 0 2px;"><span style="width:3px; height:14px; border-radius:2px; background:#E6B84A;"></span><span style="font-size:12px; font-weight:600; color:#E6B84A;">Today</span></div>
+
+          <div style="display:flex; gap:13px; align-items:flex-start; padding:14px 0; border-bottom:1px solid #1E293C;">
+            <div style="width:21px; height:21px; border-radius:11px; border:1.5px solid #3D4A63; flex-shrink:0; margin-top:2px;"></div>
+            <div style="flex:1;">
+              <div class="serif" style="font-size:17px; font-weight:500; color:#F8F5ED; line-height:1.3;">Call the dentist</div>
+              <div style="font-size:12.5px; color:#94A3B8; margin-top:3px;">Ask about the crown fitting</div>
+              <div style="font-size:11.5px; font-weight:500; color:#697A96; margin-top:6px;">9:30 AM</div>
+            </div>
+          </div>
+
+          <!-- priority / overdue: gold earns its place here -->
+          <div style="display:flex; gap:13px; align-items:flex-start; padding:14px 0; border-bottom:1px solid #1E293C;">
+            <div style="width:21px; height:21px; border-radius:11px; border:1.5px solid #3D4A63; flex-shrink:0; margin-top:2px;"></div>
+            <div style="flex:1;">
+              <div class="serif" style="font-size:17px; font-weight:500; color:#F8F5ED; line-height:1.3;">Pay electricity bill</div>
+              <div style="display:flex; align-items:center; gap:5px; margin-top:6px;">
+                <span style="width:5px; height:5px; border-radius:3px; background:#E6B84A;"></span>
+                <span style="font-size:11.5px; font-weight:600; color:#E6B84A;">Overdue &middot; 2:00 PM</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:9px; margin:20px 0 2px;"><span style="width:3px; height:14px; border-radius:2px; background:rgba(230,184,74,0.55);"></span><span style="font-size:12px; font-weight:600; color:#94A3B8;">Tomorrow</span></div>
+          <div style="display:flex; gap:13px; align-items:flex-start; padding:14px 0; border-bottom:1px solid #1E293C;">
+            <div style="width:21px; height:21px; border-radius:11px; border:1.5px solid #3D4A63; flex-shrink:0; margin-top:2px;"></div>
+            <div style="flex:1;">
+              <div class="serif" style="font-size:17px; font-weight:500; color:#F8F5ED; line-height:1.3;">Team standup notes</div>
+              <div style="font-size:11.5px; font-weight:500; color:#697A96; margin-top:6px;">10:00 AM</div>
+            </div>
+          </div>
+
+          <div class="lbl" style="margin:26px 0 2px;">Remind Someone &middot; 1</div>
+          <div style="display:flex; gap:13px; align-items:flex-start; padding:14px 0; border-bottom:1px solid #1E293C;">
+            <div style="width:21px; height:21px; border-radius:11px; border:1.5px solid #3D4A63; flex-shrink:0; margin-top:2px;"></div>
+            <div style="flex:1;">
+              <div class="serif" style="font-size:17px; font-weight:500; color:#F8F5ED; line-height:1.3;">Wish Priya happy birthday</div>
+              <div style="display:flex; align-items:center; gap:6px; margin-top:6px;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#86AFA5" stroke-width="2.2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                <span style="font-size:11.5px; font-weight:600; color:#86AFA5;">Priya</span>
+                <span style="font-size:11.5px; color:#3F5F58;">&middot;</span>
+                <span style="font-size:11.5px; font-weight:500; color:#697A96;">Tomorrow, 8:00 AM</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Completed: quieter, not faded — muted text, no opacity dimming -->
+          <div style="display:flex; justify-content:space-between; align-items:center; margin:26px 0 2px;">
+            <div class="lbl">Completed &middot; 1</div>
+            <div style="font-size:11px; font-weight:600; color:#697A96;">Clear all</div>
+          </div>
+          <div style="display:flex; gap:13px; align-items:flex-start; padding:14px 0;">
+            <div style="width:21px; height:21px; border-radius:11px; border:1.5px solid #3D4A63; background:#28344B; flex-shrink:0; margin-top:2px; display:flex; align-items:center; justify-content:center;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#86AFA5" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="serif" style="font-size:17px; font-weight:500; color:#697A96; line-height:1.3; text-decoration:line-through; text-decoration-color:#3D4A63;">Water the plants</div>
+              <div style="font-size:11.5px; font-weight:500; color:#55617A; margin-top:6px;">7:00 AM</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD REMINDER -->
+  <div style="display:flex; flex-direction:column; gap:14px;">
+    <div style="font-size:15px; opacity:0;">.</div>
+    <div class="phone">
+      <div class="screen">
+        <div style="padding:26px 22px 20px; display:flex; justify-content:space-between; align-items:center;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#86AFA5" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <div class="serif" style="font-size:19px; font-weight:500; color:#F8F5ED;">New Reminder</div>
+          <div style="font-size:13px; font-weight:700; color:#1A1405; background:#E6B84A; padding:7px 16px; border-radius:99px;">Save</div>
+        </div>
+
+        <div style="padding:6px 22px 26px; display:flex; flex-direction:column; gap:24px;">
+          <!-- title: bare field, gold underline as the one accent -->
+          <div>
+            <div class="lbl" style="margin-bottom:10px;">What to remember</div>
+            <div style="display:flex; align-items:flex-end; gap:12px; border-bottom:1.5px solid #E6B84A; padding-bottom:10px;">
+              <div class="serif" style="flex:1; font-size:19px; font-weight:500; color:#F8F5ED; line-height:1.3;">Pick up dry cleaning Friday 5:30pm</div>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E6B84A" stroke-width="2" style="flex-shrink:0; margin-bottom:2px;"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4"/></svg>
+            </div>
+          </div>
+
+          <div>
+            <div class="lbl" style="margin-bottom:10px;">Description (optional)</div>
+            <div style="font-size:14.5px; color:#55617A; border-bottom:1px solid #2B3750; padding-bottom:10px;">Add extra details&hellip;</div>
+          </div>
+
+          <!-- Parsed as: one grouped surface (this is a genuine group) -->
+          <div>
+            <div class="lbl" style="margin-bottom:10px;">Parsed as</div>
+            <div class="grp">
+              <div style="display:flex; align-items:center; gap:12px; padding:14px 15px;">
+                <div style="font-size:12.5px; color:#94A3B8; width:44px;">Title</div>
+                <div class="serif" style="flex:1; font-size:15px; font-weight:500; color:#F8F5ED;">Pick up dry cleaning</div>
+              </div>
+              <div class="rowdiv" style="display:flex; align-items:center; gap:12px; padding:14px 15px;">
+                <div style="font-size:12.5px; color:#94A3B8; width:44px;">Date</div>
+                <div style="flex:1; font-size:15px; font-weight:600; color:#F8F5ED;">Fri, 12 Sep</div>
+                <span style="font-size:10px; font-weight:700; letter-spacing:0.06em; color:#E6B84A;">AUTO</span>
+              </div>
+              <div class="rowdiv" style="display:flex; align-items:center; gap:12px; padding:14px 15px;">
+                <div style="font-size:12.5px; color:#94A3B8; width:44px;">Time</div>
+                <div style="flex:1; font-size:15px; font-weight:600; color:#F8F5ED;">5:30 PM</div>
+                <span style="font-size:10px; font-weight:700; letter-spacing:0.06em; color:#E6B84A;">AUTO</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="grp">
+            <div style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:14.5px; font-weight:600; color:#F8F5ED;">Alarm sound</div>
+                <div style="font-size:12px; color:#94A3B8; margin-top:2px;">Rings out loud</div>
+              </div>
+              <div style="width:44px; height:26px; border-radius:13px; background:#E6B84A; position:relative;">
+                <div style="width:20px; height:20px; border-radius:10px; background:#111827; position:absolute; top:3px; right:3px;"></div>
+              </div>
+            </div>
+            <div class="rowdiv" style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:14.5px; font-weight:600; color:#F8F5ED;">Remind me to message someone</div>
+                <div style="font-size:12px; color:#94A3B8; margin-top:2px;">Your phone rings; you send the message</div>
+              </div>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#697A96" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div style="display:flex; flex-direction:column; gap:14px;">
+    <div style="font-size:15px; opacity:0;">.</div>
+    <div class="phone">
+      <div class="screen">
+        <div style="padding:30px 22px 18px;">
+          <div class="serif" style="font-size:28px; font-weight:500; color:#F8F5ED;">Settings</div>
+        </div>
+
+        <div style="padding:0 22px 26px;">
+          <div class="lbl" style="margin-bottom:9px;">You</div>
+          <div class="grp" style="margin-bottom:22px;">
+            <div style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:14.5px; font-weight:600; color:#F8F5ED;">Your name</div>
+                <div style="font-size:12px; color:#94A3B8; margin-top:2px;">Anand</div>
+              </div>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#697A96" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </div>
+          </div>
+
+          <div class="lbl" style="margin-bottom:9px;">When reminders go off</div>
+          <div class="grp" style="margin-bottom:22px;">
+            <div style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:14.5px; font-weight:600; color:#F8F5ED;">Alarm sound</div>
+                <div style="font-size:12px; color:#94A3B8; margin-top:2px;">Rings out loud</div>
+              </div>
+              <div style="width:44px; height:26px; border-radius:13px; background:#E6B84A; position:relative;">
+                <div style="width:20px; height:20px; border-radius:10px; background:#111827; position:absolute; top:3px; right:3px;"></div>
+              </div>
+            </div>
+            <div class="rowdiv" style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:14.5px; font-weight:600; color:#F8F5ED;">Do not use Android Alarm feature</div>
+                <div style="font-size:12px; color:#94A3B8; margin-top:2px; line-height:1.45;">Reminders fire at exactly the time you set</div>
+              </div>
+              <div style="width:44px; height:26px; border-radius:13px; background:#2B3750; position:relative;">
+                <div style="width:20px; height:20px; border-radius:10px; background:#697A96; position:absolute; top:3px; left:3px;"></div>
+              </div>
+            </div>
+            <div class="rowdiv" style="padding:13px 15px; display:flex; align-items:center; gap:9px;">
+              <div style="flex:1; font-size:12px; font-weight:500; color:#94A3B8;">Why is there an alarm icon in my status bar?</div>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#697A96" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+            </div>
+            <div class="rowdiv" style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:14.5px; font-weight:600; color:#F8F5ED;">Vibrate</div>
+                <div style="font-size:12px; color:#94A3B8; margin-top:2px;">Vibrates, even when sound is off</div>
+              </div>
+              <div style="width:44px; height:26px; border-radius:13px; background:#E6B84A; position:relative;">
+                <div style="width:20px; height:20px; border-radius:10px; background:#111827; position:absolute; top:3px; right:3px;"></div>
+              </div>
+            </div>
+            <div class="rowdiv" style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1; font-size:14.5px; font-weight:600; color:#F8F5ED;">Quiet hours &amp; follow-ups</div>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#697A96" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </div>
+          </div>
+
+          <div class="lbl" style="margin-bottom:9px;">What notifications show</div>
+          <div class="grp" style="margin-bottom:22px;">
+            <div style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:14.5px; font-weight:600; color:#F8F5ED;">Show description in notifications</div>
+                <div style="font-size:12px; color:#94A3B8; margin-top:2px; line-height:1.45;">Appears on the lock screen and shade</div>
+              </div>
+              <div style="width:44px; height:26px; border-radius:13px; background:#E6B84A; position:relative;">
+                <div style="width:20px; height:20px; border-radius:10px; background:#111827; position:absolute; top:3px; right:3px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="lbl" style="margin-bottom:9px;">Appearance</div>
+          <div style="display:flex; gap:8px; margin-bottom:22px;">
+            <div style="padding:8px 16px; border-radius:99px; background:#E6B84A; font-size:13px; font-weight:600; color:#111827;">Light</div>
+            <div style="padding:8px 16px; border-radius:99px; background:#1C2638; font-size:13px; font-weight:600; color:#94A3B8;">Dark</div>
+            <div style="padding:8px 16px; border-radius:99px; background:#1C2638; font-size:13px; font-weight:600; color:#94A3B8;">System</div>
+          </div>
+
+          <div class="lbl" style="margin-bottom:9px;">Voice input</div>
+          <div style="margin-bottom:22px;">
+            <div style="font-size:14.5px; font-weight:600; color:#F8F5ED; margin-bottom:10px;">Dictation language</div>
+            <div style="display:flex; gap:8px;">
+              <div style="padding:8px 16px; border-radius:99px; background:#E6B84A; font-size:13px; font-weight:600; color:#111827;">English</div>
+              <div style="padding:8px 16px; border-radius:99px; background:#1C2638; font-size:13px; font-weight:600; color:#94A3B8;">&#3374;&#3378;&#3375;&#3390;&#3379;&#3330;</div>
+            </div>
+          </div>
+
+          <div class="lbl" style="margin-bottom:9px;">Sharing</div>
+          <div class="grp" style="margin-bottom:22px;">
+            <div style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:14.5px; font-weight:600; color:#F8F5ED;">Share this app</div>
+                <div style="font-size:12px; color:#94A3B8; margin-top:2px; line-height:1.45;">Send someone a short note about Reminders</div>
+              </div>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#697A96" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </div>
+            <div class="rowdiv" style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:14.5px; font-weight:600; color:#F8F5ED;">Mention this app when messaging</div>
+                <div style="font-size:12px; color:#94A3B8; margin-top:2px;">Adds a short line to your messages</div>
+              </div>
+              <div style="width:44px; height:26px; border-radius:13px; background:#E6B84A; position:relative;">
+                <div style="width:20px; height:20px; border-radius:10px; background:#111827; position:absolute; top:3px; right:3px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="lbl" style="margin-bottom:9px;">More</div>
+          <div class="grp">
+            <div style="padding:14px 15px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:14.5px; font-weight:600; color:#F8F5ED;">Backup &amp; troubleshooting</div>
+                <div style="font-size:12px; color:#94A3B8; margin-top:2px; line-height:1.45;">Save a copy, or get logs for a problem</div>
+              </div>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#697A96" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {}
+</script>
+</body>
+</html>

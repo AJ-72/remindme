@@ -1,92 +1,116 @@
+/**
+ * Ink & Coral — the design-refresh palette (see `design/skins/` for the four
+ * candidate skins this was chosen from, and its README for the colour-role
+ * rules and the token mapping).
+ *
+ * Colour roles, and the reason they are kept separate:
+ *   primary     — routine actions and "on" state: Save, active toggles,
+ *                 selected pills, parsed-value highlights, the avatar initial.
+ *   destructive — errors and destructive intent ONLY: overdue reminders,
+ *                 delete confirmation, "Clear all".
+ *   warning     — advisory, non-error notices (the Android exact-alarm
+ *                 banner). Deliberately amber, NOT red: it informs, it does
+ *                 not report a failure, and red would make a working app look
+ *                 broken.
+ *
+ * Note for this skin specifically: `primary` and `destructive` sit in the same
+ * hue family, so a Save button and an overdue row share a colour. That is a
+ * deliberate character choice — the overdue state leans on its own icon and
+ * label wording to stay distinguishable. The `ink-sky` skin in `design/skins/`
+ * splits the two hues fully if that ever reads badly on device.
+ */
 const colors = {
   light: {
-    text: "#1a1a2e",
-    tint: "#6366f1",
+    text: "#131A28",
+    tint: "#E85C3C",
 
-    background: "#F7F7F8",
-    foreground: "#1a1a2e",
+    // Cool pale grey, deliberately not pure white — the refresh's light mode
+    // is meant to sit slightly back from the raised card surfaces.
+    background: "#EDEFF3",
+    foreground: "#131A28",
 
-    card: "#ffffff",
-    cardForeground: "#1a1a2e",
+    card: "#FBFCFD",
+    cardForeground: "#131A28",
 
-    primary: "#6366f1",
-    primaryForeground: "#ffffff",
+    primary: "#E85C3C",
+    primaryForeground: "#FFFFFF",
 
-    secondary: "#ede9fe",
-    secondaryForeground: "#4338ca",
+    secondary: "#FDEAE5",
+    secondaryForeground: "#B8431F",
 
-    muted: "#F0F0F2",
-    mutedForeground: "#7c7c9d",
+    muted: "#E4E8EF",
+    mutedForeground: "#67728A",
 
-    accent: "#818cf8",
-    accentForeground: "#ffffff",
+    accent: "#F08768",
+    accentForeground: "#FFFFFF",
 
-    destructive: "#ef4444",
-    destructiveForeground: "#ffffff",
+    destructive: "#D64E2E",
+    destructiveForeground: "#FFFFFF",
     // Softened destructive, used for the overdue card border so an overdue
     // reminder reads as urgent without shouting.
-    destructiveBorder: "#fca5a5",
+    destructiveBorder: "#F2C0B4",
 
-    border: "#E4E4E7",
-    input: "#E4E4E7",
+    border: "#E3E6EC",
+    input: "#E3E6EC",
 
-    success: "#10b981",
-    successForeground: "#ffffff",
+    success: "#0D9488",
+    successForeground: "#FFFFFF",
 
-    warning: "#f59e0b",
-    warningForeground: "#ffffff",
+    warning: "#F59E0B",
+    warningForeground: "#FFFFFF",
     // Warning *surface* pair, for the exact-alarm banner: a tinted background
     // with readable text on it. Distinct from warning/warningForeground,
-    // which are for a solid warning-coloured control.
-    warningSurface: "#fffbeb",
-    warningSurfaceForeground: "#92400e",
+    // which are for a solid warning-coloured control. Amber, not red — see
+    // the colour-role note above.
+    warningSurface: "#FFFBEB",
+    warningSurfaceForeground: "#92400E",
   },
   // Dark palette. Must define EXACTLY the same token names as `light` — a
   // missing key resolves to `undefined`, which React Native renders as no
   // colour at all (typically black on black), and only on dark-mode devices.
   // `hooks/useColors.test.ts` enforces that parity.
   //
-  // Derived from the light tokens rather than inverted: the indigo brand hue
-  // is kept but lightened, because #6366f1 on a near-black ground is too low
-  // in contrast to read. Surfaces step up in lightness with elevation
+  // Derived from the light tokens rather than inverted: the coral accent is
+  // lightened (#E85C3C -> #F4775A) because the light-mode coral is too dark to
+  // read on a near-black ground. Surfaces step up in lightness with elevation
   // (background < card < muted), which is how depth reads in dark mode —
   // shadows are invisible against a dark ground.
   dark: {
-    text: "#e8e8f0",
-    tint: "#818cf8",
+    text: "#F4F1EA",
+    tint: "#F4775A",
 
-    background: "#121218",
-    foreground: "#e8e8f0",
+    background: "#0E131E",
+    foreground: "#F4F1EA",
 
-    card: "#1c1c25",
-    cardForeground: "#e8e8f0",
+    card: "#1A2232",
+    cardForeground: "#F4F1EA",
 
-    primary: "#818cf8",
-    primaryForeground: "#12121a",
+    primary: "#F4775A",
+    primaryForeground: "#141A26",
 
-    secondary: "#2a2a3d",
-    secondaryForeground: "#c7d2fe",
+    secondary: "#3A2620",
+    secondaryForeground: "#FBC0AE",
 
-    muted: "#25252f",
-    mutedForeground: "#9a9ab0",
+    muted: "#252E40",
+    mutedForeground: "#98A2B3",
 
-    accent: "#a5b4fc",
-    accentForeground: "#12121a",
+    accent: "#F79B84",
+    accentForeground: "#141A26",
 
-    destructive: "#f87171",
-    destructiveForeground: "#12121a",
-    destructiveBorder: "#7f1d1d",
+    destructive: "#F4775A",
+    destructiveForeground: "#141A26",
+    destructiveBorder: "#7A3B39",
 
-    border: "#2e2e3a",
-    input: "#2e2e3a",
+    border: "#283245",
+    input: "#283245",
 
-    success: "#34d399",
-    successForeground: "#12121a",
+    success: "#2DD4BF",
+    successForeground: "#062A26",
 
-    warning: "#fbbf24",
-    warningForeground: "#12121a",
-    warningSurface: "#2e2410",
-    warningSurfaceForeground: "#fcd34d",
+    warning: "#FBBF24",
+    warningForeground: "#141A26",
+    warningSurface: "#2E2410",
+    warningSurfaceForeground: "#FCD34D",
   },
   radius: 14,
   radiusCard: 20,

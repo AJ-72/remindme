@@ -445,7 +445,7 @@ async function setupNotificationChannel(): Promise<void> {
       // enabled on the channel. Existing installs keep whatever this channel
       // was created with — immutable by ID — but new ones get it right.
       enableVibrate: true,
-      lightColor: "#6366f1",
+      lightColor: "#E85C3C",
       sound: "alarm.wav",
       bypassDnd: true,
       lockscreenVisibility:
@@ -460,7 +460,7 @@ async function setupNotificationChannel(): Promise<void> {
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: null,
       enableVibrate: false,
-      lightColor: "#6366f1",
+      lightColor: "#E85C3C",
       sound: "alarm.wav",
       bypassDnd: true,
       lockscreenVisibility:

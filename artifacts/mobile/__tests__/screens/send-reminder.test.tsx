@@ -236,7 +236,7 @@ describe("dark mode", () => {
     // Assert the LITERAL value, not `=== colors.dark.foreground`: comparing
     // against the token follows it anywhere, so it would still pass if the
     // dark palette held light-mode values.
-    expect(flat.color).toBe("#e8e8f0");
+    expect(flat.color).toBe("#F4F1EA");
     expect(flat.color).not.toBe(lightColors.light.foreground);
   });
 
@@ -246,7 +246,7 @@ describe("dark mode", () => {
     const { findByTestId } = renderScreen();
 
     const flat = StyleSheet.flatten((await findByTestId("message-input")).props.style);
-    expect(flat.backgroundColor).toBe("#1c1c25");
+    expect(flat.backgroundColor).toBe("#1A2232");
     expect(flat.backgroundColor).not.toBe(lightColors.light.card);
   });
 
@@ -257,7 +257,7 @@ describe("dark mode", () => {
 
     const flat = StyleSheet.flatten((await findByText("Priya")).props.style);
     expect(flat.color).toBe(lightColors.light.foreground);
-    expect(flat.color).not.toBe("#e8e8f0");
+    expect(flat.color).not.toBe("#F4F1EA");
   });
 });
 
