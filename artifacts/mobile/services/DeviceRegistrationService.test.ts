@@ -9,11 +9,26 @@ jest.mock("./SessionService");
 jest.mock("expo-notifications");
 import * as Notifications from "expo-notifications";
 
-function mockUpsertResult(result: { data: unknown; error: unknown }) {
-  const upsert = jest.fn().mockResolvedValue(result);
-  const from = jest.fn().mockReturnValue({ upsert });
+const FAKE_SESSION = { user: { id: "user-1" } } as unknown as import("@supabase/supabase-js").Session;
+
+/**
+ * Mocks the client for the insert-first, update-on-conflict flow (see
+ * DeviceRegistrationService.ts's own comment on why this replaced a single
+ * upsert). `insertResult` drives the INSERT call; `updateResult`, if given,
+ * drives the UPDATE call that only runs after a 23505 from the insert.
+ */
+function mockDbResult(
+  insertResult: { error: unknown },
+  updateResult?: { data: unknown; error: unknown }
+) {
+  const insert = jest.fn().mockResolvedValue(insertResult);
+  const eq = jest.fn().mockReturnValue({
+    select: jest.fn().mockResolvedValue(updateResult ?? { data: null, error: null }),
+  });
+  const update = jest.fn().mockReturnValue({ eq });
+  const from = jest.fn().mockReturnValue({ insert, update });
   (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ from });
-  return { from, upsert };
+  return { from, insert, update };
 }
 
 describe("registerDeviceForPush", () => {
@@ -22,7 +37,7 @@ describe("registerDeviceForPush", () => {
   });
 
   it("returns not_authenticated and never requests permissions when there is no session", async () => {
-    (SessionService.hasSession as jest.Mock).mockResolvedValue(false);
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(null);
 
     const result = await registerDeviceForPush();
 
@@ -32,7 +47,7 @@ describe("registerDeviceForPush", () => {
   });
 
   it("returns permission_denied when permission is not granted", async () => {
-    (SessionService.hasSession as jest.Mock).mockResolvedValue(true);
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(FAKE_SESSION);
     (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ status: "denied" });
     (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValue({ status: "denied" });
 
@@ -42,7 +57,7 @@ describe("registerDeviceForPush", () => {
   });
 
   it("returns push_token_error when getExpoPushTokenAsync throws", async () => {
-    (SessionService.hasSession as jest.Mock).mockResolvedValue(true);
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(FAKE_SESSION);
     (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ status: "granted" });
     (Notifications.getExpoPushTokenAsync as jest.Mock).mockRejectedValue(
       new Error("unsupported environment")
@@ -53,45 +68,89 @@ describe("registerDeviceForPush", () => {
     expect(result).toEqual({ ok: false, error: "push_token_error" });
   });
 
-  it("upserts the token and returns ok:true on success", async () => {
-    (SessionService.hasSession as jest.Mock).mockResolvedValue(true);
+  it("inserts the token with this session's user_id and returns ok:true on success", async () => {
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(FAKE_SESSION);
     (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ status: "granted" });
     (Notifications.getExpoPushTokenAsync as jest.Mock).mockResolvedValue({
       data: "ExponentPushToken[abc123]",
     });
-    const { upsert } = mockUpsertResult({ data: [{ id: "device-1" }], error: null });
+    const { insert, update } = mockDbResult({ error: null });
 
     const result = await registerDeviceForPush();
 
     expect(result).toEqual({ ok: true });
-    expect(upsert).toHaveBeenCalled();
-    const [payload] = upsert.mock.calls[0];
+    expect(insert).toHaveBeenCalled();
+    const [payload] = insert.mock.calls[0];
+    // The regression this test guards: an insert missing user_id passes
+    // every mock-based assertion that only checks expo_push_token, but fails
+    // devices_insert_own's RLS check (`user_id = auth.uid()`) against the
+    // real table, since devices.user_id is NOT NULL with no default.
+    expect(payload.user_id).toBe("user-1");
     expect(payload.expo_push_token).toBe("ExponentPushToken[abc123]");
+    expect(update).not.toHaveBeenCalled();
   });
 
-  it("returns token_conflict when the token is already registered to a different account", async () => {
-    (SessionService.hasSession as jest.Mock).mockResolvedValue(true);
+  it("re-registering the same device updates instead of erroring", async () => {
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(FAKE_SESSION);
     (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ status: "granted" });
     (Notifications.getExpoPushTokenAsync as jest.Mock).mockResolvedValue({
       data: "ExponentPushToken[abc123]",
     });
-    mockUpsertResult({
-      data: null,
-      error: { code: "23505", message: "duplicate key value violates unique constraint" },
+    // Insert 23505s (the row already exists - this account's own prior
+    // registration), and the update path finds and updates exactly that row.
+    mockDbResult(
+      { error: { code: "23505", message: "duplicate key value violates unique constraint" } },
+      { data: [{ id: "device-1" }], error: null }
+    );
+
+    const result = await registerDeviceForPush();
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("returns token_conflict when the token belongs to a different account", async () => {
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(FAKE_SESSION);
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ status: "granted" });
+    (Notifications.getExpoPushTokenAsync as jest.Mock).mockResolvedValue({
+      data: "ExponentPushToken[abc123]",
     });
+    // Insert 23505s, but the update matches zero rows - RLS filtered it out
+    // because devices_update_own only sees rows this account owns. That's
+    // what actually distinguishes "mine, refresh it" from "already claimed
+    // by someone else": no error, just zero rows updated.
+    mockDbResult(
+      { error: { code: "23505", message: "duplicate key value violates unique constraint" } },
+      { data: [], error: null }
+    );
 
     const result = await registerDeviceForPush();
 
     expect(result).toEqual({ ok: false, error: "token_conflict" });
   });
 
-  it("returns registration_failed on a generic upsert error", async () => {
-    (SessionService.hasSession as jest.Mock).mockResolvedValue(true);
+  it("returns registration_failed on a generic insert error", async () => {
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(FAKE_SESSION);
     (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ status: "granted" });
     (Notifications.getExpoPushTokenAsync as jest.Mock).mockResolvedValue({
       data: "ExponentPushToken[abc123]",
     });
-    mockUpsertResult({ data: null, error: { code: "500", message: "network blip" } });
+    mockDbResult({ error: { code: "500", message: "network blip" } });
+
+    const result = await registerDeviceForPush();
+
+    expect(result).toEqual({ ok: false, error: "registration_failed" });
+  });
+
+  it("returns registration_failed if the update-on-conflict path itself errors", async () => {
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(FAKE_SESSION);
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ status: "granted" });
+    (Notifications.getExpoPushTokenAsync as jest.Mock).mockResolvedValue({
+      data: "ExponentPushToken[abc123]",
+    });
+    mockDbResult(
+      { error: { code: "23505", message: "duplicate key value violates unique constraint" } },
+      { data: null, error: { code: "500", message: "network blip" } }
+    );
 
     const result = await registerDeviceForPush();
 
@@ -99,7 +158,7 @@ describe("registerDeviceForPush", () => {
   });
 
   it("never throws even if the client throws synchronously", async () => {
-    (SessionService.hasSession as jest.Mock).mockRejectedValue(new Error("boom"));
+    (SessionService.getCurrentSession as jest.Mock).mockRejectedValue(new Error("boom"));
 
     await expect(registerDeviceForPush()).resolves.toEqual({
       ok: false,

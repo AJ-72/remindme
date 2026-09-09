@@ -18,8 +18,11 @@ import { registerDeviceForPush } from "@/services/DeviceRegistrationService";
  * built-in deep-link handling - no app.json changes, no universal link; see
  * task-10-brief.md Step 1). Establishes a session and binds the tapped
  * invite token, then immediately claims whatever invitations were pending
- * for the now-verified number. This screen only shows a summary count and a
- * way back to the home tab - the claimed-invitations LIST is Task 11/Phase 5.
+ * for the now-verified number. A single claimed invitation navigates
+ * straight to invitation-preview; more than one shows a plain tappable list
+ * (each row navigating to invitation-preview with that invitation's own
+ * data) - not a dedicated claimed-invitations list screen, which stays
+ * Task 11/Phase 5's explicit scope boundary.
  */
 
 type ScreenState =

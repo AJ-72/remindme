@@ -1,6 +1,6 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
-import { hasSession, getSupabaseClient } from "./SessionService";
+import { getCurrentSession, getSupabaseClient } from "./SessionService";
 
 /**
  * Writes this handset's Expo push token to `devices` (Task 16 final-review
@@ -45,9 +45,13 @@ export async function registerDeviceForPush(): Promise<RegisterDeviceResult> {
   try {
     // a) No session -> no `users` row yet -> devices.user_id has nothing to
     // point at. Do NOT request OS permissions for a capability that can't be
-    // used yet.
-    const authenticated = await hasSession();
-    if (!authenticated) return { ok: false, error: "not_authenticated" };
+    // used yet. Uses getCurrentSession() (not hasSession()) because the
+    // upsert below needs the actual user id, not just a boolean - devices.user_id
+    // is NOT NULL with no default, and devices_insert_own's RLS check is
+    // `user_id = auth.uid()`, so a payload without it fails RLS outright
+    // rather than merely being incomplete.
+    const session = await getCurrentSession();
+    if (!session) return { ok: false, error: "not_authenticated" };
 
     if (!Notifications) return { ok: false, error: "unsupported_environment" };
 
@@ -81,36 +85,51 @@ export async function registerDeviceForPush(): Promise<RegisterDeviceResult> {
       return { ok: false, error: "push_token_error" };
     }
 
-    // e) Upsert into `devices` via the caller's own scoped client -
+    // e) Write into `devices` via the caller's own scoped client -
     // devices_insert_own/devices_update_own RLS already grant this, no Edge
     // Function needed (same reasoning as Task 10's direct-RPC-for-bind
-    // decision). expo_push_token is UNIQUE across ALL accounts, so a
-    // conflict on a DIFFERENT account's row must surface as a real error,
-    // never be silently swallowed.
+    // decision).
+    //
+    // Deliberately NOT a single upsert({ onConflict: "expo_push_token" }).
+    // PostgREST implements that as INSERT ... ON CONFLICT DO UPDATE, and
+    // devices_update_own's RLS is `USING (user_id = auth.uid())` - so when
+    // the conflicting row belongs to a DIFFERENT account, the UPDATE half
+    // matches zero rows under RLS and returns success with no error, not the
+    // 23505 a plain insert would raise. That would silently swallow exactly
+    // the case devices.expo_push_token's UNIQUE constraint exists to catch
+    // ("forgot to clear the old row" must be an error, not a handset quietly
+    // receiving two people's reminders). Insert-first, and on a genuine
+    // unique_violation, resolve it explicitly instead of letting PostgREST's
+    // upsert semantics decide.
     const client = getSupabaseClient();
-    const { error } = await client.from("devices").upsert(
-      {
-        expo_push_token: token,
-        platform: Platform.OS,
-        last_seen_at: new Date().toISOString(),
-      },
-      { onConflict: "expo_push_token" }
-    );
+    const insert = await client.from("devices").insert({
+      user_id: session.user.id,
+      expo_push_token: token,
+      platform: Platform.OS,
+      last_seen_at: new Date().toISOString(),
+    });
 
-    if (error) {
-      // Postgres unique_violation. RLS means this device's own upsert only
-      // hits this path when the token row belongs to a different account's
-      // user_id (a same-account re-registration is an ordinary update, not
-      // a conflict) - surface it distinctly so a caller can tell "not
-      // registered" apart from "registered to someone else's account".
-      if (
-        (error as { code?: string }).code === "23505" ||
-        /unique constraint/i.test((error as { message?: string }).message ?? "")
-      ) {
-        return { ok: false, error: "token_conflict" };
-      }
-      return { ok: false, error: "registration_failed" };
-    }
+    if (!insert.error) return { ok: true };
+
+    const isUniqueViolation =
+      (insert.error as { code?: string }).code === "23505" ||
+      /unique constraint/i.test((insert.error as { message?: string }).message ?? "");
+    if (!isUniqueViolation) return { ok: false, error: "registration_failed" };
+
+    // A row for this token already exists. update() is scoped by RLS to rows
+    // this account owns - if it's a same-account re-registration, exactly
+    // one row matches and this succeeds. If the row belongs to a different
+    // account, RLS filters it out: no error, but no row updated either -
+    // that zero-match outcome is what actually distinguishes "mine, just
+    // refresh it" from "already claimed by someone else".
+    const update = await client
+      .from("devices")
+      .update({ platform: Platform.OS, last_seen_at: new Date().toISOString() })
+      .eq("expo_push_token", token)
+      .select("id");
+
+    if (update.error) return { ok: false, error: "registration_failed" };
+    if (!update.data || update.data.length === 0) return { ok: false, error: "token_conflict" };
 
     return { ok: true };
   } catch {
