@@ -8,6 +8,7 @@
     "checkLookupRateLimit.sql",
     "checkFirstContactRateLimit.sql",
     "sendInvitation.sql",
-    "getPushTokensForUser.sql"
+    "getPushTokensForUser.sql",
+    "respondToInvitation.sql"
   ]
 }
