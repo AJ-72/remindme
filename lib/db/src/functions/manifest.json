@@ -9,6 +9,7 @@
     "checkFirstContactRateLimit.sql",
     "sendInvitation.sql",
     "getPushTokensForUser.sql",
-    "respondToInvitation.sql"
+    "respondToInvitation.sql",
+    "expireInvitations.sql"
   ]
 }

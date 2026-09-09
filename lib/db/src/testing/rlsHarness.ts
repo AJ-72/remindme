@@ -34,6 +34,16 @@ const AUTH_SHIM = `
   create role anon nologin;
   grant usage on schema public, auth to authenticated, anon;
   grant execute on function auth.uid() to authenticated, anon;
+
+  -- Exists ONLY so a function file's own "grant execute ... to service_role"
+  -- statement is valid DDL when the schema snapshot is built - GRANT requires
+  -- the target role to exist. Nothing ever switches into this role: asUser/
+  -- asAnon only ever set_config('role', ...) to 'authenticated' or 'anon',
+  -- and asService runs as the owning superuser (bypasses grants entirely, see
+  -- its own docstring). A test for "only service_role may call this" is
+  -- therefore exercised as "asUser has no EXECUTE grant and is refused",
+  -- not by actually authenticating as this role.
+  create role service_role nologin;
 `;
 
 /** Grants run after the caller's DDL, so they cover tables it created. */
