@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-09 — `RemindersContext.addReminder` always resolves `exactTiming` to a concrete boolean before calling the service — a spy on the service level can never see it absent
+
+**WHAT:** A test asserting `expect(data).not.toHaveProperty("exactTiming")` on a `jest.spyOn(ReminderService, "addReminder")` call fails even for correct code that never explicitly set `exactTiming`, because `RemindersContext.addReminder` (`contexts/RemindersContext.tsx` ~line 271) unconditionally computes `exactTiming: data.exactTiming !== undefined ? data.exactTiming : defaultExactTimingEnabled` before forwarding to the service — so the service-level call always has a concrete `exactTiming: boolean`, never `undefined`/absent. `alarm` has NO equivalent context-level injection (it stays optional and its default is applied later, at read time, inside `ReminderService` itself) — so an absence assertion on `alarm` is valid, but the same pattern on `exactTiming` is not.
+
+**WHY:** Non-obvious because both fields look symmetric from the outside (both are "reminder scheduling flags with a stored default"), but only one of them is eagerly resolved at the context layer. A future test copying the `alarm`-absence pattern onto `exactTiming` will fail for a reason that has nothing to do with the code under test being wrong.
+
+**WHERE:** Hit writing `artifacts/mobile/__tests__/screens/invitation-preview.test.tsx` (Task 13 of `docs/superpowers/plans/2026-09-08-tier2-phases-3-5.md`, verifying "no sender-controlled alarm/exactTiming override" on an accepted Tier 2 reminder). Fix: assert `data.exactTiming` equals the recipient's own default value (proving it's context-injected, not sender-controlled) rather than asserting absence. General lesson: before asserting a field is absent on a `ReminderService`-level spy, check whether `RemindersContext` eagerly resolves that specific field first.
+
 ## 2026-09-09 — Assigning a plain `text` parameter into an enum column needs an explicit cast in plpgsql, even inside an UPDATE's SET clause
 
 **WHAT:** `respond_to_invitation(p_response text)`'s `UPDATE ... SET status = p_response` failed until written as `status = p_response::public.invitation_status`. Caught by the TDD test run itself, not by inspection — the brief's own draft SQL was missing the cast.
