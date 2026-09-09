@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { createSchemaTestDb } from "../testing/createSchemaTestDb";
-import { AMMA, ANAND } from "../testing/identities";
+import { AMMA, ANAND, STRANGER } from "../testing/identities";
 import type { RlsTestDb } from "../testing/rlsHarness";
 
 const seed = `
   insert into users (id, phone_hash, discoverable) values
     ('${AMMA}', 'hash-amma', true),
-    ('${ANAND}', 'hash-anand', true);
+    ('${ANAND}', 'hash-anand', true),
+    ('${STRANGER}', 'hash-stranger', true);
 
   insert into devices (user_id, expo_push_token, platform) values
     ('${AMMA}', 'ExponentPushToken[amma-1]', 'android'),
     ('${AMMA}', 'ExponentPushToken[amma-2]', 'ios');
+
+  -- ANAND has sent AMMA an invitation - the trust relationship the guard
+  -- checks for.
+  insert into invitations (sender_id, recipient_phone_hash, datetime, original_datetime, expires_at, content_expires_at) values
+    ('${ANAND}', 'hash-amma', now() + interval '1 day', now() + interval '1 day', now() + interval '1 day', now() + interval '1 day');
 `;
 
 async function withSeed(): Promise<RlsTestDb> {
@@ -20,7 +26,7 @@ async function withSeed(): Promise<RlsTestDb> {
 }
 
 describe("get_push_tokens_for_user", () => {
-  it("returns tokens for the given user", async () => {
+  it("returns tokens for the given user when the caller has an invitation to them", async () => {
     const db = await withSeed();
     const result = await db.asUser(ANAND, `select * from get_push_tokens_for_user('${AMMA}')`);
     expect(result).toEqual(
@@ -33,8 +39,14 @@ describe("get_push_tokens_for_user", () => {
     await db.close();
   });
 
-  it("returns empty for a user with no devices", async () => {
+  it("returns empty for a user with no devices, even with a valid invitation relationship", async () => {
     const db = await withSeed();
+    // AMMA has not sent ANAND any invitation, but ANAND has no devices
+    // seeded either way - seed a reverse invitation so this exercises "no
+    // devices" rather than "no relationship".
+    await db.asService(
+      `insert into invitations (sender_id, recipient_phone_hash, datetime, original_datetime, expires_at, content_expires_at) values ('${AMMA}', 'hash-anand', now() + interval '1 day', now() + interval '1 day', now() + interval '1 day', now() + interval '1 day');`
+    );
     const result = await db.asUser(AMMA, `select * from get_push_tokens_for_user('${ANAND}')`);
     expect(result).toEqual([]);
     await db.close();
@@ -65,6 +77,24 @@ describe("get_push_tokens_for_user", () => {
     await expect(db.asAnon(`select * from get_push_tokens_for_user('${AMMA}')`)).rejects.toThrow(
       /not authenticated/i
     );
+    await db.close();
+  });
+
+  it("refuses a caller with NO prior invitation to the target", async () => {
+    const db = await withSeed();
+    // STRANGER has never sent AMMA anything.
+    await expect(
+      db.asUser(STRANGER, `select * from get_push_tokens_for_user('${AMMA}')`)
+    ).rejects.toThrow(/no invitation relationship/i);
+    await db.close();
+  });
+
+  it("sabotage check: still refuses without a prior invitation if EXECUTE is granted to anon", async () => {
+    const db = await withSeed();
+    await db.asService("grant execute on function get_push_tokens_for_user(uuid) to anon;");
+    await expect(
+      db.asAnon(`select * from get_push_tokens_for_user('${AMMA}')`)
+    ).rejects.toThrow(/not authenticated/i);
     await db.close();
   });
 });
