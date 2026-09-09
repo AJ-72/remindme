@@ -1,9 +1,13 @@
 import React from "react";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import InvitationPreviewScreen from "@/app/invitation-preview";
+import { RemindersProvider } from "@/contexts/RemindersContext";
 import * as SessionService from "@/services/SessionService";
+import * as InvitationService from "@/services/InvitationService";
+import * as ReminderService from "@/services/ReminderService";
 
 jest.mock("expo-haptics");
 jest.mock("@/services/SessionService");
@@ -35,13 +39,16 @@ function renderScreen() {
         insets: { top: 0, left: 0, right: 0, bottom: 0 },
       }}
     >
-      <InvitationPreviewScreen />
+      <RemindersProvider>
+        <InvitationPreviewScreen />
+      </RemindersProvider>
     </SafeAreaProvider>
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
+  await (AsyncStorage as any).clear();
   mockSearchParams = {
     id: "inv-1",
     title: "Take BP tablets",
@@ -118,5 +125,62 @@ describe("InvitationPreviewScreen", () => {
       blocked_id: "sender-1",
     });
     expect(await findByText(/won't receive reminders from Amma anymore/i)).toBeTruthy();
+  });
+
+  it("accepting calls respondToInvitation and adds a local reminder with no alarm/exactTiming override", async () => {
+    const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+    const addReminderSpy = jest.spyOn(ReminderService, "addReminder");
+    jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+
+    const { getByTestId, findByText } = renderScreen();
+    await findByText("From Amma");
+
+    fireEvent.press(getByTestId("accept-button"));
+
+    await waitFor(() =>
+      expect(InvitationService.respondToInvitation).toHaveBeenCalledWith(
+        expect.any(String),
+        "accepted"
+      )
+    );
+    expect(InvitationService.respondToInvitation).toHaveBeenCalledWith("inv-1", "accepted");
+    await waitFor(() => expect(addReminderSpy).toHaveBeenCalled());
+    const [, data] = addReminderSpy.mock.calls[0];
+    // The screen itself must never pass `alarm`/`exactTiming` - no property
+    // for `alarm` reaches ReminderService.addReminder at all (the context
+    // passes it through untouched, and the screen never sets it). For
+    // `exactTiming`, RemindersContext.addReminder always injects a concrete
+    // value from the recipient's OWN stored default
+    // (getDefaultExactTimingEnabled(), true on clean storage) before
+    // calling the service - so its presence here is the context's existing,
+    // desired default-reading behavior, not a sender-controlled override.
+    expect(data).not.toHaveProperty("alarm");
+    expect(data.exactTiming).toBe(true);
+    expect(data).toMatchObject({
+      title: "Take BP tablets",
+      description: "After breakfast",
+      datetime: "2026-09-09T08:00:00.000Z",
+    });
+  });
+
+  it("declining calls respondToInvitation and does NOT add a local reminder", async () => {
+    const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+    jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+    const addReminderSpy = jest.spyOn(ReminderService, "addReminder");
+
+    const { getByTestId, findByText } = renderScreen();
+    await findByText("From Amma");
+
+    fireEvent.press(getByTestId("decline-button"));
+
+    await waitFor(() =>
+      expect(InvitationService.respondToInvitation).toHaveBeenCalledWith(
+        expect.any(String),
+        "declined"
+      )
+    );
+    expect(addReminderSpy).not.toHaveBeenCalled();
   });
 });

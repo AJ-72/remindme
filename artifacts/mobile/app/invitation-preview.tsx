@@ -4,7 +4,9 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
+import { respondToInvitation } from "@/services/InvitationService";
 import { getSupabaseClient, getCurrentSession } from "@/services/SessionService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
@@ -48,9 +50,11 @@ export default function InvitationPreviewScreen() {
     senderId: string;
   }>();
 
+  const { addReminder } = useReminders();
   const [senderName, setSenderName] = useState<string | null>(null);
   const [blocking, setBlocking] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const [responding, setResponding] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,12 +97,43 @@ export default function InvitationPreviewScreen() {
     }
   };
 
-  const handleAccept = () => {
-    // Wired in Task 12.
+  const handleAccept = async () => {
+    if (!id || responding) return;
+    setResponding(true);
+    try {
+      const result = await respondToInvitation(id, "accepted");
+      if (result.ok) {
+        // Scheduling content MUST come from the local params captured at
+        // claim time, never from respondToInvitation's own response -
+        // Task 12's respond_to_invitation() nulls title/description on a
+        // successful accept as part of its own transaction (T5.2), so the
+        // RPC response for a just-accepted invitation has null content by
+        // design. alarm/exactTiming are deliberately omitted so the
+        // recipient's own defaults apply (RemindersContext), never
+        // anything sender-controlled.
+        await addReminder({
+          title: title ?? "",
+          description: description ?? "",
+          datetime,
+        });
+        goBack();
+      }
+    } finally {
+      setResponding(false);
+    }
   };
 
-  const handleDecline = () => {
-    // Wired in Task 12.
+  const handleDecline = async () => {
+    if (!id || responding) return;
+    setResponding(true);
+    try {
+      const result = await respondToInvitation(id, "declined");
+      if (result.ok) {
+        goBack();
+      }
+    } finally {
+      setResponding(false);
+    }
   };
 
   const styles = StyleSheet.create({
@@ -240,14 +275,20 @@ export default function InvitationPreviewScreen() {
           <Pressable
             style={[styles.actionBtn, styles.primaryBtn]}
             onPress={handleAccept}
+            disabled={responding}
             testID="accept-button"
           >
-            <Feather name="check" size={16} color={colors.primaryForeground} />
+            {responding ? (
+              <ActivityIndicator size="small" color={colors.primaryForeground} />
+            ) : (
+              <Feather name="check" size={16} color={colors.primaryForeground} />
+            )}
             <Text style={styles.primaryBtnText}>Accept</Text>
           </Pressable>
           <Pressable
             style={[styles.actionBtn, styles.secondaryBtn]}
             onPress={handleDecline}
+            disabled={responding}
             testID="decline-button"
           >
             <Feather name="x-circle" size={16} color={colors.foreground} />

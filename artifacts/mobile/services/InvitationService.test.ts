@@ -1,4 +1,9 @@
-import { sendInvitation, claimPendingInvitations, bindViaInviteToken } from "./InvitationService";
+import {
+  sendInvitation,
+  claimPendingInvitations,
+  bindViaInviteToken,
+  respondToInvitation,
+} from "./InvitationService";
 import * as SessionService from "./SessionService";
 
 jest.mock("./SessionService");
@@ -120,5 +125,33 @@ describe("bindViaInviteToken", () => {
     const result = await bindViaInviteToken("some-token");
 
     expect(result).toEqual({ ok: false, error: "network_error" });
+  });
+});
+
+describe("respondToInvitation", () => {
+  const mockFetch = jest.fn();
+  beforeEach(() => {
+    mockFetch.mockReset();
+    // @ts-ignore
+    global.fetch = mockFetch;
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue({ access_token: "t" });
+  });
+
+  it("returns ok:true on success", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ invitation: { id: "inv-1", status: "accepted" } }),
+    });
+    const result = await respondToInvitation("inv-1", "accepted");
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("returns ok:false on server failure", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: { code: "not_found", message: "..." } }),
+    });
+    const result = await respondToInvitation("inv-1", "declined");
+    expect(result).toEqual({ ok: false, error: "not_found" });
   });
 });

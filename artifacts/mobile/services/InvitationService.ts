@@ -101,3 +101,39 @@ export async function bindViaInviteToken(token: string): Promise<BindResult> {
   if (!data || data.length === 0) return { ok: false, error: "bind_failed" };
   return { ok: true };
 }
+
+/**
+ * Calls the respond-invitation Edge Function (T5.1/T5.2) to accept or
+ * decline a claimed invitation server-side. Never returns the invitation's
+ * title/description to the caller by design: on a successful accept, Task
+ * 12's respond_to_invitation() SQL function nulls those columns as part of
+ * the same transaction (T5.2), so the RPC response for a just-accepted
+ * invitation has null content. Callers that need to schedule a local
+ * reminder on accept MUST use the title/description they already hold
+ * locally from claimPendingInvitations() (the ClaimedInvitation captured at
+ * claim time), never anything read off this function's response.
+ */
+export async function respondToInvitation(
+  invitationId: string,
+  response: "accepted" | "declined"
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await getCurrentSession();
+  if (!session) return { ok: false, error: "not_authenticated" };
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/respond-invitation`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ invitationId, response }),
+    });
+    const json = await res.json();
+    if (!res.ok) return { ok: false, error: json?.error?.code ?? "respond_failed" };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "network_error" };
+  }
+}
