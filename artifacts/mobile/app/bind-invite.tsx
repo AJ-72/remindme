@@ -10,6 +10,7 @@ import {
   claimPendingInvitations,
   type ClaimedInvitation,
 } from "@/services/InvitationService";
+import { registerDeviceForPush } from "@/services/DeviceRegistrationService";
 
 /**
  * Rung-1 onboarding screen (T2.9 addendum, Task 10): the destination of
@@ -80,6 +81,13 @@ export default function BindInviteScreen() {
         setState({ phase: "error", error: result.error });
         return;
       }
+
+      // Fire-and-forget: binding is exactly the moment a `users` row (and
+      // thus a valid FK target for devices.user_id) starts existing, but a
+      // missing/failed push registration must never block or fail the bind
+      // - same "never fail the primary action" precedent as push-delivery
+      // failures elsewhere in this plan.
+      registerDeviceForPush();
 
       const claimed = await claimPendingInvitations();
       if (cancelled) return;

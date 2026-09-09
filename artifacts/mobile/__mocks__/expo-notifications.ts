@@ -20,6 +20,9 @@ export const getPermissionsAsync = jest.fn().mockResolvedValue({
   status: "granted",
   android: { alarm: true },
 });
+export const getExpoPushTokenAsync = jest
+  .fn()
+  .mockResolvedValue({ data: "ExponentPushToken[mock]" });
 export const setNotificationChannelAsync = jest
   .fn()
   .mockResolvedValue(undefined);

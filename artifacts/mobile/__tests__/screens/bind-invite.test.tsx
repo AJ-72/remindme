@@ -4,8 +4,10 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import BindInviteScreen from "@/app/bind-invite";
 import * as InvitationService from "@/services/InvitationService";
+import * as DeviceRegistrationService from "@/services/DeviceRegistrationService";
 
 jest.mock("expo-haptics");
+jest.mock("@/services/DeviceRegistrationService");
 
 const mockReplace = jest.fn();
 const mockBack = jest.fn();
@@ -40,6 +42,7 @@ function renderScreen() {
 beforeEach(() => {
   jest.clearAllMocks();
   mockSearchParams = { token: "some-token" };
+  (DeviceRegistrationService.registerDeviceForPush as jest.Mock).mockResolvedValue({ ok: true });
 });
 
 describe("BindInviteScreen", () => {
@@ -109,6 +112,51 @@ describe("BindInviteScreen", () => {
         },
       })
     );
+  });
+
+  it("calls registerDeviceForPush after a successful bind, without blocking the success screen", async () => {
+    (InvitationService.bindViaInviteToken as jest.Mock).mockResolvedValue({ ok: true });
+    (InvitationService.claimPendingInvitations as jest.Mock).mockResolvedValue([]);
+    let resolveRegister: (v: { ok: true }) => void;
+    (DeviceRegistrationService.registerDeviceForPush as jest.Mock).mockReturnValue(
+      new Promise((resolve) => {
+        resolveRegister = resolve;
+      })
+    );
+
+    const { findByText } = renderScreen();
+
+    // The success screen renders even though registerDeviceForPush's promise
+    // is still pending - fire-and-forget, never blocks the bind flow.
+    expect(await findByText(/no reminders were waiting/i)).toBeTruthy();
+    expect(DeviceRegistrationService.registerDeviceForPush).toHaveBeenCalled();
+
+    resolveRegister!({ ok: true });
+  });
+
+  it("does not call registerDeviceForPush when the bind itself fails", async () => {
+    (InvitationService.bindViaInviteToken as jest.Mock).mockResolvedValue({
+      ok: false,
+      error: "invalid token",
+    });
+
+    const { findByText } = renderScreen();
+
+    await findByText("This link isn't valid or has already been used");
+    expect(DeviceRegistrationService.registerDeviceForPush).not.toHaveBeenCalled();
+  });
+
+  it("still shows the success screen when registerDeviceForPush fails", async () => {
+    (InvitationService.bindViaInviteToken as jest.Mock).mockResolvedValue({ ok: true });
+    (InvitationService.claimPendingInvitations as jest.Mock).mockResolvedValue([]);
+    (DeviceRegistrationService.registerDeviceForPush as jest.Mock).mockResolvedValue({
+      ok: false,
+      error: "permission_denied",
+    });
+
+    const { findByText } = renderScreen();
+
+    expect(await findByText(/no reminders were waiting/i)).toBeTruthy();
   });
 
   it("shows copy for an invalid or already-used token", async () => {
