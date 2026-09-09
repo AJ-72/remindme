@@ -75,6 +75,39 @@ describe("respond_to_invitation", () => {
     await db.close();
   });
 
+  it("refuses a response value that is a valid enum label but not accepted/declined", async () => {
+    // 'expired' is a real value of invitation_status (see invitations.ts), so
+    // the enum cast alone would let it through silently - only the explicit
+    // `p_response not in ('accepted','declined')` guard catches this. Without
+    // that guard this endpoint would double as an accidental status-setter
+    // for any of the other six statuses.
+    const { db, invitationId } = await withInvitation();
+    await expect(
+      db.asUser(AMMA, `select * from respond_to_invitation('${invitationId}', 'expired')`)
+    ).rejects.toThrow();
+    await db.close();
+  });
+
+  it("sets terminal_at on a successful accept", async () => {
+    const { db, invitationId } = await withInvitation();
+    const result = await db.asUser(
+      AMMA,
+      `select terminal_at from respond_to_invitation('${invitationId}', 'accepted')`
+    );
+    expect((result[0] as { terminal_at: unknown }).terminal_at).not.toBeNull();
+    await db.close();
+  });
+
+  it("sets terminal_at on a successful decline", async () => {
+    const { db, invitationId } = await withInvitation();
+    const result = await db.asUser(
+      AMMA,
+      `select terminal_at from respond_to_invitation('${invitationId}', 'declined')`
+    );
+    expect((result[0] as { terminal_at: unknown }).terminal_at).not.toBeNull();
+    await db.close();
+  });
+
   it("refuses an unauthenticated caller", async () => {
     const { db, invitationId } = await withInvitation();
     await expect(
