@@ -2,12 +2,15 @@
 
 [← index](README.md)
 
-Everything here is `BLOCKED` until the backend exists — there is no Supabase
-project and no Edge Functions yet, so none of it can be run today — **except
-D38**, which is pure on-device local storage and needs no backend at all.
-The `BLOCKED` ones are written now because the design decisions they check
-are being made now, and a check written after the fact tends to be a check
-shaped to pass.
+Everything here is `BLOCKED` until the backend is **deployed** — as of
+2026-09-09, Phases 3-5 (lookup, invitation send/claim, accept-and-schedule)
+are built, unit-tested, and code-reviewed (`docs/superpowers/plans/2026-09-08-tier2-phases-3-5.md`),
+but none of it has been pushed to the live `remindme-tier2` Supabase project
+or had `mcp__Supabase__get_advisors` run against it — so nothing here can be
+run on a real device yet — **except D38**, which is pure on-device local
+storage and needs no backend at all. The `BLOCKED` ones are written now
+because the design decisions they check are being made now, and a check
+written after the fact tends to be a check shaped to pass.
 
 **Six of these need two handsets with two real phone numbers** — a setup cost
 worth planning for rather than discovering. D32 needs a second person.
