@@ -5,7 +5,11 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
-import { bindViaInviteToken, claimPendingInvitations } from "@/services/InvitationService";
+import {
+  bindViaInviteToken,
+  claimPendingInvitations,
+  type ClaimedInvitation,
+} from "@/services/InvitationService";
 
 /**
  * Rung-1 onboarding screen (T2.9 addendum, Task 10): the destination of
@@ -19,8 +23,21 @@ import { bindViaInviteToken, claimPendingInvitations } from "@/services/Invitati
 
 type ScreenState =
   | { phase: "binding" }
-  | { phase: "success"; claimedCount: number }
+  | { phase: "success"; claimed: ClaimedInvitation[] }
   | { phase: "error"; error: string };
+
+function navigateToInvitationPreview(invitation: ClaimedInvitation) {
+  router.push({
+    pathname: "/invitation-preview",
+    params: {
+      id: invitation.id,
+      title: invitation.title,
+      description: invitation.description,
+      datetime: invitation.datetime,
+      senderId: invitation.senderId,
+    },
+  });
+}
 
 function copyForError(error: string): string {
   switch (error) {
@@ -66,7 +83,14 @@ export default function BindInviteScreen() {
 
       const claimed = await claimPendingInvitations();
       if (cancelled) return;
-      setState({ phase: "success", claimedCount: claimed.length });
+      setState({ phase: "success", claimed });
+
+      // For exactly one claimed invitation, skip the intermediate list and
+      // go straight to invitation-preview - the list only earns its place
+      // when there's more than one row to choose from (see task-16 brief).
+      if (claimed.length === 1) {
+        navigateToInvitationPreview(claimed[0]);
+      }
     }
 
     run();
@@ -116,6 +140,29 @@ export default function BindInviteScreen() {
       fontFamily: "Inter_600SemiBold",
       color: colors.primaryForeground,
     },
+    claimedList: {
+      width: "100%",
+      marginBottom: 24,
+      gap: 8,
+    },
+    claimedRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+    },
+    claimedRowTitle: {
+      flex: 1,
+      fontSize: 14,
+      fontFamily: "Inter_500Medium",
+      color: colors.foreground,
+    },
   });
 
   return (
@@ -133,12 +180,29 @@ export default function BindInviteScreen() {
             <Feather name="check-circle" size={40} color={colors.primary} />
             <Text style={styles.title}>You're all set</Text>
             <Text style={styles.message}>
-              {state.claimedCount === 0
+              {state.claimed.length === 0
                 ? "No reminders were waiting for you."
-                : state.claimedCount === 1
+                : state.claimed.length === 1
                   ? "You have 1 reminder waiting for you."
-                  : `You have ${state.claimedCount} reminders waiting for you.`}
+                  : `You have ${state.claimed.length} reminders waiting for you.`}
             </Text>
+            {state.claimed.length > 1 && (
+              <View style={styles.claimedList}>
+                {state.claimed.map((invitation) => (
+                  <Pressable
+                    key={invitation.id}
+                    style={styles.claimedRow}
+                    onPress={() => navigateToInvitationPreview(invitation)}
+                    testID={`claimed-invitation-row-${invitation.id}`}
+                  >
+                    <Text style={styles.claimedRowTitle} numberOfLines={1}>
+                      {invitation.title || "Reminder"}
+                    </Text>
+                    <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+                  </Pressable>
+                ))}
+              </View>
+            )}
             <Pressable style={styles.primaryBtn} onPress={goHome} testID="bind-go-home">
               <Text style={styles.primaryBtnText}>Go to my reminders</Text>
             </Pressable>

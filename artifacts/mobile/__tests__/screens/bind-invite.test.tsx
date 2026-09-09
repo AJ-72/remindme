@@ -1,5 +1,5 @@
 import React from "react";
-import { render, waitFor } from "@testing-library/react-native";
+import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import BindInviteScreen from "@/app/bind-invite";
@@ -9,12 +9,14 @@ jest.mock("expo-haptics");
 
 const mockReplace = jest.fn();
 const mockBack = jest.fn();
+const mockPush = jest.fn();
 let mockSearchParams: { token?: string } = { token: "some-token" };
 
 jest.mock("expo-router", () => ({
   router: {
     replace: (...args: any[]) => mockReplace(...args),
     back: (...args: any[]) => mockBack(...args),
+    push: (...args: any[]) => mockPush(...args),
     canGoBack: () => false,
   },
   useLocalSearchParams: () => mockSearchParams,
@@ -58,7 +60,7 @@ describe("BindInviteScreen", () => {
     await waitFor(() => expect(InvitationService.claimPendingInvitations).toHaveBeenCalled());
   });
 
-  it("shows the claimed count and a way forward on a successful bind", async () => {
+  it("shows the claimed count and a list of tappable rows for N>1 claimed invitations", async () => {
     (InvitationService.bindViaInviteToken as jest.Mock).mockResolvedValue({ ok: true });
     (InvitationService.claimPendingInvitations as jest.Mock).mockResolvedValue([
       { id: "inv-1", title: "Take BP tablets", description: null, datetime: "2026-09-09T08:00:00Z", senderId: "s1" },
@@ -69,9 +71,24 @@ describe("BindInviteScreen", () => {
 
     expect(await findByText(/2 reminders waiting/i)).toBeTruthy();
     expect(getByTestId("bind-go-home")).toBeTruthy();
+
+    const row1 = getByTestId("claimed-invitation-row-inv-1");
+    fireEvent.press(row1);
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: "/invitation-preview",
+      params: {
+        id: "inv-1",
+        title: "Take BP tablets",
+        description: null,
+        datetime: "2026-09-09T08:00:00Z",
+        senderId: "s1",
+      },
+    });
+
+    expect(getByTestId("claimed-invitation-row-inv-2")).toBeTruthy();
   });
 
-  it("shows singular copy when exactly one invitation is claimed", async () => {
+  it("shows singular copy and navigates directly to invitation-preview when exactly one invitation is claimed", async () => {
     (InvitationService.bindViaInviteToken as jest.Mock).mockResolvedValue({ ok: true });
     (InvitationService.claimPendingInvitations as jest.Mock).mockResolvedValue([
       { id: "inv-1", title: "Take BP tablets", description: null, datetime: "2026-09-09T08:00:00Z", senderId: "s1" },
@@ -80,6 +97,18 @@ describe("BindInviteScreen", () => {
     const { findByText } = renderScreen();
 
     expect(await findByText(/1 reminder waiting/i)).toBeTruthy();
+    await waitFor(() =>
+      expect(mockPush).toHaveBeenCalledWith({
+        pathname: "/invitation-preview",
+        params: {
+          id: "inv-1",
+          title: "Take BP tablets",
+          description: null,
+          datetime: "2026-09-09T08:00:00Z",
+          senderId: "s1",
+        },
+      })
+    );
   });
 
   it("shows copy for an invalid or already-used token", async () => {
