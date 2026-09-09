@@ -53,6 +53,10 @@ begin
     raise exception 'recipient is not accepting reminders from you' using errcode = 'P0001';
   end if;
 
+  if not public.check_first_contact_rate_limit(caller, recipient_hash) then
+    raise exception 'too many new contacts today' using errcode = 'P0001';
+  end if;
+
   insert into public.invitations (
     sender_id, recipient_phone_hash, title, description,
     datetime, original_datetime, expires_at, content_expires_at

@@ -4,7 +4,9 @@
     "bindViaInviteToken.sql",
     "claimInvitations.sql",
     "hashLookup.sql",
+    "getSenderDisplayName.sql",
     "checkLookupRateLimit.sql",
+    "checkFirstContactRateLimit.sql",
     "sendInvitation.sql",
     "getPushTokensForUser.sql"
   ]

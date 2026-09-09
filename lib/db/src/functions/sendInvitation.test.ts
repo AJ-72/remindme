@@ -93,6 +93,19 @@ describe("send_invitation", () => {
     await db.close();
   });
 
+  it("refuses the 11th distinct new recipient within 24 hours (T4.6)", async () => {
+    const db = await withSeed();
+    for (let i = 0; i < 10; i++) {
+      const id = `20000000-0000-0000-0000-${String(i).padStart(12, "0")}`;
+      await db.asService(`insert into users (id, phone_hash) values ('${id}', 'hash-fc-${i}');`);
+      await db.asUser(ANAND, `select * from send_invitation('${id}', 'X', 'Y', now() + interval '2 hours')`);
+    }
+    await expect(
+      db.asUser(ANAND, `select * from send_invitation('${AMMA}', 'X', 'Y', now() + interval '2 hours')`)
+    ).rejects.toThrow();
+    await db.close();
+  });
+
   it("refuses an unauthenticated caller", async () => {
     const db = await withSeed();
     await expect(
