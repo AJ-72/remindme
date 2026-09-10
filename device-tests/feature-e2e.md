@@ -273,3 +273,42 @@ background in both themes and at the largest font size.
 whole page then scrolls sideways), the article cannot be scrolled to its
 end, or body text drops to near-invisible contrast in one theme — the usual
 cause is a hardcoded colour that only suits the other.
+
+## D28 — System-wide "Remind Me" text-selection menu · `PENDING`
+
+*Added 2026-09-10.* `ACTION_PROCESS_TEXT` is pure system integration: the
+menu entry, the launch intent and the singleTask re-use path all live in the
+OS. Jest only proves that text put on the `sharedText` channel reaches
+QuickAddInput. Needs a **native build** (dev client or release) — a Metro
+reload cannot add an intent-filter.
+
+**Setup.** Install a fresh native build (`npx expo run:android`, or an EAS
+build). Force-stop Reminders first, so the first case is a true cold start.
+
+**Steps.**
+1. Open Chrome. Select a sentence, for example "call the dentist tomorrow at
+   5". Open the floating toolbar overflow (⋮).
+2. Press **Remind Me**.
+3. Read the quick-add field on the home screen.
+4. Rotate the phone, then rotate it back.
+5. Press Home. Open WhatsApp. Select different text and press **Remind Me**
+   again.
+6. Repeat step 5 from Gmail, from a read-only field (a web page) and from an
+   editable field (a compose box).
+7. Select Malayalam text, for example "നാളെ രാവിലെ 5 മണിക്ക്", and press
+   **Remind Me**.
+
+**Pass.** "Remind Me" is in the toolbar in every app; each press opens
+Reminders with the quick-add field filled with exactly the selected text;
+the parsed date preview appears; rotation does not duplicate or re-insert
+the text; the second selection replaces the first without a second app
+instance in the recents list; Malayalam text arrives in Malayalam glyphs.
+
+**Fails if.** The menu entry is absent (filter or label missing), the app
+opens with an empty field (the intent extra is not read), the text comes
+back after a rotation (the intent is not consumed), or two Reminders
+entries appear in recents (launchMode is wrong).
+
+**Note.** The app never replaces the source text — it only reads it. So the
+calling app always gets `RESULT_CANCELED`, and an editable source field must
+stay unchanged.

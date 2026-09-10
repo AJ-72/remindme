@@ -1,0 +1,7 @@
+{
+  "name": "process-text",
+  "version": "0.1.0",
+  "description": "Reads Android ACTION_PROCESS_TEXT payloads (text selected in another app).",
+  "main": "index.ts",
+  "private": true
+}

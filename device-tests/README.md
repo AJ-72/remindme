@@ -17,7 +17,7 @@ ships it.**
 | --- | --- | --- |
 | [cross-cutting.md](cross-cutting.md) | Alarm delivery mechanics — the OEM battery/Doze/AlarmManager behavior everything else depends on | D1, D7, D19, D20, D22, D25, D26 |
 | [notifications.md](notifications.md) | Notification actions, channels, dedupe | D2, D3, D4, D15, D16 |
-| [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9, D10, D11, D12, D13 |
+| [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9, D10, D11, D12, D13, D28 |
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14 |
 | [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete | D17, D18, D21, D23 |
 | [malayalam-parsing.md](malayalam-parsing.md) | On-device Malayalam input/parsing (numerals, ambiguous readings, AM/PM) | D24, + 2 unnumbered checklists |
