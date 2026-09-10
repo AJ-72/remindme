@@ -63,6 +63,13 @@ begin
   --   - not past its own expiry or its content-retention cutoff
   --   - this caller holds no OTHER number already (one number per account in
   --     v1 - a mismatch here must abort the whole claim, not partially land it)
+  --   - no OTHER account already holds this invitation's number (the mirror
+  --     case: a stale/duplicate identity - e.g. a prior install of the same
+  --     physical number - already claimed this phone_hash under a different
+  --     id. Without this, the later INSERT ... on conflict (id) can't catch
+  --     it either, since its conflict target is `id`, not `phone_hash` - it
+  --     would fall through to a raw users_phone_hash_unique violation instead
+  --     of this function's own "already bound" error)
   update public.invitations i
      set bound_by = caller,
          bound_at = now()
@@ -73,6 +80,10 @@ begin
      and not exists (
        select 1 from public.users u
         where u.id = caller and u.phone_hash <> i.recipient_phone_hash
+     )
+     and not exists (
+       select 1 from public.users u
+        where u.id <> caller and u.phone_hash = i.recipient_phone_hash
      )
   returning i.* into inv;
 
@@ -89,8 +100,11 @@ begin
     elsif inv.bound_by is not null and inv.bound_by <> caller then
       raise exception 'number already bound to a different account' using errcode = 'P0001';
     else
-      -- Only remaining reason the UPDATE's WHERE could have failed: this
-      -- caller already holds a different number than this token's.
+      -- Only remaining reasons the UPDATE's WHERE could have failed: either
+      -- this caller already holds a different number than this token's, or a
+      -- different account already holds THIS token's number (stale/duplicate
+      -- identity on the same physical number). Same user-facing error either
+      -- way - which account is "wrong" isn't this caller's business to know.
       raise exception 'number already bound to a different account' using errcode = 'P0001';
     end if;
   end if;

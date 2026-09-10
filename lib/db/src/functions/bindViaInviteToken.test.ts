@@ -94,6 +94,25 @@ describe("bind_via_invite_token", () => {
     await db.close();
   });
 
+  it("refuses a fresh caller whose target phone_hash is already owned by a different account", async () => {
+    // Mirror of the "already bound to a different number" case above, but
+    // from the other direction: here it's the CALLER who is fresh (no row of
+    // their own yet), and it's a DIFFERENT, unrelated account that already
+    // holds this invitation's phone_hash - e.g. a stale/duplicate identity
+    // left over from an earlier install of the same physical number. Without
+    // an explicit guard, the INSERT ... on conflict (id) do update doesn't
+    // catch this (the conflict target is `id`, not `phone_hash`), so it falls
+    // through to a raw duplicate-key violation on users_phone_hash_unique
+    // instead of the same friendly "already bound" error the mirror case
+    // gets.
+    const { db, token } = await withInvitation();
+    await db.asService(`insert into users (id, phone_hash) values ('${STRANGER}', 'hash-amma')`);
+    await expect(
+      db.asUser(AMMA, `select * from bind_via_invite_token('${token}')`)
+    ).rejects.toThrow(/already bound/i);
+    await db.close();
+  });
+
   it("refuses an unknown token", async () => {
     const { db } = await withInvitation();
     const bogus = "00000000-0000-4000-8000-000000000000";
