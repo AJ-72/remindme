@@ -4,6 +4,7 @@ import {
   checkForInvitations,
   bindViaInviteToken,
   respondToInvitation,
+  resolveSenderNames,
 } from "./InvitationService";
 import * as SessionService from "./SessionService";
 
@@ -200,7 +201,7 @@ describe("checkForInvitations", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("does not navigate when more than one invitation is claimed (list is a separate concern)", async () => {
+  it("does not call the single-invitation navigate when more than one is claimed", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -216,11 +217,121 @@ describe("checkForInvitations", () => {
     expect(result).toHaveLength(2);
   });
 
+  // B15
+  it("calls navigateToList with the full claimed list when more than one invitation is claimed", async () => {
+    const claimed = [
+      { id: "inv-1", title: "A", description: null, datetime: "2026-09-09T08:00:00.000Z", senderId: "s1" },
+      { id: "inv-2", title: "B", description: null, datetime: "2026-09-10T08:00:00.000Z", senderId: "s2" },
+    ];
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ claimed }) });
+    const navigate = jest.fn();
+    const navigateToList = jest.fn();
+    await checkForInvitations(navigate, navigateToList);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(navigateToList).toHaveBeenCalledTimes(1);
+    expect(navigateToList).toHaveBeenCalledWith(claimed);
+  });
+
+  it("does not call navigateToList when exactly one invitation is claimed", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        claimed: [
+          { id: "inv-1", title: "A", description: null, datetime: "2026-09-09T08:00:00.000Z", senderId: "s1" },
+        ],
+      }),
+    });
+    const navigate = jest.fn();
+    const navigateToList = jest.fn();
+    await checkForInvitations(navigate, navigateToList);
+    expect(navigateToList).not.toHaveBeenCalled();
+  });
+
+  it("does not throw when navigateToList is omitted and more than one is claimed", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        claimed: [
+          { id: "inv-1", title: "A", description: null, datetime: "2026-09-09T08:00:00.000Z", senderId: "s1" },
+          { id: "inv-2", title: "B", description: null, datetime: "2026-09-10T08:00:00.000Z", senderId: "s2" },
+        ],
+      }),
+    });
+    const navigate = jest.fn();
+    await expect(checkForInvitations(navigate)).resolves.toHaveLength(2);
+  });
+
   it("swallows a missing session / network failure and never throws", async () => {
     (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(null);
     const navigate = jest.fn();
     const result = await checkForInvitations(navigate);
     expect(result).toEqual([]);
     expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+// B15
+describe("resolveSenderNames", () => {
+  beforeEach(() => {
+    (SessionService.getSupabaseClient as jest.Mock).mockReset();
+  });
+
+  it("resolves a display_name for each sender id via one rpc call per unique id", async () => {
+    const rpcMock = jest.fn().mockImplementation((_fn: string, args: { p_sender_id: string }) => {
+      const names: Record<string, string> = { s1: "Amma", s2: "Ravi" };
+      return Promise.resolve({ data: names[args.p_sender_id] ?? null, error: null });
+    });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+    const result = await resolveSenderNames(["s1", "s2"]);
+
+    expect(result).toEqual({ s1: "Amma", s2: "Ravi" });
+    expect(rpcMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("de-dupes repeated sender ids into a single rpc call each", async () => {
+    const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+    const result = await resolveSenderNames(["s1", "s1", "s1"]);
+
+    expect(result).toEqual({ s1: "Amma" });
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves to null for an id whose lookup errors, without failing the others", async () => {
+    const rpcMock = jest.fn().mockImplementation((_fn: string, args: { p_sender_id: string }) => {
+      if (args.p_sender_id === "bad") {
+        return Promise.resolve({ data: null, error: { message: "boom" } });
+      }
+      return Promise.resolve({ data: "Amma", error: null });
+    });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+    const result = await resolveSenderNames(["s1", "bad"]);
+
+    expect(result).toEqual({ s1: "Amma", bad: null });
+  });
+
+  it("resolves to null for an id whose rpc call throws, without failing the others", async () => {
+    const rpcMock = jest.fn().mockImplementation((_fn: string, args: { p_sender_id: string }) => {
+      if (args.p_sender_id === "bad") return Promise.reject(new Error("network"));
+      return Promise.resolve({ data: "Amma", error: null });
+    });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+    const result = await resolveSenderNames(["s1", "bad"]);
+
+    expect(result).toEqual({ s1: "Amma", bad: null });
+  });
+
+  it("returns an empty object for an empty id list", async () => {
+    const rpcMock = jest.fn();
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+    const result = await resolveSenderNames([]);
+
+    expect(result).toEqual({});
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 });

@@ -151,6 +151,42 @@ export async function claimPendingInvitations(): Promise<ClaimedInvitation[]> {
   }
 }
 
+/**
+ * Resolves display names for several senders at once (B15's pending-list
+ * screen shows one row per invitation, potentially from several different
+ * senders, and firing get_sender_display_name() once per row serially would
+ * be N round trips on a screen that's already a "several things happened at
+ * once" moment). De-dupes ids first, since the same sender commonly appears
+ * on more than one pending row. Callers still need their own "Someone"
+ * fallback per id - matches invitation-preview.tsx's existing precedent
+ * rather than baking a copy-string into a service function.
+ *
+ * Never throws - a lookup failure for one id resolves to null in the map
+ * (same as invitation-preview.tsx's own null-on-error handling) rather than
+ * failing every other row on the screen.
+ */
+export async function resolveSenderNames(
+  senderIds: string[]
+): Promise<Record<string, string | null>> {
+  const uniqueIds = Array.from(new Set(senderIds));
+  const client = getSupabaseClient();
+
+  const results = await Promise.all(
+    uniqueIds.map(async (id) => {
+      try {
+        const { data, error } = await client.rpc("get_sender_display_name", {
+          p_sender_id: id,
+        });
+        return [id, error || !data ? null : data] as const;
+      } catch {
+        return [id, null] as const;
+      }
+    })
+  );
+
+  return Object.fromEntries(results);
+}
+
 export type BindResult = { ok: true } | { ok: false; error: string };
 
 /**
@@ -213,28 +249,33 @@ export async function respondToInvitation(
 }
 
 /**
- * Shared "go check for invitations, and if there's exactly one, jump
- * straight to it" logic - previously duplicated between bind-invite.tsx and
- * register-number.tsx (each with its own local navigateToInvitationPreview
- * + claimPendingInvitations().then(...) call). Pulled out so the same check
- * can also run from app-foreground/launch and from a received push,
- * without a third copy of the "exactly one vs. more than one" rule.
+ * Shared "go check for invitations, and route appropriately" logic -
+ * previously duplicated between bind-invite.tsx and register-number.tsx
+ * (each with its own local navigateToInvitationPreview +
+ * claimPendingInvitations().then(...) call). Pulled out so the same check
+ * can also run from app-foreground/launch and from a received push, without
+ * a third copy of the "one vs. more than one" rule.
  *
- * More than one claimed invitation deliberately does NOT navigate here -
- * same precedent as bind-invite.tsx: a multi-invitation list is a separate,
- * still-unbuilt screen (Task 11/Phase 5's scope boundary), not something
- * this helper should improvise.
+ * B15: more than one claimed invitation now navigates to the pending-list
+ * screen (navigateToList) instead of being dropped on the floor - the
+ * previous behavior (claim silently, show nothing) is the exact gap B15
+ * exists to close. navigateToList is optional so an existing caller that
+ * hasn't been updated yet still compiles and keeps its old "do nothing for
+ * 2+" behavior rather than crashing on a missing callback.
  *
  * Never throws - claimPendingInvitations() already swallows its own
  * failures (missing session, network error) and returns [], which this
  * simply passes through with no navigation.
  */
 export async function checkForInvitations(
-  navigate: (invitation: ClaimedInvitation) => void
+  navigate: (invitation: ClaimedInvitation) => void,
+  navigateToList?: (invitations: ClaimedInvitation[]) => void
 ): Promise<ClaimedInvitation[]> {
   const claimed = await claimPendingInvitations();
   if (claimed.length === 1) {
     navigate(claimed[0]);
+  } else if (claimed.length > 1) {
+    navigateToList?.(claimed);
   }
   return claimed;
 }

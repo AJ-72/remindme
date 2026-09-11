@@ -72,6 +72,10 @@ function RootLayoutNav() {
         name="invitation-preview"
         options={{ headerShown: false, presentation: "modal" }}
       />
+      <Stack.Screen
+        name="pending-invitations"
+        options={{ headerShown: false, presentation: "modal" }}
+      />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
     </Stack>
   );
