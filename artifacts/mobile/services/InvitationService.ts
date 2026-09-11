@@ -41,6 +41,39 @@ export async function sendInvitation(
   }
 }
 
+/**
+ * Syncs the local "Your name" setting to `users.display_name` (B11), so
+ * send-invitation's push notification and get_sender_display_name() (read
+ * by invitation-preview.tsx) have something real to show instead of always
+ * falling back to "Someone". Direct client update, not an Edge Function -
+ * `display_name` is already both RLS- and column-grant writable by the
+ * owning row's own auth.uid() (users_update_self, privileges.sql), the same
+ * shape as invitation-preview.tsx's direct `blocks` insert.
+ *
+ * Deliberately does NOT call ensureSession() - syncing a name must never be
+ * the thing that first creates a network identity for an anonymous-by-
+ * default user (SessionService.ts header). No session yet means nothing to
+ * sync to, so this silently no-ops rather than establishing one.
+ */
+export async function syncDisplayName(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+
+  const session = await getCurrentSession();
+  if (!session) return;
+
+  try {
+    await getSupabaseClient()
+      .from("users")
+      .update({ display_name: trimmed })
+      .eq("id", session.user.id);
+  } catch {
+    // Best-effort - a failed sync must never block the name setting itself
+    // from saving locally, and there is nothing actionable to show the user
+    // for a background sync failure.
+  }
+}
+
 export type SelfRegisterResult = { ok: true; appUserId: string } | { ok: false; error: string };
 
 /**

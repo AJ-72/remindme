@@ -42,6 +42,7 @@ import {
   snoozeReminder as serviceSnooze,
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
+import { syncDisplayName } from "@/services/InvitationService";
 import { DEFAULT_QUIET_HOURS, type QuietHours } from "@/utils/quietHours";
 import {
   DEFAULT_SNOOZE_PRESET,
@@ -252,6 +253,10 @@ export function RemindersProvider({
     // Store the trimmed form, matching what the service persisted, so the
     // greeting never renders a stray space the next render would drop anyway.
     setUserNameState(name.trim());
+    // B11: fire-and-forget, best-effort - a sync failure or a not-yet-bound
+    // user (syncDisplayName no-ops with no session) must never block the
+    // name itself from saving locally, which is why this isn't awaited.
+    syncDisplayName(name);
   }, []);
 
   const setDictationLanguage = useCallback(async (lang: DictationLanguage) => {
