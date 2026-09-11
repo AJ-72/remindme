@@ -59,3 +59,9 @@ Thumbs.db
 # catchup skill — local session state, not committed
 .claude/catchup-state.md
 .claude/last-catchup.md
+
+# Firebase config — tied to a personal Firebase project; real file lives
+# locally and as an EAS secret file for cloud builds. See
+# artifacts/mobile/google-services.json.example for the shape and CLAUDE.md
+# for setup steps.
+artifacts/mobile/google-services.json

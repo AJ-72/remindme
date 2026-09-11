@@ -279,6 +279,20 @@ export default function SettingsScreen() {
             </View>
             <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
           </Pressable>
+          <Pressable
+            style={[styles.row, styles.rowDivider]}
+            onPress={() => router.push("/register-number")}
+            testID="register-number-row"
+          >
+            <Feather name="phone" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Your number</Text>
+              <Text style={styles.rowSubLabel}>
+                Register so other people can find and remind you in-app
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
+          </Pressable>
         </View>
 
         {/* When reminders go off — the settings a user actually returns for */}

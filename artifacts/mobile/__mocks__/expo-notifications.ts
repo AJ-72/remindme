@@ -20,6 +20,9 @@ export const getPermissionsAsync = jest.fn().mockResolvedValue({
   status: "granted",
   android: { alarm: true },
 });
+export const getExpoPushTokenAsync = jest
+  .fn()
+  .mockResolvedValue({ data: "ExponentPushToken[mock]" });
 export const setNotificationChannelAsync = jest
   .fn()
   .mockResolvedValue(undefined);
@@ -40,6 +43,9 @@ export const clearLastNotificationResponseAsync = jest
   .fn()
   .mockResolvedValue(undefined);
 export const addNotificationResponseReceivedListener = jest
+  .fn()
+  .mockReturnValue({ remove: jest.fn() });
+export const addNotificationReceivedListener = jest
   .fn()
   .mockReturnValue({ remove: jest.fn() });
 

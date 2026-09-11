@@ -21,6 +21,7 @@ ships it.**
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14 |
 | [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete | D17, D18, D21, D23 |
 | [malayalam-parsing.md](malayalam-parsing.md) | On-device Malayalam input/parsing (numerals, ambiguous readings, AM/PM) | D24, + 2 unnumbered checklists |
+| [remind-others.md](remind-others.md) | M4 Tier 2, app-to-app delivery — all `BLOCKED` on a backend that does not exist yet, except D38 (local-only) | D27-D38 |
 
 ## Status legend
 
@@ -44,8 +45,13 @@ ships it.**
 ## All scenarios at a glance
 
 Last updated after the automated run of **2026-09-04** (OnePlus CPH2569,
-local debug build via `expo run:android`) unless noted. **9 `AUTO` · 14
-`SEMI` · 1 `MANUAL`.**
+local debug build via `expo run:android`) unless noted. **9 `AUTO` · 24
+`SEMI` · 2 `MANUAL`.**
+
+The 11 `BLOCKED` Tier 2 rows at the bottom are not runnable at all yet — no
+Supabase project, no Edge Functions. **Six of them need two handsets with two
+real phone numbers**, which is a setup cost worth planning for rather than
+discovering.
 
 | ID | Scenario | Status | Last run | Auto? | Blocks backlog | File |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -62,7 +68,7 @@ local debug build via `expo run:android`) unless noted. **9 `AUTO` · 14
 | D15 | Body tap, then Mark Done | `PENDING` | — | SEMI | — | [notifications](notifications.md#d15) |
 | D16 | Personalized snooze re-alert | `PARTIAL` | 2026-09-04 | AUTO (partial) | — | [notifications](notifications.md#d16) |
 | D12 | Vague-task hint | `PASS` | 2026-09-04 | AUTO | — | [feature-e2e](feature-e2e.md#d12) |
-| D9 | Remind-someone-else Tier 1 | `PARTIAL` | 2026-08-29 | SEMI | **B8** M4 Tier 1 sign-off | [feature-e2e](feature-e2e.md#d9) |
+| D9 | Remind-someone-else Tier 1 | `PARTIAL` (core loop `PASS`) | 2026-08-30 | SEMI | **B8** M4 Tier 1 sign-off | [feature-e2e](feature-e2e.md#d9) |
 | D10 | Name capture and personalization | `PARTIAL` | 2026-08-24 | SEMI | — | [feature-e2e](feature-e2e.md#d10) |
 | D6 | Malayalam dictation end to end | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d6) |
 | D11 | Quiet hours incl. midnight wrap | `PARTIAL` | 2026-09-04 | AUTO (partial) | — | [feature-e2e](feature-e2e.md#d11) |
@@ -76,6 +82,18 @@ local debug build via `expo run:android`) unless noted. **9 `AUTO` · 14
 | D24 | 12-hour AM/PM time display | `BLOCKED` | 2026-09-03 (attempted) | AUTO | — | [malayalam-parsing](malayalam-parsing.md#d24) |
 | — | Malayalam numeral clock times (dot separator + am/pm) | `PENDING` | — | MANUAL | — | [malayalam-parsing](malayalam-parsing.md#numeral-clock-times) |
 | — | Ambiguous-numeral confirmation sheet | `PENDING` | — | SEMI | — | [malayalam-parsing](malayalam-parsing.md#ambiguous-numeral-sheet) |
+| D29 | Tier 2: accepted reminder fires locally, survives reboot | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d29) |
+| D34 | Tier 2: verification ladder, link rung and OTP rung | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d34) |
+| D35 | Tier 2: invite token single-use, survives link preview | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d35) |
+| D28 | Tier 2: invitation arrives with the app killed | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d28) |
+| D27 | Tier 2: registration and the discoverability switch | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d27) |
+| D30 | Tier 2: block blocks, and unblock re-delivers nothing | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d30) |
+| D31 | Tier 2: expiry at the reminder's own time | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d31) |
+| D32 | Tier 2: concurrent cancel versus reschedule | `BLOCKED` | — | MANUAL | **M4-T2** | [remind-others](remind-others.md#d32) |
+| D33 | Tier 2: Tier 1 fallback for an unreachable recipient | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d33) |
+| D36 | Tier 2: rebind on a new phone, and the 45-day cliff | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d36) |
+| D37 | Tier 2: cancel while the recipient is offline | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d37) |
+| D38 | Tier 2: device key persists across restart, absent on fresh install | `PENDING` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d38) |
 
 **2026-09-04 note:** D4, D11, D16, D17, D18 moved from `PENDING` to
 `PARTIAL` — new Maestro flows (`Maestro/d4_*`, `d11_*`, `d16_*`, `d17_*`,

@@ -77,6 +77,15 @@ export interface ReminderRecipient {
   phone: string;
   /** Advisory only; contact ids change across devices and contact merges. */
   contactId?: string;
+  /**
+   * Cached reachability (T3.5). Derived, never a durable fact - see
+   * isReachabilityStale() in RecipientLookupService.ts. Absent means "never
+   * checked", not "no app".
+   */
+  appUserId?: string | null;
+  /** When appUserId was last determined. Paired with appUserId; check
+   * isReachabilityStale() before trusting either without re-checking. */
+  lookedUpAt?: string;
 }
 
 export interface Reminder {

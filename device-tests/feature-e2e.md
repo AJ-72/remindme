@@ -5,7 +5,7 @@
 | ID | Scenario | Status | Last run | Auto? |
 | --- | --- | --- | --- | --- |
 | [D12](#d12) | Vague-task hint | `PASS` | 2026-08-29 | AUTO |
-| [D9](#d9) | Remind-someone-else Tier 1 | `PARTIAL` | 2026-08-29 | SEMI |
+| [D9](#d9) | Remind-someone-else Tier 1 | `PARTIAL` (core loop `PASS`) | 2026-08-30 | SEMI |
 | [D10](#d10) | Name capture and personalization | `PARTIAL` | 2026-08-24 | SEMI |
 | [D6](#d6) | Malayalam dictation end to end | `PENDING` | — | MANUAL |
 | [D11](#d11) | Quiet hours incl. midnight wrap | `PARTIAL` | 2026-09-04 | AUTO (partial) |
@@ -60,12 +60,19 @@ neither test title carries a parseable time — see the flow's own comments);
 
 Blocks backlog **B8** (M4 Tier 1 device sign-off).
 
-**Passing** (2026-08-24, user's OEM device): the send screen opens with the
-message pre-filled, the signature and invite line render, and WhatsApp
-receives the pre-filled text.
+**Core loop `PASS`** (2026-08-30, user's OEM device): a contact was picked
+from the phone's contacts and the pre-filled message sent by **both WhatsApp
+and SMS**. With the 2026-08-24 run (send screen opens pre-filled, signature
+and invite line render), that is the happy path end to end, and M4 Tier 1
+counts as shipped rather than pending.
+
+What is left below is the set of paths a happy-path run cannot reach. Each is
+worth its own run; step 1 of the unproven list is the one that would silently
+degrade every WhatsApp send on a whole class of devices.
 
 **Still outstanding** (needs a native build — `expo-contacts` has no OTA
-path).
+path). The full-loop steps below are retained because the cold-start tap and
+the notification body text were not part of the 2026-08-30 run.
 
 **Setup.** EAS build. Contacts permission not yet granted, so step 1
 exercises the prompt. Have a contact who **is** on WhatsApp and one who is

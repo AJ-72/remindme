@@ -1,0 +1,29 @@
+# Remind-someone-else e2e (negative case), done entirely from the
+# quick-add composer on the home screen: pick contact "Padma"
+# (+917306412884 - confirmed NOT a registered app user) via the recipient
+# picker, and assert the "has app" zap/bolt badge (testID
+# recipient-in-app-badge) does NOT appear once RecipientLookupService
+# resolves reachable=false. Non-destructive: no clearState, doesn't tap Save.
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Call padma tomorrow at 9am"
+- tapOn:
+    id: "quick-add-recipient"
+- tapOn: "Search name or number"
+- inputText: "7306412884"
+- tapOn: "Padma"
+# Give the async lookup call time to resolve before asserting absence -
+# asserting too early would pass for the wrong reason (not yet resolved).
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-recipient-chip"
+    timeout: 10000
+- assertNotVisible:
+    id: "recipient-in-app-badge"
