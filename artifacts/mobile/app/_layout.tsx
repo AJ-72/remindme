@@ -12,7 +12,7 @@ import {
   NotoSansMalayalam_700Bold,
 } from "@expo-google-fonts/noto-sans-malayalam";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
 import { AppState, View } from "react-native";
@@ -31,6 +31,7 @@ import { SharedTextProvider } from "@/contexts/SharedTextContext";
 import {
   checkExactAlarmPermission,
   hasCompletedPermissionOnboarding,
+  hasCompletedRegistrationOnboarding,
   markPermissionOnboardingComplete,
   openExactAlarmSettings,
   requestNotificationPermissions,
@@ -139,6 +140,24 @@ export default function RootLayout() {
       setReadyForNamePrompt(true);
     });
   }, []);
+
+  // First-run registration onboarding (B12) - deliberately AFTER the
+  // permission onboarding and name-prompt gate settle (readyForNamePrompt),
+  // same stacking-dialog concern as NameOnboarding above: pushing a modal
+  // route while a system permission dialog is up would bury it. Explicitly
+  // optional (skippable in the screen itself) - this app's core reminder
+  // loop needs no account, so this never blocks reaching the home screen,
+  // it only offers registration once per install.
+  const registrationOnboardingChecked = useRef(false);
+  useEffect(() => {
+    if (!readyForNamePrompt || registrationOnboardingChecked.current) return;
+    registrationOnboardingChecked.current = true;
+    hasCompletedRegistrationOnboarding().then((completed) => {
+      if (!completed) {
+        router.push({ pathname: "/register-number", params: { firstRun: "1" } });
+      }
+    });
+  }, [readyForNamePrompt]);
 
   // Re-check when user returns from Settings so banner clears automatically
   // once the permission is granted, without requiring an app restart.
