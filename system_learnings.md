@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-11 — B15: Expo's push API has no field for Android notification group/tag, and the "pending count" plumbing question dissolved on inspection
+
+**WHAT:** Two findings while designing B15 (the multi-invitation list screen): (1) `claim_invitations()` (the DB RPC) already claims-and-returns every pending invitation for the caller in one atomic call — there is no separate "peek how many are pending" query to build, since claiming is a one-shot sweep, not a queryable running count. This meant B15's own backlog note ("plumbing to know how many are pending is not yet decided") was based on a wrong assumption — the existing claim response already has everything needed, just previously discarded when its length was > 1. (2) `_shared/expoPush.ts`'s `PushMessage` interface only sends `title`/`body`/`data` — Expo's push API has no documented field for Android's native notification group/tag, so a server-sent push cannot make Android collapse multiple tray entries into one on its own. True OS-level grouping would require bypassing Expo Push for a raw FCM call with its own service-account credential path.
+
+**WHY:** (1) is worth remembering any time a backlog note assumes new server plumbing is needed for "how many X are pending" — check whether the existing write path already returns the full set before assuming a new read path is required. (2) is a real Expo Push API limitation, not a gap in this codebase's usage of it — confirmed by reading `PushMessage`'s actual shape rather than assuming Expo supports OS-level grouping because most push services eventually do.
+
+**WHERE:** `lib/db/src/functions/claimInvitations.sql` (the atomic claim), `supabase/functions/_shared/expoPush.ts` (the push payload shape). Resolution shipped in `backlog.md` B15 (`DONE`): the list screen reuses the existing claim response directly (no new RPC), and push grouping was solved client-side instead (`artifacts/mobile/services/invitationNotificationGrouping.ts` — dismiss+re-post a local summary notification while the app is alive to see the push land), deferring a real FCM-level fix as separate, larger scope. If that real fix is ever built, it needs a new FCM service-account credential path in the Edge Function, distinct from the existing Expo Push flow used everywhere else.
+
 ## 2026-09-11 — B14 fixed: redeploying an Edge Function needs no mobile app rebuild, and the drift was isolated to one function
 
 **WHAT:** Redeployed `send-invitation` to `remindme-tier2` (v2→v3) via `mcp__Supabase__deploy_edge_function`, confirmed via `get_edge_function` that the live source now matches the repo exactly. Audited the other 4 functions for the same class of drift (`lookup`, `claim-invitations`, `respond-invitation`, `expire-invitations-cron`) by diffing their live `get_edge_function` output against repo source — all 4 matched byte-for-byte, so the staleness was isolated to `send-invitation` alone, not a systemic redeploy gap.
