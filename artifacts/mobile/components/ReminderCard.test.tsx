@@ -104,6 +104,44 @@ describe("ReminderCard — send reminders", () => {
   });
 });
 
+describe("ReminderCard — received reminders (B13)", () => {
+  it("shows the sender chip for a reminder with a senderName", () => {
+    const { getByTestId, getByText } = renderCard(makeReminder({ senderName: "Amma" }));
+    expect(getByTestId("sender-chip")).toBeTruthy();
+    expect(getByText("From Amma")).toBeTruthy();
+  });
+
+  it("shows no sender chip for an ordinary reminder", () => {
+    const { queryByTestId } = renderCard(makeReminder());
+    expect(queryByTestId("sender-chip")).toBeNull();
+  });
+
+  it("lets the sender chip and recipient chip coexist without collision", () => {
+    // Not a realistic combination in practice, but the two badges mark
+    // opposite directions and must not be mutually exclusive by accident.
+    const { getByTestId } = renderCard(
+      makeReminder({
+        senderName: "Amma",
+        recipient: { name: "Priya", phone: "9876543210" },
+      })
+    );
+    expect(getByTestId("sender-chip")).toBeTruthy();
+    expect(getByTestId("recipient-chip")).toBeTruthy();
+  });
+
+  it("renders a Malayalam sender name in the Malayalam font", () => {
+    const { getByText } = renderCard(makeReminder({ senderName: "അമ്മ" }));
+    const el = getByText("From അമ്മ");
+    expect(el.props.style).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fontFamily: expect.stringContaining("NotoSansMalayalam"),
+        }),
+      ])
+    );
+  });
+});
+
 describe("ReminderCard — tap routing", () => {
   const { router } = require("expo-router");
 

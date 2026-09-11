@@ -115,6 +115,12 @@ export default function InvitationPreviewScreen() {
           title: title ?? "",
           description: description ?? "",
           datetime,
+          // B13: preserved so the home screen can badge this as "from
+          // someone else" - displaySenderName already falls back to
+          // "Someone" above (senderName state is null until the RPC
+          // resolves, or the sender has no display_name set).
+          senderName: displaySenderName,
+          senderId,
         });
         goBack();
       }

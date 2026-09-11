@@ -161,6 +161,10 @@ describe("InvitationPreviewScreen", () => {
       title: "Take BP tablets",
       description: "After breakfast",
       datetime: "2026-09-09T08:00:00.000Z",
+      // B13: provenance carried onto the local reminder so the home screen
+      // can badge it as "from someone else" - see ReminderCard.
+      senderName: "Amma",
+      senderId: "sender-1",
     });
   });
 
