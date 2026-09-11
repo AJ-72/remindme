@@ -1,7 +1,15 @@
 import { registerDeviceForPush } from "./DeviceRegistrationService";
 import * as SessionService from "./SessionService";
+import { logDebug } from "./DebugLogService";
 
 jest.mock("./SessionService");
+// The whole point of this service is a fire-and-forget call site (no
+// .then/.catch at either call site in bind-invite.tsx/register-number.tsx) -
+// every outcome, including ok:true, must reach the debug log or a real
+// failure (e.g. push_token_error from a misconfigured native FCM setup, the
+// actual production cause of an empty `devices` table) is invisible even in
+// DebugLogService's own ring buffer.
+jest.mock("./DebugLogService", () => ({ logDebug: jest.fn().mockResolvedValue(undefined) }));
 
 // expo-notifications is dynamically require()'d inside the service (matches
 // ReminderService.ts's own pattern), so mock the module the way the manual
@@ -44,6 +52,9 @@ describe("registerDeviceForPush", () => {
     expect(result).toEqual({ ok: false, error: "not_authenticated" });
     expect(Notifications.getPermissionsAsync).not.toHaveBeenCalled();
     expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(logDebug).toHaveBeenCalledWith(
+      expect.stringContaining("not_authenticated")
+    );
   });
 
   it("returns permission_denied when permission is not granted", async () => {
@@ -54,9 +65,12 @@ describe("registerDeviceForPush", () => {
     const result = await registerDeviceForPush();
 
     expect(result).toEqual({ ok: false, error: "permission_denied" });
+    expect(logDebug).toHaveBeenCalledWith(
+      expect.stringContaining("permission_denied")
+    );
   });
 
-  it("returns push_token_error when getExpoPushTokenAsync throws", async () => {
+  it("returns push_token_error when getExpoPushTokenAsync throws, and logs the native error", async () => {
     (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(FAKE_SESSION);
     (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ status: "granted" });
     (Notifications.getExpoPushTokenAsync as jest.Mock).mockRejectedValue(
@@ -66,6 +80,15 @@ describe("registerDeviceForPush", () => {
     const result = await registerDeviceForPush();
 
     expect(result).toEqual({ ok: false, error: "push_token_error" });
+    // The message itself (e.g. a missing google-services.json on Android)
+    // is the whole diagnostic value here - a bare "push_token_error" string
+    // gives no lead on which of several native failure modes actually fired.
+    expect(logDebug).toHaveBeenCalledWith(
+      expect.stringContaining("push_token_error")
+    );
+    expect(logDebug).toHaveBeenCalledWith(
+      expect.stringContaining("unsupported environment")
+    );
   });
 
   it("inserts the token with this session's user_id and returns ok:true on success", async () => {
@@ -88,6 +111,7 @@ describe("registerDeviceForPush", () => {
     expect(payload.user_id).toBe("user-1");
     expect(payload.expo_push_token).toBe("ExponentPushToken[abc123]");
     expect(update).not.toHaveBeenCalled();
+    expect(logDebug).toHaveBeenCalledWith(expect.stringContaining("ok"));
   });
 
   it("re-registering the same device updates instead of erroring", async () => {
@@ -126,6 +150,9 @@ describe("registerDeviceForPush", () => {
     const result = await registerDeviceForPush();
 
     expect(result).toEqual({ ok: false, error: "token_conflict" });
+    expect(logDebug).toHaveBeenCalledWith(
+      expect.stringContaining("token_conflict")
+    );
   });
 
   it("returns registration_failed on a generic insert error", async () => {
@@ -139,6 +166,9 @@ describe("registerDeviceForPush", () => {
     const result = await registerDeviceForPush();
 
     expect(result).toEqual({ ok: false, error: "registration_failed" });
+    expect(logDebug).toHaveBeenCalledWith(
+      expect.stringContaining("registration_failed")
+    );
   });
 
   it("returns registration_failed if the update-on-conflict path itself errors", async () => {
@@ -164,5 +194,8 @@ describe("registerDeviceForPush", () => {
       ok: false,
       error: "registration_failed",
     });
+    expect(logDebug).toHaveBeenCalledWith(
+      expect.stringContaining("registration_failed")
+    );
   });
 });

@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import { getCurrentSession, getSupabaseClient } from "./SessionService";
+import { logDebug } from "./DebugLogService";
 
 /**
  * Writes this handset's Expo push token to `devices` (Task 16 final-review
@@ -20,6 +21,15 @@ import { getCurrentSession, getSupabaseClient } from "./SessionService";
  * split so a caller who already denied permission doesn't get re-prompted on
  * every bind. Requesting is still fine here since bind-invite.tsx only calls
  * this once, right after a fresh bind succeeds.
+ *
+ * Every outcome (success and every typed failure) is also written to
+ * DebugLogService. Both call sites (bind-invite.tsx, register-number.tsx)
+ * are fire-and-forget with no .then/.catch, so without this a real failure -
+ * e.g. push_token_error from a device with no FCM configured - is invisible
+ * everywhere, including this app's own debug log screen. Confirmed live: the
+ * `devices` table had zero rows in production despite both call sites
+ * running on every bind/register, because getExpoPushTokenAsync() was
+ * throwing silently and nothing surfaced it.
  */
 
 export type RegisterDeviceResult = { ok: true } | { ok: false; error: string };
@@ -42,6 +52,19 @@ function projectIdFromConfig(): string | undefined {
 }
 
 export async function registerDeviceForPush(): Promise<RegisterDeviceResult> {
+  const result = await registerDeviceForPushInner();
+  // Single log point for every exit path (see the doc comment above for
+  // why this exists at all) rather than one call per return - a return
+  // added later here can't forget to log, since there is nothing to add.
+  await logDebug(
+    result.ok
+      ? "registerDeviceForPush: ok"
+      : `registerDeviceForPush: ${result.error}`
+  );
+  return result;
+}
+
+async function registerDeviceForPushInner(): Promise<RegisterDeviceResult> {
   try {
     // a) No session -> no `users` row yet -> devices.user_id has nothing to
     // point at. Do NOT request OS permissions for a capability that can't be
@@ -81,7 +104,13 @@ export async function registerDeviceForPush(): Promise<RegisterDeviceResult> {
       );
       token = result?.data;
       if (!token) return { ok: false, error: "push_token_error" };
-    } catch {
+    } catch (e) {
+      // The message (e.g. a missing google-services.json on Android) is the
+      // actual diagnostic value here - a bare "push_token_error" code alone
+      // doesn't distinguish this from a simulator, a revoked cert, etc.
+      await logDebug(
+        `registerDeviceForPush: push_token_error - ${e instanceof Error ? e.message : String(e)}`
+      );
       return { ok: false, error: "push_token_error" };
     }
 
