@@ -72,6 +72,26 @@ Android builds use EAS: `pnpm --filter @workspace/mobile run build:android` (pre
    }
    ```
    Note: some individual native modules' own `android/build.gradle` (e.g. `react-native-worklets`) read a `CMAKE_VERSION` env var for their own build, but the **`:app` module itself does not** — it needs the explicit `externalNativeBuild.cmake.version` block above, or it silently keeps using 3.22.1 even with `CMAKE_VERSION` set in the shell. Since `android/` is prebuild-generated, this edit may need reapplying after a fresh `expo prebuild`.
+
+   **The `:app`-level pin above is NOT sufficient by itself** (confirmed 2026-09-11: a build with only this fix still failed with `ninja: error: manifest 'build.ninja' still dirty after 100 tries` inside `react-native-screens` and `expo-modules-core`'s own `.cxx` dirs — their own `android/build.gradle` under `node_modules` has its own `externalNativeBuild` block, doesn't inherit `:app`'s pin, and doesn't honor `CMAKE_VERSION` either, so it silently falls back to AGP's buggy 3.22.1 default). Fix: force it repo-wide via a `subprojects` block in `artifacts/mobile/android/build.gradle` (top-level, not `android/app/build.gradle`), added after the existing `allprojects` block:
+   ```gradle
+   subprojects {
+     afterEvaluate { project ->
+       if (project.hasProperty("android")) {
+         def androidExt = project.android
+         if (androidExt.hasProperty("externalNativeBuild")) {
+           androidExt.externalNativeBuild {
+             cmake {
+               version "4.1.2"  // match whatever you installed
+             }
+           }
+         }
+       }
+     }
+   }
+   ```
+   Also prebuild-generated, so it needs reapplying alongside the `:app`-level pin after every `expo prebuild --clean`. Do both, not just the `:app` one, or a clean prebuild silently regresses to this exact failure the next time a module without its own explicit pin gets rebuilt.
+
    After changing the CMake version, delete stale caches or the old absolute paths / broken ninja manifests persist: `android/app/.cxx`, `android/app/build`, `android/build`, `android/.gradle`.
 3. **pnpm's `.pnpm` store path adds nesting that makes marginal path-length cases worse** (not the root cause — real cause is #2 above — but it lowers the threshold at which the Ninja bug bites). If still hitting path-length issues after fixing CMake/Ninja, a repo living under a very long path (e.g. deeply nested user folders) compounds the problem further.
 
@@ -215,7 +235,10 @@ Expo Router with file-based routing under `artifacts/mobile/app/`. Screens impor
 
   Local native build note from the same session: `expo run:android --device <name>` needs a device **name** (the interactive-picker label), not an adb serial — use `ANDROID_SERIAL=<serial> npx expo run:android` to target a specific device non-interactively. Also, once a debug APK is built for one device, `adb install -r` onto a second compatible-ABI device works without a second full native build.
 
-  Still deferred, unchanged from before: Android push (FCM) has no `google-services.json`/Google Services Gradle plugin in the repo at all — `pnpm exec find . -name google-services.json` (or equivalent) returns nothing. This is a human-owned credentials gap, not app code; testing this session proceeded without push per explicit user choice, using in-app polling/claim on next launch instead.
+- **Android push (FCM) is now fully wired and confirmed live-delivering, as of 2026-09-11** — closing the gap this file used to describe as deferred. Two separate credentials were needed, not one:
+  1. **`google-services.json`** (client-side Firebase config) — a real Firebase project (`reminders-app-3de05`) was created, the Android app registered under it (`com.curios.remindme`, must match exactly), and the downloaded file placed at `artifacts/mobile/google-services.json`. It's real-project-specific and gitignored (`.gitignore`); `artifacts/mobile/google-services.json.example` documents the shape for a future setup. `app.json`'s `expo.android.googleServicesFile` points at it — this is the entire Expo-side wiring needed; **do not** hand-edit `android/build.gradle`/`android/app/build.gradle` per Firebase console's own generic Gradle instructions, `expo prebuild` generates the Google Services plugin wiring (`com.google.gms.google-services`) automatically and a manual edit fights it.
+  2. **An FCM service-account credential uploaded to Expo's own dashboard** (expo.dev → project → Credentials/Configuration → Android → FCM V1) — a *separate* step `google-services.json` does NOT cover. Missing this produces a specific, previously-confusing symptom: `registerDeviceForPush()` succeeds (a real `ExponentPushToken[...]` gets written to `devices`), `send-invitation` returns 200, but no notification ever arrives — because Expo's push service itself rejects the send server-side with `{"status":"error","message":"Unable to retrieve the FCM server key for the recipient's app.","details":{"error":"InvalidCredentials","fault":"developer"}}`. This is invisible from this repo's own logs (`sendExpoPush()` doesn't log ticket status) — diagnosed by `curl`-ing `https://exp.host/--/api/v2/push/send` directly with a real captured token and reading the ticket. Fix: generate a service-account key (Firebase Console → Project Settings → Service Accounts → Generate new private key) and upload that JSON to Expo's dashboard; the same diagnostic curl then returns `{"status":"ok",...}`.
+  A native rebuild (`expo prebuild --clean` then a full `npx expo run:android`) is required after adding `google-services.json` — the Google Services plugin only activates via the regenerated native project, not just the JS/Metro bundle. See "Local Android builds on Windows" above for the CMake pin needed to get that rebuild to succeed at all (this rebuild is what surfaced the "`:app`-level pin alone is not sufficient" gap documented there).
 - `expo-notifications` is loaded via dynamic `require()` wrapped in try/catch to avoid crashes in non-native environments.
 - Android requires explicit notification channel setup; see `setupNotificationChannel()` in `ReminderService.ts` — there's a legacy channel migration to handle.
 - Use `pnpm` only — the root `package.json` preinstall hook rejects npm/yarn.
