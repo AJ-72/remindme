@@ -1,25 +1,8 @@
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.115.0";
 import { handleCors } from "../_shared/cors.ts";
 import { jsonError, jsonOk } from "../_shared/errors.ts";
+import { hmacPhoneHash } from "../_shared/phoneHash.ts";
 import { getAuthedClient } from "../_shared/supabaseClient.ts";
-
-// The server-side HMAC pepper (T2.1) — never sent to or derivable by the
-// client. Same normalization the mobile app's normalizeForIdentity()
-// produces MUST be hashed identically here, or lookups silently never match.
-async function hmacPhoneHash(phoneE164: string): Promise<string> {
-  const pepper = Deno.env.get("PHONE_HASH_PEPPER")!;
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(pepper),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(phoneE164));
-  return Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
 
 export interface LookupRequest {
   phoneE164: string;

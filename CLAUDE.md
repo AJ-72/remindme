@@ -2,9 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Token discipline
+
+Before starting any non-trivial task, state:
+- **Estimated token budget** (rough order of magnitude: small ~5-15k / medium ~15-50k / large 50k+), and
+- **Model recommendation** (current model vs. a cheaper one, e.g. Haiku for mechanical/low-reasoning work) with one line of rationale.
+
+Confirm both with the user before proceeding. Once confirmed, work economically toward that budget: minimize exploratory tool calls, keep thinking terse, avoid re-reading files already in context, and prefer targeted edits over broad rewrites. If actual usage is tracking to exceed the stated budget mid-task, flag it rather than silently continuing.
+
+Skip this for trivial one-shot asks (a single question, a one-line lookup).
+
+**Why:** token spend should be a visible, agreed-on tradeoff, not an invisible default — even though the estimate is necessarily approximate (no live token metering is available mid-task) and the model itself can't be switched by the agent (`/model` is a user action; report actual spend via `/cost`).
+
 ## What this is
 
-**Reminders** — a mobile app (React Native/Expo) for scheduling reminders with local notifications. Reminders are stored locally on-device via AsyncStorage. **There is still no deployed backend**, though `lib/db` now defines a real schema for the in-progress "remind someone else" Tier 2 work — see "The backend is a schema with nothing behind it yet" below before planning anything that assumes a server. Supports voice dictation (English/Malayalam, user-selectable in Settings) and Malayalam-script text input/rendering throughout.
+**Reminders** — a mobile app (React Native/Expo) for scheduling reminders with local notifications. Reminders are stored locally on-device via AsyncStorage. A Supabase backend for the "remind someone else" Tier 2 work (M4) is now deployed and live — see "The M4 Tier 2 backend is deployed" below for what that covers and what's still local-only. Supports voice dictation (English/Malayalam, user-selectable in Settings) and Malayalam-script text input/rendering throughout.
 
 ## Run & Operate
 
@@ -32,6 +44,10 @@ pnpm --filter @workspace/db run push:sql
 
 # RLS / schema tests (real Postgres via PGlite, in-process — no Docker needed)
 pnpm --filter @workspace/db run test
+
+# Deploy one Edge Function (requires SUPABASE_ACCESS_TOKEN, see supabase.com -> Account -> Access Tokens)
+$env:SUPABASE_ACCESS_TOKEN = '<token>'
+.\scripts\deploy-edge-functions.ps1 -Function <lookup|send-invitation|claim-invitations|respond-invitation|expire-invitations-cron>
 ```
 
 Mobile dev runs via Expo on Replit with specific env vars (`REPLIT_EXPO_DEV_DOMAIN`, `REPL_ID`, etc.) — local dev of the mobile app requires those to be set.
@@ -70,7 +86,7 @@ cd artifacts/mobile && npx eas-cli build --platform android --profile preview --
 
 **CI pipeline:** `.github/workflows/eas-build.yml` is manually triggered (`workflow_dispatch`) — pick platform/profile in the Actions UI. It runs `pnpm --filter @workspace/mobile run typecheck` and `run test` first, then calls `eas build` only if both pass. Requires an `EXPO_TOKEN` repo secret (same token as local builds, see above).
 
-Required env: `DATABASE_URL` — Postgres connection string (for api-server and db push).
+Required env: `DATABASE_URL` — Postgres connection string (for api-server and db push; for `remindme-tier2` specifically, `postgresql://postgres:<password>@db.zeeanhbvcjslzirftass.supabase.co:5432/postgres` — get the password from the Supabase dashboard, never commit it). `SUPABASE_ACCESS_TOKEN` — for `scripts/deploy-edge-functions.ps1` (Edge Function deploys only; not needed for `db run push`/`push:sql`, which use `DATABASE_URL` directly).
 
 ### Android/Expo device workflow
 
@@ -97,7 +113,7 @@ Required env: `DATABASE_URL` — Postgres connection string (for api-server and 
 
 **DB schema source of truth**: `lib/db/src/schema/` — one file per table, each exporting a Drizzle table, `insertXSchema` (via `drizzle-zod`), and `InsertX`/`X` types. `lib/db/src/schema/index.ts` re-exports all tables; a table file that is never re-exported is absent from the generated DDL, so it goes both untested and unpushed (there is a test pinning the table list for exactly this reason).
 
-Five tables exist, all for M4 Tier 2 and none yet reachable by the app: `users`, `devices`, `blocks`, `invitations`, `link_codes`. `invitations.bind_token` (uuid, unique) is the rung-1 verification credential — possession of the link carrying it is proof of number control. Consumption is tracked on `bound_by`/`bound_at` on the same row, not inferred from `users.phone_hash` — an account is user-deletable, so a proxy inferred from it dies with the account, which an independent review caught in the first version of `bind_via_invite_token()`.
+Five tables exist, all for M4 Tier 2: `users`, `devices`, `blocks`, `invitations`, `link_codes` — deployed and reachable by the app via the Edge Functions below (see Gotchas). `invitations.bind_token` (uuid, unique) is the rung-1 verification credential — possession of the link carrying it is proof of number control. Consumption is tracked on `bound_by`/`bound_at` on the same row, not inferred from `users.phone_hash` — an account is user-deletable, so a proxy inferred from it dies with the account, which an independent review caught in the first version of `bind_via_invite_token()`.
 
 **RLS policies live in the schema too**, via `pgPolicy` — and Drizzle enables RLS on a table *only* if that table declares a policy, so **a new table with no policy is wide open to every authenticated caller** while looking perfectly ordinary in review. Two things guard that: a test asserting `tablesWithoutRls()` is empty, and `privileges.sql` starting from `revoke all`.
 
@@ -118,6 +134,21 @@ Five tables exist, all for M4 Tier 2 and none yet reachable by the app: `users`,
 **TypeScript project references**: `tsconfig.json` at root uses `references` for `lib/` packages. `pnpm run typecheck:libs` runs `tsc --build` over these; `pnpm run typecheck` also typechecks artifacts.
 
 **Supply-chain protection**: `pnpm-workspace.yaml` enforces `minimumReleaseAge: 1440` (packages must be 1 day old before install). Do not disable this. To bypass for a specific trusted package temporarily, add it to `minimumReleaseAgeExclude`.
+
+## Supabase Edge Functions
+
+`supabase/functions/` — Deno, deployed to `remindme-tier2` (see Gotchas). One directory per function, each with its own `index.ts` + `index.test.ts`; `_shared/` holds cross-function helpers, imported via relative paths (`../_shared/...`), not an import map.
+
+- `_shared/supabaseClient.ts` — `getAuthedClient(req)` builds a supabase-js client scoped to the caller's own forwarded JWT (never the service role) and returns a ready-to-return 401 `Response` on any auth failure. Every function except `expire-invitations-cron` calls this first, per ADR 0001: privileged operations act as the calling user, with `SECURITY DEFINER` SQL (not a service-role client) crossing the boundary where a user structurally cannot act as themselves (lookup's hash match, claim's self-claim).
+- `_shared/cors.ts` / `_shared/errors.ts` — shared `handleCors()` preflight short-circuit and `jsonOk`/`jsonError` response helpers. Every function calls `handleCors(req)` first, even `expire-invitations-cron` which never receives a real preflight, for consistency.
+- `_shared/expoPush.ts` — `sendExpoPush()`, batches up to 100 tokens/request against Expo's push API; a dead token or failed batch reports in `failed`, never throws, so it can't block delivery to the rest of a batch or the invitation send itself.
+- `lookup` — phone-number reachability check. Hashes the input with an HMAC pepper (`PHONE_HASH_PEPPER` env var — server-side only, never derivable client-side) matching the mobile app's own `normalizeForIdentity()` output, then calls `hash_lookup()`. Rate-limited via `check_lookup_rate_limit()`.
+- `send-invitation` — creates an invitation via `send_invitation()` (the single enforcement point for the block-list check and 30-day content cap), then best-effort pushes every device registered for the recipient via `get_push_tokens_for_user()` + `sendExpoPush()`. A missing/dead device never fails the send — the recipient still collects the invitation on next auth via `claim-invitations` regardless of push.
+- `claim-invitations` — pulls every pending invitation for the caller's own bound phone number via `claim_invitations()`, which reads `auth.uid()` itself rather than trusting anything caller-supplied.
+- `respond-invitation` — accept/decline via `respond_to_invitation()`.
+- `expire-invitations-cron` — the one function with no user JWT at all; runs on a schedule (see Gotchas for the `pg_cron`/`pg_net`/Vault wiring), authenticated by a `x-cron-secret` header checked in-body (`checkCronAuth()`, fails closed on a missing/unset `CRON_SECRET` — final-review Fix 4). Uses the service-role key deliberately, the one place in this codebase that does.
+
+Each `index.ts` separates pure request-handling logic (`handleLookup`, `handleSendInvitation`, etc. — exported, testable against a fake `SupabaseClient`) from the `Deno.serve()` wiring, matching this repo's general preference for logic that doesn't require spinning up the actual runtime to test.
 
 ## Mobile app structure
 
@@ -169,11 +200,22 @@ Expo Router with file-based routing under `artifacts/mobile/app/`. Screens impor
 
 ## Gotchas
 
-- **The backend is a schema with nothing behind it yet.** `lib/db` now defines five real tables with RLS policies and tests (M4 Tier 2), but **there is no deployed database, no Supabase project, and no server the app talks to.** `artifacts/api-server` still serves one health route, `openapi.yaml` still declares one path, and the mobile app still persists everything in `AsyncStorage` and calls none of it. Re-verified 2026-09-01.
+- **The M4 Tier 2 backend is deployed, live on a real Supabase project.** Project `remindme-tier2` (ref `zeeanhbvcjslzirftass`, `ap-south-1`), deployed 2026-09-09. Schema (5 tables, all RLS-enabled), all 10 SQL functions (`lib/db/src/functions/`, applied via `push:sql`), and all 5 Edge Functions (`supabase/functions/` — `lookup`, `send-invitation`, `claim-invitations`, `respond-invitation`, `expire-invitations-cron`) are live and confirmed via `mcp__Supabase__get_advisors`/direct SQL — not just pushed-and-assumed-working. `expire-invitations-cron` runs hourly via a `pg_cron` + `pg_net` job (`expire-invitations-hourly`, id 1) that pulls its `x-cron-secret` from Supabase Vault (`cron_secret`) rather than embedding it in the job body — do the same for any future scheduled job, not a hardcoded secret in `cron.schedule()`'s SQL text, which is both a plaintext-in-DB problem and (confirmed this session) something the Claude Code permission classifier itself blocks. `PHONE_HASH_PEPPER` and `CRON_SECRET` are set as Edge Function secrets (dashboard → Project Settings → Edge Functions → Secrets); **`PHONE_HASH_PEPPER` must never be rotated once set** — every existing `phone_hash` depends on it, and changing it breaks all lookups/matching silently, with no error anywhere.
 
-  Per `docs/adr/0001`, the app will reach the backend through Supabase Edge Functions rather than PostgREST, and `artifacts/api-server` is slated for deletion. It has not been deleted yet.
+  The mobile client already points at this project by default — `artifacts/mobile/constants/supabase.ts` hardcodes `SUPABASE_URL`/`SUPABASE_ANON_KEY` for `remindme-tier2` (overridable via `EXPO_PUBLIC_SUPABASE_URL`/`EXPO_PUBLIC_SUPABASE_ANON_KEY` env vars at build time). No mobile-side config change is needed to reach it.
 
-  This matters for planning: anything needing a server — device sync, accounts, MCP (backlog M8), remind-someone-else Tier 2 (M4), group RSVP (M7) — starts by **building that backend**, and its cost is the whole cost. Do not scope such work as "wire up the existing API".
+  **What this does NOT mean**: `artifacts/api-server` still serves one health route, `openapi.yaml` still declares one path, and the mobile app's core reminder CRUD still persists entirely in `AsyncStorage` — only the M4 Tier 2 "remind someone else" surface (invitations/binding/blocks) talks to this backend, via Edge Functions, never PostgREST directly (`docs/adr/0001`). `artifacts/api-server` is still slated for deletion per that ADR and has not been deleted. Device sync, accounts-for-their-own-sake, MCP (backlog M8), and group RSVP (M7) are all still unbuilt and still start from zero if scoped.
+
+  **Redeploying after a schema/function/Edge-Function change**: this session had no working `supabase` CLI or `SUPABASE_ACCESS_TOKEN`/`gh` in its environment, so `scripts/deploy-edge-functions.ps1` (which needs both) was bypassed — Edge Functions were deployed directly via the `mcp__Supabase__deploy_edge_function` tool instead, reading each function's `index.ts` plus its `_shared/*.ts` deps and inlining them into the `files` array (no import-map needed, all deps came from `esm.sh` URL imports already in the source). If that MCP tool isn't available in a future session, fall back to `scripts/deploy-edge-functions.ps1` with a real `SUPABASE_ACCESS_TOKEN`. Either way, `push:sql` (DB functions/grants) is a separate step from Edge Function deploys — both are required after a change to either, and were found out of sync with each other this session (functions/grants were stale from before commit `a8c5bd9`, plus several later ones, until re-run).
+
+- **The "remind someone else" flow was tested live, end-to-end, on two physical devices on 2026-09-11 and confirmed working** — invitation created via `send-invitation`, claimed via `claim-invitations`, visible on the recipient's device (invitation `7eb79c78`'s `recipient_id` populated, confirmed via direct DB read, not just the client UI). Getting there surfaced and fixed three real bugs beyond the app code itself — see `system_learnings.md` ("Remind someone else — three real bugs found live-testing on two devices" entry, 2026-09-11) for full root causes/fixes:
+  1. `lookup_rate_limits` table was missing from the live `remindme-tier2` database — defined correctly in Drizzle schema source and re-exported, but never actually applied via `push:sql`/`drizzle-kit push` (a stronger version of the grants-drift risk already documented above — this time a whole table, not just grants). Recreated live via a direct migration matching the schema source exactly.
+  2. `register-number.tsx` (the self-registration screen) never called `claimPendingInvitations()` — only `bind-invite.tsx` (the invite-link binding screen) did. Since `self_register()` proves phone ownership the same way binding does, any invitation already sent to a self-registering number was permanently stranded (`recipient_id` staying null forever). Fixed by wiring the same claim to `register-number.tsx`'s `submit()`, mirroring `bind-invite.tsx`'s pattern (see `artifacts/mobile/app/register-number.tsx`); 3 new tests added in `__tests__/screens/register-number.test.tsx`.
+  3. Not a code bug: a test device's **system locale region** (`en-GB`) differed from its actual SIM/carrier country (`IN`), and `normalizeForIdentity()`'s device-region-guessing branch (`artifacts/mobile/utils/phoneNumber.ts`) used the wrong one, silently normalizing the same typed digits to a different E.164 number (and therefore a different `phone_hash`) than the sender expected. An explicit leading `+` on the typed number bypasses region-guessing entirely and is the reliable workaround/diagnostic when reachability lookups mysteriously miss for a real recipient.
+
+  Local native build note from the same session: `expo run:android --device <name>` needs a device **name** (the interactive-picker label), not an adb serial — use `ANDROID_SERIAL=<serial> npx expo run:android` to target a specific device non-interactively. Also, once a debug APK is built for one device, `adb install -r` onto a second compatible-ABI device works without a second full native build.
+
+  Still deferred, unchanged from before: Android push (FCM) has no `google-services.json`/Google Services Gradle plugin in the repo at all — `pnpm exec find . -name google-services.json` (or equivalent) returns nothing. This is a human-owned credentials gap, not app code; testing this session proceeded without push per explicit user choice, using in-app polling/claim on next launch instead.
 - `expo-notifications` is loaded via dynamic `require()` wrapped in try/catch to avoid crashes in non-native environments.
 - Android requires explicit notification channel setup; see `setupNotificationChannel()` in `ReminderService.ts` — there's a legacy channel migration to handle.
 - Use `pnpm` only — the root `package.json` preinstall hook rejects npm/yarn.

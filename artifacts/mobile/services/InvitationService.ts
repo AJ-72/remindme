@@ -41,6 +41,47 @@ export async function sendInvitation(
   }
 }
 
+export type SelfRegisterResult = { ok: true; appUserId: string } | { ok: false; error: string };
+
+/**
+ * Self-serve first-time registration: a number with no invitation and no
+ * existing account asserts itself directly. OTP verification is explicitly
+ * deferred (tracked separately) — this trusts the number the caller typed.
+ * Establishes a session first via ensureSession(), same as
+ * bindViaInviteToken() below, since a not-yet-registered caller has none yet.
+ * Goes through the self-register Edge Function (not a direct RPC like
+ * bindViaInviteToken) because hashing the phone number requires the
+ * server-side pepper, which the client never has.
+ */
+export async function selfRegister(phoneE164: string): Promise<SelfRegisterResult> {
+  let session;
+  try {
+    session = await ensureSession();
+  } catch {
+    return { ok: false, error: "network_error" };
+  }
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/self-register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ phoneE164 }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: json?.error?.code ?? "self_register_failed" };
+    }
+    return { ok: true, appUserId: json.appUserId };
+  } catch {
+    return { ok: false, error: "network_error" };
+  }
+}
+
 export interface ClaimedInvitation {
   id: string;
   title: string | null;

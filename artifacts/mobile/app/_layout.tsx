@@ -63,6 +63,10 @@ function RootLayoutNav() {
       <Stack.Screen name="why-tasks-slip" options={{ headerShown: false }} />
       <Stack.Screen name="bind-invite" options={{ headerShown: false }} />
       <Stack.Screen
+        name="register-number"
+        options={{ headerShown: false, presentation: "modal" }}
+      />
+      <Stack.Screen
         name="invitation-preview"
         options={{ headerShown: false, presentation: "modal" }}
       />

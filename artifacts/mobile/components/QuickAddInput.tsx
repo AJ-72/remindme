@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { getLocales } from "expo-localization";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import QuietHoursSheet from "@/components/QuietHoursSheet";
 import { useReminders } from "@/contexts/RemindersContext";
@@ -25,6 +26,8 @@ import {
   startListening,
   stopListening,
 } from "@/services/SpeechService";
+import { checkReachability, isReachabilityStale } from "@/services/RecipientLookupService";
+import { sendInvitation } from "@/services/InvitationService";
 import type { PickableContact } from "@/services/ContactsService";
 import type { ReminderRecipient } from "@/services/ReminderService";
 import { formatTime12h } from "@/utils/formatDatetime";
@@ -122,6 +125,7 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [notesVisible, setNotesVisible] = useState(false);
   const [recipient, setRecipient] = useState<ReminderRecipient | undefined>(undefined);
+  const [invitationError, setInvitationError] = useState<string | null>(null);
   const [contactPickerVisible, setContactPickerVisible] = useState(false);
   const [quietPrompt, setQuietPrompt] = useState<Date | null>(null);
   // A ref, not state: it is read inside the quiet-hours handlers on a later
@@ -247,17 +251,36 @@ export default function QuickAddInput({ onSaved }: Props) {
     const title = titleOverride ?? (parsedTitle || input.trim());
     if (!title.trim()) return;
     setSaving(true);
+    setInvitationError(null);
     try {
+      const trimmedDescription = description.trim();
+      const datetimeIso = dateToUse.toISOString();
       await addReminder({
         title: title.trim(),
-        description: description.trim(),
-        datetime: dateToUse.toISOString(),
+        description: trimmedDescription,
+        datetime: datetimeIso,
         alarm,
         // Spread rather than `recipient` so an unset value omits the key
         // entirely - `'recipient' in obj` is true even when it holds undefined,
         // which is what isSendReminder would otherwise trip over.
         ...(recipient ? { recipient } : {}),
       });
+
+      // Additive Tier 2 send - never blocks the Tier 1 save above, which has
+      // already completed by this point. A failure here degrades silently to
+      // the existing WhatsApp-link flow; only a low-key inline notice shows.
+      if (recipient?.appUserId && !isReachabilityStale(recipient.lookedUpAt)) {
+        const result = await sendInvitation(
+          recipient.appUserId,
+          title.trim(),
+          trimmedDescription,
+          datetimeIso
+        );
+        if (!result.ok) {
+          setInvitationError("Couldn't send in-app — you can still message via WhatsApp.");
+        }
+      }
+
       setInput("");
       setParsedTitle("");
       setParsedDate(null);
@@ -522,6 +545,20 @@ export default function QuickAddInput({ onSaved }: Props) {
       color: colors.primary,
       flexShrink: 1,
     },
+    recipientChipBadge: {
+      width: 16,
+      height: 16,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.primary + "33",
+    },
+    invitationErrorText: {
+      fontSize: 11,
+      color: colors.mutedForeground,
+      marginTop: 4,
+      marginLeft: 4,
+    },
     textInput: {
       fontSize: 15,
       lineHeight: 20,
@@ -780,27 +817,39 @@ export default function QuickAddInput({ onSaved }: Props) {
           testID="quick-add-input"
         />
         {recipient && (
-          <View style={styles.recipientChip} testID="quick-add-recipient-chip">
-            <Feather name="send" size={11} color={colors.primary} />
-            <Text
-              style={[
-                styles.recipientChipText,
-                { fontFamily: getFontFamily(recipient.name, "600SemiBold") },
-              ]}
-              numberOfLines={1}
-            >
-              {recipient.name}
-            </Text>
-            <Pressable
-              onPress={() => setRecipient(undefined)}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel={`Remove ${recipient.name}`}
-              testID="quick-add-recipient-clear"
-            >
-              <Feather name="x" size={12} color={colors.primary} />
-            </Pressable>
-          </View>
+          <>
+            <View style={styles.recipientChip} testID="quick-add-recipient-chip">
+              <Feather name="send" size={11} color={colors.primary} />
+              <Text
+                style={[
+                  styles.recipientChipText,
+                  { fontFamily: getFontFamily(recipient.name, "600SemiBold") },
+                ]}
+                numberOfLines={1}
+              >
+                {recipient.name}
+              </Text>
+              {recipient.appUserId ? (
+                <View style={styles.recipientChipBadge} testID="recipient-in-app-badge">
+                  <Feather name="zap" size={9} color={colors.primary} />
+                </View>
+              ) : null}
+              <Pressable
+                onPress={() => setRecipient(undefined)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${recipient.name}`}
+                testID="quick-add-recipient-clear"
+              >
+                <Feather name="x" size={12} color={colors.primary} />
+              </Pressable>
+            </View>
+            {invitationError ? (
+              <Text style={styles.invitationErrorText} testID="invitation-error">
+                {invitationError}
+              </Text>
+            ) : null}
+          </>
         )}
 
         <View style={styles.actionRow}>
@@ -937,8 +986,26 @@ export default function QuickAddInput({ onSaved }: Props) {
         onSelect={(c: PickableContact) => {
           // Name is a SNAPSHOT - never re-resolved from contacts, so a deleted
           // contact or a revoked permission cannot break an existing reminder.
-          setRecipient({ name: c.name, phone: c.phone, contactId: c.contactId });
+          const picked: ReminderRecipient = { name: c.name, phone: c.phone, contactId: c.contactId };
+          setRecipient(picked);
           setContactPickerVisible(false);
+          setInvitationError(null);
+          // Additive Tier 2 check - never blocks or delays showing the picked
+          // contact; the existing Tier 1 WhatsApp-link flow keeps working
+          // unmodified whether this resolves, fails, or is still in flight.
+          const deviceRegion = getLocales()[0]?.regionCode ?? null;
+          console.log("[TEMP-DIAG2] calling checkReachability, phone=", picked.phone, "region=", deviceRegion);
+          checkReachability(picked, deviceRegion).then((result) => {
+            console.log("[TEMP-DIAG2] checkReachability resolved:", JSON.stringify(result));
+            if (!result) return;
+            setRecipient((current) =>
+              current && current.phone === picked.phone
+                ? { ...current, appUserId: result.appUserId, lookedUpAt: result.lookedUpAt }
+                : current
+            );
+          }).catch((err) => {
+            console.log("[TEMP-DIAG2] checkReachability threw:", String(err));
+          });
         }}
       />
 
