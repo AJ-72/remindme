@@ -56,6 +56,7 @@ function makeDeps() {
       datetime: new Date("2026-08-07T08:30:00").toISOString(),
       completed: false,
     }),
+    checkForInvitations: jest.fn().mockResolvedValue([]),
   };
 }
 
@@ -363,5 +364,54 @@ describe("routing a body tap by reminder kind", () => {
     await handleNotificationResponse(makeResponse(SNOOZE_MORE_ACTION_ID), deps);
     expect(deps.navigateToDetail).toHaveBeenCalledWith("r1", { openSnoozeSheet: true });
     expect(deps.navigateToSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleNotificationResponse — invitation push", () => {
+  function makeInvitationResponse(
+    actionIdentifier: string,
+    overrides: { identifier?: string } = {}
+  ): NotificationResponseLike {
+    return {
+      actionIdentifier,
+      notification: {
+        request: {
+          identifier: overrides.identifier ?? "notif-invite-1",
+          content: {
+            data: { type: "invitation", invitationId: "inv-1" },
+          },
+        },
+      },
+    };
+  }
+
+  it("checks for invitations on a body tap, without touching any local-reminder logic", async () => {
+    const deps = makeDeps();
+    await handleNotificationResponse(makeInvitationResponse(DEFAULT_ACTION_IDENTIFIER), deps);
+    expect(deps.checkForInvitations).toHaveBeenCalledTimes(1);
+    expect(deps.navigateToDetail).not.toHaveBeenCalled();
+    expect(deps.navigateToSend).not.toHaveBeenCalled();
+    expect(deps.markDoneById).not.toHaveBeenCalled();
+  });
+
+  it("does not navigate itself — headless task has no navigator, so this only claims", async () => {
+    // checkForInvitations() takes its own navigate callback; the headless
+    // deps builder wires that to a no-op, same as navigateToDetail/
+    // navigateToSend for local-reminder actions (see notificationResponseTask.ts).
+    // This test only asserts handleNotificationResponse doesn't call the
+    // local-reminder navigators — the foreground app's own launch/AppState
+    // check (useInvitationCheck) is what actually navigates once the app
+    // is open again.
+    const deps = makeDeps();
+    await handleNotificationResponse(makeInvitationResponse(DEFAULT_ACTION_IDENTIFIER), deps);
+    expect(deps.navigateToDetail).not.toHaveBeenCalled();
+  });
+
+  it("dedupes a replayed invitation response the same way as a local-reminder one", async () => {
+    const deps = makeDeps();
+    const response = makeInvitationResponse(DEFAULT_ACTION_IDENTIFIER);
+    await handleNotificationResponse(response, deps);
+    await handleNotificationResponse(response, deps);
+    expect(deps.checkForInvitations).toHaveBeenCalledTimes(1);
   });
 });

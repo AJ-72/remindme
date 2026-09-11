@@ -178,3 +178,30 @@ export async function respondToInvitation(
     return { ok: false, error: "network_error" };
   }
 }
+
+/**
+ * Shared "go check for invitations, and if there's exactly one, jump
+ * straight to it" logic - previously duplicated between bind-invite.tsx and
+ * register-number.tsx (each with its own local navigateToInvitationPreview
+ * + claimPendingInvitations().then(...) call). Pulled out so the same check
+ * can also run from app-foreground/launch and from a received push,
+ * without a third copy of the "exactly one vs. more than one" rule.
+ *
+ * More than one claimed invitation deliberately does NOT navigate here -
+ * same precedent as bind-invite.tsx: a multi-invitation list is a separate,
+ * still-unbuilt screen (Task 11/Phase 5's scope boundary), not something
+ * this helper should improvise.
+ *
+ * Never throws - claimPendingInvitations() already swallows its own
+ * failures (missing session, network error) and returns [], which this
+ * simply passes through with no navigation.
+ */
+export async function checkForInvitations(
+  navigate: (invitation: ClaimedInvitation) => void
+): Promise<ClaimedInvitation[]> {
+  const claimed = await claimPendingInvitations();
+  if (claimed.length === 1) {
+    navigate(claimed[0]);
+  }
+  return claimed;
+}

@@ -11,7 +11,10 @@ export interface SendInvitationRequest {
   datetime: string;
 }
 
-type PushSender = (tokens: string[], message: { title: string; body: string }) => Promise<PushResult>;
+type PushSender = (
+  tokens: string[],
+  message: { title: string; body: string; data?: Record<string, unknown> }
+) => Promise<PushResult>;
 
 /**
  * Pure logic: create the invitation via the DB's send_invitation() RPC (the
@@ -45,9 +48,15 @@ export async function handleSendInvitation(
   const tokens = (deviceRows ?? []).map((d: { expo_push_token: string }) => d.expo_push_token);
   if (tokens.length > 0) {
     try {
+      // data.type lets the client tell an invitation push apart from any
+      // other kind (e.g. a locally-scheduled reminder notification, which
+      // carries its own differently-shaped NotificationData) without
+      // guessing from title/body text - see
+      // hooks/useInvitationCheck.ts and notificationResponseHandler.ts.
       await pushSender(tokens, {
         title: "New reminder",
         body: body.title,
+        data: { type: "invitation", invitationId: invitation.id },
       });
     } catch {
       // A push-delivery failure (e.g. fetch itself throwing on a network

@@ -47,6 +47,17 @@ export interface NotificationResponseHandlerDeps {
   navigateToSend: (id: string) => void;
   getSnoozePreset: () => Promise<SnoozePreset>;
   loadReminderById: (id: string) => Promise<Reminder | undefined>;
+  /**
+   * Reacts to a tapped invitation push (see send-invitation/index.ts's
+   * data.type:"invitation" tag). Deliberately takes no navigate callback
+   * here - a tap on a background/killed-app push has no navigator
+   * available (same headless constraint documented in
+   * notificationResponseTask.ts), so this only claims. Tapping the
+   * notification launches the app, which runs useInvitationCheck() on
+   * mount and navigates from there once claimPendingInvitations() has
+   * something to show.
+   */
+  checkForInvitations: () => Promise<unknown>;
 }
 
 function isNotificationData(value: unknown): value is NotificationData {
@@ -54,6 +65,14 @@ function isNotificationData(value: unknown): value is NotificationData {
     !!value &&
     typeof value === "object" &&
     typeof (value as NotificationData).reminderId === "string"
+  );
+}
+
+function isInvitationData(value: unknown): value is { type: "invitation" } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { type?: unknown }).type === "invitation"
   );
 }
 
@@ -79,6 +98,18 @@ export async function handleNotificationResponse(
   if (await deps.hasHandledResponse(responseKey)) return;
 
   const data = response.notification.request.content.data;
+
+  // Invitation pushes carry no reminderId - they're server-originated, not
+  // a locally-scheduled reminder - so they must branch off before
+  // isNotificationData's reminderId check, which would otherwise just
+  // silently drop them. No action-identifier distinction: this push has no
+  // custom actions, so any tap (the default action) means "open it".
+  if (isInvitationData(data)) {
+    await deps.markResponseHandled(responseKey);
+    await deps.checkForInvitations();
+    return;
+  }
+
   if (!isNotificationData(data)) return;
 
   await deps.markResponseHandled(responseKey);

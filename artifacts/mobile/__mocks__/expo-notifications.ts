@@ -45,6 +45,9 @@ export const clearLastNotificationResponseAsync = jest
 export const addNotificationResponseReceivedListener = jest
   .fn()
   .mockReturnValue({ remove: jest.fn() });
+export const addNotificationReceivedListener = jest
+  .fn()
+  .mockReturnValue({ remove: jest.fn() });
 
 export const DEFAULT_ACTION_IDENTIFIER =
   "expo.modules.notifications.actions.DEFAULT";

@@ -15,6 +15,8 @@ import {
   markResponseHandled,
 } from "@/services/handledResponses";
 import { handleNotificationResponse } from "@/services/notificationResponseHandler";
+import { checkForInvitations } from "@/services/InvitationService";
+import { navigateToInvitationPreview } from "@/hooks/useInvitationCheck";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -55,6 +57,11 @@ export default function NotificationResponseHandler() {
           params: options.openSnoozeSheet ? { id, openSnooze: "1" } : { id },
         });
       },
+      // Tapped while the app is foregrounded (or the tap just launched it and
+      // this listener is already live) - a navigator exists here, unlike the
+      // headless task's own deps, so this can go straight to the invitation
+      // instead of waiting for the next useInvitationCheck() foreground pass.
+      checkForInvitations: () => checkForInvitations(navigateToInvitationPreview),
     };
 
     // NOT a queue drain: this keeps resolving with the same response on every
@@ -88,9 +95,33 @@ export default function NotificationResponseHandler() {
       // ignore — listener may not be available in all environments
     }
 
+    // Separate from the response listener above: that one only fires on a
+    // TAP. An invitation push that arrives while the app is already open
+    // needs to be picked up without waiting for the user to tap the tray -
+    // this is the foreground-received case from
+    // hooks/useInvitationCheck.ts's own header (mount/foreground-resume
+    // covers launch and backgrounded-then-resumed; this covers "already
+    // looking at the app when the push lands").
+    let receivedSubscription: { remove: () => void } | null = null;
+    try {
+      receivedSubscription = Notifications.addNotificationReceivedListener(
+        (notification: any) => {
+          const data = notification?.request?.content?.data;
+          if (data?.type === "invitation") {
+            checkForInvitations(navigateToInvitationPreview);
+          }
+        }
+      );
+    } catch {
+      // ignore — listener may not be available in all environments
+    }
+
     return () => {
       try {
         subscription?.remove();
+      } catch {}
+      try {
+        receivedSubscription?.remove();
       } catch {}
     };
   }, []);

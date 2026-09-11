@@ -46,6 +46,7 @@ import {
   type NotificationResponseHandlerDeps,
   type NotificationResponseLike,
 } from "@/services/notificationResponseHandler";
+import { checkForInvitations } from "@/services/InvitationService";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -88,6 +89,10 @@ export function buildBackgroundResponseDeps(): NotificationResponseHandlerDeps {
     // taking down the task before the storage write.
     navigateToDetail: () => {},
     navigateToSend: () => {},
+    // No-op navigate: headless, same constraint as above. Tapping the push
+    // still launches the app, which runs useInvitationCheck() on mount and
+    // navigates from there once this claim has something to show.
+    checkForInvitations: () => checkForInvitations(() => {}),
   };
 }
 

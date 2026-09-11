@@ -43,6 +43,28 @@ Deno.test("creates the invitation and returns it", async () => {
   assertEquals(pushedTo, ["ExponentPushToken[abc]"]);
 });
 
+Deno.test("tags the push payload with type:invitation and the invitation id, so the client can distinguish it from any other push", async () => {
+  const client = fakeClient({
+    invitation: { id: "inv-1", title: "Take BP tablets" },
+    deviceTokens: ["ExponentPushToken[abc]"],
+  });
+  let pushedData: Record<string, unknown> | undefined;
+  await handleSendInvitation(
+    client,
+    {
+      recipientAppUserId: "user-1",
+      title: "Take BP tablets",
+      description: "After breakfast",
+      datetime: new Date().toISOString(),
+    },
+    async (_tokens, message) => {
+      pushedData = message.data;
+      return { sent: _tokens, failed: [] };
+    }
+  );
+  assertEquals(pushedData, { type: "invitation", invitationId: "inv-1" });
+});
+
 Deno.test("still returns the invitation when the recipient has no registered device", async () => {
   const client = fakeClient({ invitation: { id: "inv-2" }, deviceTokens: [] });
   let pushCalled = false;

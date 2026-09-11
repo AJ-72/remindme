@@ -37,6 +37,7 @@ import {
 } from "@/services/ReminderService";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
 import { registerNotificationResponseTask } from "@/tasks/notificationResponseTask";
+import { useInvitationCheck } from "@/hooks/useInvitationCheck";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -101,6 +102,11 @@ export default function RootLayout() {
     registerRescheduleTask();
     registerNotificationResponseTask();
   }, []);
+
+  // Checks for pending invitations on launch and again on every foreground
+  // resume, so an already-bound user sees a sender's reminder without
+  // reloading or re-registering. See hooks/useInvitationCheck.ts.
+  useInvitationCheck();
 
   // Initial check on mount
   useEffect(() => {

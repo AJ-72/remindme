@@ -1,6 +1,7 @@
 import {
   sendInvitation,
   claimPendingInvitations,
+  checkForInvitations,
   bindViaInviteToken,
   respondToInvitation,
 } from "./InvitationService";
@@ -153,5 +154,73 @@ describe("respondToInvitation", () => {
     });
     const result = await respondToInvitation("inv-1", "declined");
     expect(result).toEqual({ ok: false, error: "not_found" });
+  });
+});
+
+describe("checkForInvitations", () => {
+  const mockFetch = jest.fn();
+  beforeEach(() => {
+    mockFetch.mockReset();
+    // @ts-ignore
+    global.fetch = mockFetch;
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue({ access_token: "t" });
+  });
+
+  it("navigates to invitation-preview when exactly one invitation is claimed", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        claimed: [
+          {
+            id: "inv-1",
+            title: "Take BP tablets",
+            description: "After breakfast",
+            datetime: "2026-09-09T08:00:00.000Z",
+            senderId: "sender-1",
+          },
+        ],
+      }),
+    });
+    const navigate = jest.fn();
+    await checkForInvitations(navigate);
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith({
+      id: "inv-1",
+      title: "Take BP tablets",
+      description: "After breakfast",
+      datetime: "2026-09-09T08:00:00.000Z",
+      senderId: "sender-1",
+    });
+  });
+
+  it("does not navigate when no invitations are claimed", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ claimed: [] }) });
+    const navigate = jest.fn();
+    await checkForInvitations(navigate);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("does not navigate when more than one invitation is claimed (list is a separate concern)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        claimed: [
+          { id: "inv-1", title: "A", description: null, datetime: "2026-09-09T08:00:00.000Z", senderId: "s1" },
+          { id: "inv-2", title: "B", description: null, datetime: "2026-09-10T08:00:00.000Z", senderId: "s2" },
+        ],
+      }),
+    });
+    const navigate = jest.fn();
+    const result = await checkForInvitations(navigate);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(result).toHaveLength(2);
+  });
+
+  it("swallows a missing session / network failure and never throws", async () => {
+    (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(null);
+    const navigate = jest.fn();
+    const result = await checkForInvitations(navigate);
+    expect(result).toEqual([]);
+    expect(navigate).not.toHaveBeenCalled();
   });
 });
