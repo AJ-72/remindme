@@ -37,6 +37,8 @@ export const SHOW_DESCRIPTION_KEY = "@show_description_v1";
 export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
 export const VIBRATION_KEY = "@vibration_v1";
 export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
+export const REGISTRATION_ONBOARDING_KEY = "@registration_onboarding_v1";
+export const REGISTERED_PHONE_KEY = "@registered_phone_v1";
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 /**
  * Corrupt reminder payloads are copied here rather than discarded. AsyncStorage
@@ -115,6 +117,27 @@ export interface Reminder {
    * task has slid from its original intent is unrecoverable.
    */
   originalDatetime?: string;
+  /**
+   * Set only on a reminder created by accepting a Tier 2 invitation
+   * (invitation-preview.tsx) - the sender's display name, resolved at
+   * accept time via get_sender_display_name() (already falls back to
+   * "Someone" there if unset). Presence of this field, not just senderId,
+   * is what ReminderCard uses to badge a reminder as "from someone else" -
+   * see isReceivedReminder() below.
+   */
+  senderName?: string;
+  /** The sender's app user id, paired with senderName. Local-only context;
+   * never sent anywhere - see invitation-preview.tsx for where it's read. */
+  senderId?: string;
+}
+
+/**
+ * Single definition of "is this a reminder someone else sent me", mirroring
+ * isSendReminder() below for the opposite direction (B13) - used by the home
+ * screen and ReminderCard so both agree on what counts as "received".
+ */
+export function isReceivedReminder(r: Reminder): boolean {
+  return !!r.senderName;
 }
 
 /**
@@ -414,6 +437,47 @@ export async function hasCompletedPermissionOnboarding(): Promise<boolean> {
 
 export async function markPermissionOnboardingComplete(): Promise<void> {
   await AsyncStorage.setItem(PERMISSION_ONBOARDING_KEY, "true");
+}
+
+/**
+ * First-run registration onboarding (B12) — a separate, later gate from
+ * `hasCompletedPermissionOnboarding` above. Runs once per install, shown
+ * only after the permission onboarding finishes, and is skippable: the
+ * "remind someone else" feature is optional, so this flag is set on either
+ * Skip or a successful registration, never re-shown once seen.
+ */
+export async function hasCompletedRegistrationOnboarding(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(REGISTRATION_ONBOARDING_KEY)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+export async function markRegistrationOnboardingComplete(): Promise<void> {
+  await AsyncStorage.setItem(REGISTRATION_ONBOARDING_KEY, "true");
+}
+
+/**
+ * The phone number this device most recently registered/bound successfully
+ * (B10). Persisted locally purely to drive the UI's "already registered,
+ * remove first" guard in register-number.tsx — the server row remains the
+ * actual source of truth for whether the number is bound.
+ */
+export async function getRegisteredPhone(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(REGISTERED_PHONE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setRegisteredPhone(phoneE164: string): Promise<void> {
+  await AsyncStorage.setItem(REGISTERED_PHONE_KEY, phoneE164);
+}
+
+export async function clearRegisteredPhone(): Promise<void> {
+  await AsyncStorage.removeItem(REGISTERED_PHONE_KEY);
 }
 
 async function setupNotificationChannel(): Promise<void> {
