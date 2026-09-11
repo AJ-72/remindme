@@ -9,6 +9,24 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-11 — `npx jest` (parallel workers, default) intermittently fails `add-reminder`/`send-reminder`/`settings` screen tests under CPU contention on this machine — not a real bug
+
+**WHAT:** While verifying B10-B13, a full-suite `npx jest` run showed `__tests__/screens/add-reminder.test.tsx` and `__tests__/screens/send-reminder.test.tsx` failing; a second full run showed those two passing but `__tests__/screens/settings.test.tsx` failing instead. All three pass reliably (3/3 runs each) in isolation (`npx jest <file>`) and the full suite passes 100% (942/942) under `npx jest --runInBand` (serial, no worker contention). Initially misdiagnosed as pre-existing deterministic bugs and filed as backlog items B14/B15 — corrected here and those items removed after re-testing in isolation showed no failure at all.
+
+**WHY non-obvious:** The first-round check (stash this session's changes, re-run just the two suspect files) reproduced the failure and looked like solid falsification evidence, but ran the same two flaky files together in one worker batch — exactly the contention condition that triggers the flake, so the "confirms pre-existing" conclusion was still wrong, just for a subtler reason than "caused by my changes." The real signal only appeared on a third check: isolating each file alone (`npx jest <single-file>`, 3 runs each) passed every time. This is the "hypothesis fails twice, stop guessing" case from the global Debugging Rules, except here the resolution was a *third*, cheaper check (isolate further) rather than a git-diff/bisect, since the variable being isolated was test-runner concurrency, not code.
+
+**WHERE:** No code bug, no fix needed. If a future session sees one of these three screen tests fail in a full-suite run, re-run that file alone before assuming a regression — `npx jest --runInBand` is the reliable full-suite command on this machine if a clean signal is needed without file-by-file isolation.
+
+## 2026-09-11 — `deno test` on an Edge Function mutates the repo's root `package.json` unless run with `--no-config`
+
+**WHAT:** Running `deno test` directly inside `supabase/functions/<fn>/` (Deno 2.9.6) auto-migrated this repo's `pnpm-workspace.yaml` into `package.json`, adding a `workspaces`/`catalog` block Deno invented from nothing — an uncommitted, unrelated, and unwanted change to a file the test run had no business touching. Caught via `git status` before committing (Git Hygiene rule), reverted with `git checkout -- package.json`.
+
+**WHY:** Deno 2.x auto-detects a nearby `pnpm-workspace.yaml` and offers/performs a one-way migration of its fields into `package.json`'s `workspaces`/`catalog` keys the first time `deno test`/`deno check` runs in a directory under it — undocumented from the CLI's own output beyond a `warning:`/`hint:` pair, easy to miss if not running `git status` immediately after.
+
+**WHERE:** No functions code affected. Safe invocation going forward: run `deno test --allow-net --no-config <file>` (or copy the function + `_shared/` to a scratch directory outside the pnpm workspace entirely, which also sidesteps the issue). No Deno test currently runs in CI (`.github/workflows/eas-build.yml` only runs the mobile package's `typecheck`/`test`) — these Edge Function tests are presently verified ad hoc only.
+
+---
+
 ## 2026-09-11 — "Not reachable" badge on a real recipient was a phone-number normalization mismatch, not a push/backend bug — recurrence of the region-guessing issue
 
 **WHAT:** After the push-delivery fixes (entry below), one direction still looked broken: Padma's device showed no "has the app" bolt badge for Anand as a recipient, even though his account/device were fully registered server-side (confirmed via direct `users`/`devices` query). Root cause was the same class of bug already documented in `CLAUDE.md`'s three-bugs entry, just hitting the other direction: Anand's number was saved in Padma's contacts as local digits with no leading `+`, so `normalizeForIdentity()` (`artifacts/mobile/utils/phoneNumber.ts`) had to guess a region from Padma's device locale to build an E.164 number — guessed wrong (or guessed differently than whatever Anand actually typed into `register-number.tsx`), producing a different `phone_hash` than his real registration. The `lookup` Edge Function correctly returned `{exists:false}` for that wrong hash — not a bug in `lookup`/`hash_lookup` itself, just a client-side input mismatch presented as if it were a real "no app" answer, since the two are indistinguishable by design (see `recipientReachability.ts`'s own doc comment on why a miss can't be cached long). Fixed live by re-registering Anand's number with an explicit `+91` prefix, which matched what was then typed into Padma's contact entry.
