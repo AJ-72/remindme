@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-11 — A landed Edge Function fix (B11) went stale on the live Supabase project with nothing to catch it
+
+**WHAT:** `send-invitation`'s code in the repo (commit `5ce5677`) has had the sender-name push title (`"{name} sent you a reminder"`) and `senderId`/`data.type` params since B11 landed, but `mcp__Supabase__get_edge_function` against the live `remindme-tier2` project showed the deployed function was still the old pre-B11 version (`"New reminder"`, no `senderId` param, no `data.type` tag) — confirmed by reading the live source directly, not assumed. Filed as B14 rather than silently redeployed, since the user asked for backlog-first triage.
+
+**WHY:** Edge Function deploys are a separate manual step (`scripts/deploy-edge-functions.ps1` or the `deploy_edge_function` MCP tool) from a normal `git commit`/merge — nothing in CI or this repo's workflow re-deploys Edge Functions automatically, and nothing flags a merged fix that never got its deploy step run. A merged, tested, reviewed fix can still be live-broken indefinitely with zero signal in the repo itself.
+
+**WHERE:** `supabase/functions/send-invitation/index.ts` (repo, correct) vs. the live `remindme-tier2` project (stale) — see `backlog.md` B14. Before trusting "should already be live" for ANY Edge Function change, verify with `mcp__Supabase__get_edge_function` (or the CLI equivalent) rather than assuming a past deploy covered it — this is the second time this file documents Edge Functions/DB functions drifting out of sync with the repo (see CLAUDE.md's Gotchas section, "functions/grants were stale... until re-run").
+
 ## 2026-09-11 — `npx jest` (parallel workers, default) intermittently fails `add-reminder`/`send-reminder`/`settings` screen tests under CPU contention on this machine — not a real bug
 
 **WHAT:** While verifying B10-B13, a full-suite `npx jest` run showed `__tests__/screens/add-reminder.test.tsx` and `__tests__/screens/send-reminder.test.tsx` failing; a second full run showed those two passing but `__tests__/screens/settings.test.tsx` failing instead. All three pass reliably (3/3 runs each) in isolation (`npx jest <file>`) and the full suite passes 100% (942/942) under `npx jest --runInBand` (serial, no worker contention). Initially misdiagnosed as pre-existing deterministic bugs and filed as backlog items B14/B15 — corrected here and those items removed after re-testing in isolation showed no failure at all.
