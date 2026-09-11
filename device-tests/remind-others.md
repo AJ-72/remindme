@@ -29,6 +29,7 @@ worth planning for rather than discovering. D32 needs a second person.
 | [D36](#d36) | Rebind on a new phone, and the 45-day cliff | `BLOCKED` | — | SEMI |
 | [D37](#d37) | Cancel while the recipient is offline | `BLOCKED` | — | SEMI |
 | [D38](#d38) | Device key persists across restart, absent on fresh install | `PENDING` | — | SEMI |
+| [D39](#d39) | Invitation push actually delivers, real device, no reload | `PASS` | 2026-09-11 | SEMI |
 
 Highest-value first runs once the backend lands: **D34** (rung 1 shows no
 verification screen at all — the claim the whole onboarding rests on),
@@ -329,3 +330,37 @@ actual native call), or it survives an uninstall (would mean it leaked into
 something like Android Auto Backup, which is a privacy problem for an
 identity key - see `docs/superpowers/specs/2026-08-30-remind-someone-else-tier2-design.md`,
 "An account is not a bound phone number").
+
+<a id="d39"></a>
+## D39 — Invitation push actually delivers to a real device, no reload · `PASS` — 2026-09-11
+Jest cannot see any of this: `registerDeviceForPush()` and `send-invitation`
+both mock `expo-notifications`/the push API, so both can report success while
+Expo's own push service silently rejects the send server-side for a reason
+invisible to every log this repo captures. Found live 2026-09-11 exactly
+this way - see `system_learnings.md`'s entry of the same date.
+
+**Setup.** Two devices. Sender registered/bound, recipient freshly
+re-registered so `registerDeviceForPush()` runs against a build with real
+Firebase/FCM config wired in.
+
+**Steps.**
+1. On the recipient's device, submit registration/bind (writes a real
+   `ExponentPushToken[...]` to `devices`).
+2. On the sender's device, create a reminder for the recipient and save.
+3. Watch the recipient's device without touching it.
+4. Separately, `curl` `https://exp.host/--/api/v2/push/send` directly with
+   the recipient's real token to isolate "Expo accepted and delivered it"
+   from "the app's own send-invitation call path is broken" - the two look
+   identical from inside the app.
+
+**Pass (confirmed 2026-09-11).** The notification appears on the recipient's
+device within seconds of step 2, with **no reload and no re-registration** -
+`recipient_id` on the invitation row is populated and its status moves to
+`accepted`, verified via direct DB read, not just the client UI. Step 4's
+diagnostic curl returns `{"status":"ok",...}`.
+
+**Fails if.** Nothing arrives despite a 200 from `send-invitation` - check
+step 4's curl response first: `{"status":"error",...,"details":{"error":
+"InvalidCredentials","fault":"developer"}}` means the FCM service-account
+credential is missing from Expo's dashboard (a separate step from
+`google-services.json` - see CLAUDE.md Gotchas), not a device or app bug.
