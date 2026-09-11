@@ -2,6 +2,8 @@ import React from "react";
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import RegisterNumberScreen from "@/app/register-number";
 import * as InvitationService from "@/services/InvitationService";
 import * as DeviceRegistrationService from "@/services/DeviceRegistrationService";
@@ -14,12 +16,15 @@ jest.mock("@/services/InvitationService");
 const mockBack = jest.fn();
 const mockPush = jest.fn();
 
+let mockSearchParams: Record<string, string> = {};
+
 jest.mock("expo-router", () => ({
   router: {
     back: (...args: any[]) => mockBack(...args),
     push: (...args: any[]) => mockPush(...args),
     canGoBack: () => true,
   },
+  useLocalSearchParams: () => mockSearchParams,
 }));
 
 function renderScreen() {
@@ -35,8 +40,10 @@ function renderScreen() {
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
+  mockSearchParams = {};
+  await AsyncStorage.clear();
   (DeviceRegistrationService.registerDeviceForPush as jest.Mock).mockResolvedValue({ ok: true });
   (InvitationService.claimPendingInvitations as jest.Mock).mockResolvedValue([]);
 });
@@ -188,10 +195,10 @@ describe("RegisterNumberScreen", () => {
     expect(getByTestId("register-number-submit")).toBeTruthy();
   });
 
-  it("closes the screen via the close button", () => {
+  it("closes the screen via the close button", async () => {
     const { getByTestId } = renderScreen();
     fireEvent.press(getByTestId("register-number-close"));
-    expect(mockBack).toHaveBeenCalled();
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
   });
 
   it("closes the screen via Done on the success screen", async () => {
@@ -274,5 +281,76 @@ describe("RegisterNumberScreen", () => {
         params: expect.objectContaining({ id: "inv-2" }),
       })
     );
+  });
+
+  describe("first-run mode (B12)", () => {
+    beforeEach(() => {
+      mockSearchParams = { firstRun: "1" };
+    });
+
+    it("shows an Optional badge and a Skip button", () => {
+      const { getByTestId } = renderScreen();
+      expect(getByTestId("register-number-optional-badge")).toBeTruthy();
+      expect(getByTestId("register-number-skip")).toBeTruthy();
+    });
+
+    it("does not show the Optional badge or Skip button outside first-run mode", () => {
+      mockSearchParams = {};
+      const { queryByTestId } = renderScreen();
+      expect(queryByTestId("register-number-optional-badge")).toBeNull();
+      expect(queryByTestId("register-number-skip")).toBeNull();
+    });
+
+    it("marks registration onboarding complete and goes back on Skip", async () => {
+      const { getByTestId } = renderScreen();
+      fireEvent.press(getByTestId("register-number-skip"));
+
+      await waitFor(() => expect(mockBack).toHaveBeenCalled());
+      expect(await AsyncStorage.getItem("@registration_onboarding_v1")).toBe("true");
+    });
+
+    it("marks registration onboarding complete on a successful registration", async () => {
+      (InvitationService.selfRegister as jest.Mock).mockResolvedValue({
+        ok: true,
+        appUserId: "user-1",
+      });
+
+      const { getByTestId, findByText } = renderScreen();
+      fireEvent.changeText(getByTestId("register-number-input"), "4155552671");
+      fireEvent.press(getByTestId("register-number-submit"));
+
+      await findByText(/you're registered/i);
+      expect(await AsyncStorage.getItem("@registration_onboarding_v1")).toBe("true");
+    });
+  });
+
+  describe("already-registered guard (B10)", () => {
+    it("shows the persisted number and blocks re-registration until removed", async () => {
+      await AsyncStorage.setItem("@registered_phone_v1", "+14155552671");
+
+      const { findByText, getByTestId, queryByTestId } = renderScreen();
+
+      expect(await findByText(/your number is registered/i)).toBeTruthy();
+      expect(await findByText(/\+14155552671/)).toBeTruthy();
+      expect(queryByTestId("register-number-input")).toBeNull();
+
+      fireEvent.press(getByTestId("register-number-remove"));
+      expect(await findByText("Add your number")).toBeTruthy();
+      expect(await AsyncStorage.getItem("@registered_phone_v1")).toBeNull();
+    });
+
+    it("persists the number after a successful registration", async () => {
+      (InvitationService.selfRegister as jest.Mock).mockResolvedValue({
+        ok: true,
+        appUserId: "user-1",
+      });
+
+      const { getByTestId, findByText } = renderScreen();
+      fireEvent.changeText(getByTestId("register-number-input"), "4155552671");
+      fireEvent.press(getByTestId("register-number-submit"));
+
+      await findByText(/you're registered/i);
+      expect(await AsyncStorage.getItem("@registered_phone_v1")).toBe("+14155552671");
+    });
   });
 });

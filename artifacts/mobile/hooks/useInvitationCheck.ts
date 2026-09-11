@@ -33,13 +33,29 @@ export function navigateToInvitationPreview(invitation: ClaimedInvitation) {
   });
 }
 
+/**
+ * B15: routes 2+ concurrently-claimed invitations to the pending-list screen
+ * instead of the previous silent no-op. Passed as JSON in a single param
+ * rather than one param per field (as navigateToInvitationPreview does for
+ * a single invitation) - expo-router params are flat strings, and a list's
+ * shape doesn't fit that without either N indexed params or one serialized
+ * blob; a small list of a few invitations stays well under any router URL
+ * length concern.
+ */
+export function navigateToPendingList(invitations: ClaimedInvitation[]) {
+  router.push({
+    pathname: "/pending-invitations",
+    params: { invitations: JSON.stringify(invitations) },
+  });
+}
+
 export function useInvitationCheck(): void {
   useEffect(() => {
-    checkForInvitations(navigateToInvitationPreview);
+    checkForInvitations(navigateToInvitationPreview, navigateToPendingList);
 
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
-        checkForInvitations(navigateToInvitationPreview);
+        checkForInvitations(navigateToInvitationPreview, navigateToPendingList);
       }
     });
     return () => sub.remove();

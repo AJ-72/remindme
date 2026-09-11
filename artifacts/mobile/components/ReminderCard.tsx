@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { Reminder, useReminders } from "@/contexts/RemindersContext";
-import { isSendReminder } from "@/services/ReminderService";
+import { isReceivedReminder, isSendReminder } from "@/services/ReminderService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
 
@@ -154,6 +154,12 @@ function ReminderCard({ reminder, onDelete }: Props) {
     title: [staticStyles.title, dynamicTitleStyle],
     recipientChip: [staticStyles.recipientChip, { backgroundColor: colors.primary + "1A" }],
     recipientChipText: [staticStyles.recipientChipText, { color: colors.primary }],
+    // B13: a visually distinct color/icon from the outgoing recipientChip
+    // above (send icon, primary color) — this one marks the OPPOSITE
+    // direction, someone else's reminder arriving for the current user, and
+    // must read as clearly different at a glance, not just a relabeled chip.
+    senderChip: [staticStyles.recipientChip, { backgroundColor: colors.accent + "1A" }],
+    senderChipText: [staticStyles.recipientChipText, { color: colors.accent }],
     description: [staticStyles.description, { color: colors.mutedForeground }],
     timeText: [staticStyles.timeText, dynamicTimeTextStyle],
   };
@@ -221,6 +227,21 @@ function ReminderCard({ reminder, onDelete }: Props) {
                 numberOfLines={1}
               >
                 {reminder.recipient.name}
+              </Text>
+            </View>
+          )}
+
+          {isReceivedReminder(reminder) && (
+            <View style={styles.senderChip} testID="sender-chip">
+              <Feather name="arrow-down-left" size={11} color={colors.accent} />
+              <Text
+                style={[
+                  styles.senderChipText,
+                  { fontFamily: getFontFamily(reminder.senderName!, "600SemiBold") },
+                ]}
+                numberOfLines={1}
+              >
+                From {reminder.senderName}
               </Text>
             </View>
           )}

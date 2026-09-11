@@ -33,9 +33,9 @@ describe("useInvitationCheck", () => {
     expect(mockCheck).toHaveBeenCalledTimes(1);
   });
 
-  it("passes a navigate callback through to checkForInvitations", () => {
+  it("passes a navigate callback and a navigateToList callback through to checkForInvitations", () => {
     renderHook(() => useInvitationCheck());
-    expect(mockCheck).toHaveBeenCalledWith(expect.any(Function));
+    expect(mockCheck).toHaveBeenCalledWith(expect.any(Function), expect.any(Function));
   });
 
   it("checks again when the app returns to the foreground", () => {

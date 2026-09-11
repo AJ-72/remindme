@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { getLocales } from "expo-localization";
-import { router } from "expo-router";
-import React, { useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -18,8 +18,16 @@ import { registerDeviceForPush } from "@/services/DeviceRegistrationService";
 import {
   claimPendingInvitations,
   selfRegister,
+  syncDisplayName,
   type ClaimedInvitation,
 } from "@/services/InvitationService";
+import {
+  clearRegisteredPhone,
+  getRegisteredPhone,
+  getUserName,
+  markRegistrationOnboardingComplete,
+  setRegisteredPhone,
+} from "@/services/ReminderService";
 import { normalizeForIdentity } from "@/utils/phoneNumber";
 
 /**
@@ -62,6 +70,8 @@ function navigateToInvitationPreview(invitation: ClaimedInvitation) {
 }
 
 type ScreenState =
+  | { phase: "loading" }
+  | { phase: "already-registered"; phone: string }
   | { phase: "input" }
   | { phase: "submitting" }
   | { phase: "success"; claimed: ClaimedInvitation[] }
@@ -81,12 +91,44 @@ function copyForError(error: string): string {
 export default function RegisterNumberScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const { firstRun } = useLocalSearchParams<{ firstRun?: string }>();
+  const isFirstRun = firstRun === "1";
   const [raw, setRaw] = useState("");
   const [state, setState] = useState<ScreenState>({ phase: "input" });
+
+  // B10: a device that already registered a number must not be able to
+  // silently register a second one over it - the phone check only guards
+  // against a DIFFERENT account claiming an ALREADY-TAKEN number
+  // (number_taken), not against this same device re-registering with no
+  // warning. Checked once on mount; already-registered wins over whatever
+  // the sync initial "input" state above rendered.
+  useEffect(() => {
+    let cancelled = false;
+    getRegisteredPhone().then((phone) => {
+      if (!cancelled && phone) setState({ phase: "already-registered", phone });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const region = getLocales()[0]?.regionCode ?? null;
   const { e164 } = normalizeForIdentity(raw, region);
   const canSubmit = !!e164 && state.phase !== "submitting";
+
+  const finishFirstRunIfNeeded = async () => {
+    if (isFirstRun) await markRegistrationOnboardingComplete();
+  };
+
+  const skip = async () => {
+    await finishFirstRunIfNeeded();
+    router.back();
+  };
+
+  const removeNumber = async () => {
+    await clearRegisteredPhone();
+    setState({ phase: "input" });
+  };
 
   const submit = async () => {
     if (!e164) return;
@@ -96,6 +138,16 @@ export default function RegisterNumberScreen() {
       setState({ phase: "error", error: result.error });
       return;
     }
+    await setRegisteredPhone(e164);
+    await finishFirstRunIfNeeded();
+    // B11: this is the first moment a session/users row exists for someone
+    // who set their name before ever registering - syncDisplayName() from
+    // setUserName() would have no-op'd back then (no session yet), so it's
+    // repeated here now that one does. Fire-and-forget, same precedent as
+    // registerDeviceForPush() below.
+    getUserName().then((name) => {
+      if (name) syncDisplayName(name);
+    });
     // Fire-and-forget, same precedent as bind-invite.tsx: this is exactly
     // the moment a `users` row starts existing (a valid FK target for
     // devices.user_id), but a missing/failed push registration must never
@@ -195,6 +247,23 @@ export default function RegisterNumberScreen() {
       color: colors.foreground,
       marginRight: 8,
     },
+    skipBtn: {
+      marginTop: 14,
+      paddingVertical: 8,
+    },
+    skipBtnText: {
+      fontSize: 14,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+    },
+    firstRunBadge: {
+      fontSize: 12,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 4,
+    },
   });
 
   return (
@@ -202,7 +271,7 @@ export default function RegisterNumberScreen() {
       <View style={styles.header}>
         <Pressable
           style={styles.closeBtn}
-          onPress={() => router.back()}
+          onPress={skip}
           testID="register-number-close"
         >
           <Feather name="x" size={22} color={colors.mutedForeground} />
@@ -212,11 +281,16 @@ export default function RegisterNumberScreen() {
         {state.phase === "input" || state.phase === "submitting" ? (
           <>
             <Feather name="phone" size={40} color={colors.primary} />
+            {isFirstRun && (
+              <Text style={styles.firstRunBadge} testID="register-number-optional-badge">
+                Optional
+              </Text>
+            )}
             <Text style={styles.title}>Add your number</Text>
             <Text style={styles.message}>
-              Lets other people find you and remind you in-app, instead of only over
-              WhatsApp. We don&apos;t verify it with a code yet — just don&apos;t use
-              someone else&apos;s number.
+              {isFirstRun
+                ? "Only needed if you want to remind someone else, or have someone remind you, in-app. Your own reminders work without this — you can always add it later in Settings."
+                : "Lets other people find you and remind you in-app, instead of only over WhatsApp. We don't verify it with a code yet — just don't use someone else's number."}
             </Text>
             <TextInput
               style={styles.input}
@@ -245,8 +319,31 @@ export default function RegisterNumberScreen() {
                 </Text>
               )}
             </Pressable>
+            {isFirstRun && state.phase === "input" && (
+              <Pressable style={styles.skipBtn} onPress={skip} testID="register-number-skip">
+                <Text style={styles.skipBtnText}>Skip for now</Text>
+              </Pressable>
+            )}
           </>
         ) : null}
+
+        {state.phase === "already-registered" && (
+          <>
+            <Feather name="phone" size={40} color={colors.primary} />
+            <Text style={styles.title}>Your number is registered</Text>
+            <Text style={styles.message}>
+              This device is registered as {state.phone}. To register a different number,
+              remove this one first.
+            </Text>
+            <Pressable
+              style={styles.primaryBtn}
+              onPress={removeNumber}
+              testID="register-number-remove"
+            >
+              <Text style={styles.primaryBtnText}>Remove this number</Text>
+            </Pressable>
+          </>
+        )}
 
         {state.phase === "success" && (
           <>

@@ -27,6 +27,7 @@ type PushSender = (
  */
 export async function handleSendInvitation(
   client: SupabaseClient,
+  senderId: string,
   body: SendInvitationRequest,
   pushSender: PushSender = sendExpoPush
 ) {
@@ -48,13 +49,26 @@ export async function handleSendInvitation(
   const tokens = (deviceRows ?? []).map((d: { expo_push_token: string }) => d.expo_push_token);
   if (tokens.length > 0) {
     try {
+      // B11: the push title names the sender, so the recipient knows who
+      // it's from before opening the app - previously always generic "New
+      // reminder". Reads the CALLER's OWN display_name (users_select_self
+      // RLS covers this - the caller is the sender, reading their own row -
+      // no new grant needed), falling back to "Someone" the same way
+      // get_sender_display_name()'s client-side callers already do
+      // (invitation-preview.tsx) if it's unset.
+      const { data: senderRow } = await client
+        .from("users")
+        .select("display_name")
+        .eq("id", senderId)
+        .maybeSingle();
+      const senderName = senderRow?.display_name || "Someone";
       // data.type lets the client tell an invitation push apart from any
       // other kind (e.g. a locally-scheduled reminder notification, which
       // carries its own differently-shaped NotificationData) without
       // guessing from title/body text - see
       // hooks/useInvitationCheck.ts and notificationResponseHandler.ts.
       await pushSender(tokens, {
-        title: "New reminder",
+        title: `${senderName} sent you a reminder`,
         body: body.title,
         data: { type: "invitation", invitationId: invitation.id },
       });
@@ -89,7 +103,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const result = await handleSendInvitation(authed.client, body);
+    const result = await handleSendInvitation(authed.client, authed.userId, body);
     return jsonOk(result);
   } catch (e) {
     const message = (e as Error).message ?? "";

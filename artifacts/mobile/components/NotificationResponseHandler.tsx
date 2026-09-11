@@ -15,8 +15,9 @@ import {
   markResponseHandled,
 } from "@/services/handledResponses";
 import { handleNotificationResponse } from "@/services/notificationResponseHandler";
-import { checkForInvitations } from "@/services/InvitationService";
-import { navigateToInvitationPreview } from "@/hooks/useInvitationCheck";
+import { checkForInvitations, resolveSenderNames } from "@/services/InvitationService";
+import { navigateToInvitationPreview, navigateToPendingList } from "@/hooks/useInvitationCheck";
+import { collapseInvitationNotifications } from "@/services/invitationNotificationGrouping";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -61,7 +62,8 @@ export default function NotificationResponseHandler() {
       // this listener is already live) - a navigator exists here, unlike the
       // headless task's own deps, so this can go straight to the invitation
       // instead of waiting for the next useInvitationCheck() foreground pass.
-      checkForInvitations: () => checkForInvitations(navigateToInvitationPreview),
+      checkForInvitations: () =>
+        checkForInvitations(navigateToInvitationPreview, navigateToPendingList),
     };
 
     // NOT a queue drain: this keeps resolving with the same response on every
@@ -105,10 +107,25 @@ export default function NotificationResponseHandler() {
     let receivedSubscription: { remove: () => void } | null = null;
     try {
       receivedSubscription = Notifications.addNotificationReceivedListener(
-        (notification: any) => {
+        async (notification: any) => {
           const data = notification?.request?.content?.data;
-          if (data?.type === "invitation") {
-            checkForInvitations(navigateToInvitationPreview);
+          if (data?.type !== "invitation") return;
+
+          const claimed = await checkForInvitations(
+            navigateToInvitationPreview,
+            navigateToPendingList
+          );
+          // B15: a push just landed while the app was alive to see it - if
+          // that leaves 2+ invitations pending, collapse the individual
+          // tray notifications into one summary rather than letting them
+          // stack. Single-pending stays exactly as today (server-sent,
+          // already sender-named per B11) - collapsing would just replace
+          // a good notification with a worse one.
+          const latest = claimed[claimed.length - 1];
+          if (claimed.length > 1 && latest) {
+            const names = await resolveSenderNames([latest.senderId]);
+            const latestSenderName = names[latest.senderId] ?? "Someone";
+            collapseInvitationNotifications(claimed.length, latestSenderName);
           }
         }
       );

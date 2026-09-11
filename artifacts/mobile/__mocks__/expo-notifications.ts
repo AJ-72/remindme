@@ -13,6 +13,9 @@ export const getAllScheduledNotificationsAsync = jest
 export const dismissNotificationAsync = jest
   .fn()
   .mockResolvedValue(undefined);
+export const getPresentedNotificationsAsync = jest
+  .fn()
+  .mockResolvedValue([] as unknown[]);
 export const requestPermissionsAsync = jest
   .fn()
   .mockResolvedValue({ status: "granted" });

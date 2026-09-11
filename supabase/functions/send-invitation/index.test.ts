@@ -4,6 +4,7 @@ import { handleSendInvitation } from "./index.ts";
 function fakeClient(opts: {
   invitation: Record<string, unknown>;
   deviceTokens: string[];
+  senderDisplayName?: string | null;
 }) {
   return {
     rpc: async (fn: string) => {
@@ -16,6 +17,22 @@ function fakeClient(opts: {
       }
       throw new Error(`unexpected rpc ${fn}`);
     },
+    from: (table: string) => {
+      if (table !== "users") throw new Error(`unexpected table ${table}`);
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data:
+                opts.senderDisplayName === undefined
+                  ? null
+                  : { display_name: opts.senderDisplayName },
+              error: null,
+            }),
+          }),
+        }),
+      };
+    },
     // deno-lint-ignore no-explicit-any
   } as any;
 }
@@ -24,10 +41,12 @@ Deno.test("creates the invitation and returns it", async () => {
   const client = fakeClient({
     invitation: { id: "inv-1", title: "Take BP tablets" },
     deviceTokens: ["ExponentPushToken[abc]"],
+    senderDisplayName: "Amma",
   });
   let pushedTo: string[] = [];
   const result = await handleSendInvitation(
     client,
+    "sender-1",
     {
       recipientAppUserId: "user-1",
       title: "Take BP tablets",
@@ -47,10 +66,12 @@ Deno.test("tags the push payload with type:invitation and the invitation id, so 
   const client = fakeClient({
     invitation: { id: "inv-1", title: "Take BP tablets" },
     deviceTokens: ["ExponentPushToken[abc]"],
+    senderDisplayName: "Amma",
   });
   let pushedData: Record<string, unknown> | undefined;
   await handleSendInvitation(
     client,
+    "sender-1",
     {
       recipientAppUserId: "user-1",
       title: "Take BP tablets",
@@ -70,6 +91,7 @@ Deno.test("still returns the invitation when the recipient has no registered dev
   let pushCalled = false;
   const result = await handleSendInvitation(
     client,
+    "sender-2",
     {
       recipientAppUserId: "user-2",
       title: "X",
@@ -89,9 +111,11 @@ Deno.test("still returns the invitation when pushSender throws", async () => {
   const client = fakeClient({
     invitation: { id: "inv-3", title: "X" },
     deviceTokens: ["ExponentPushToken[abc]"],
+    senderDisplayName: "Amma",
   });
   const result = await handleSendInvitation(
     client,
+    "sender-3",
     {
       recipientAppUserId: "user-3",
       title: "X",
@@ -103,4 +127,53 @@ Deno.test("still returns the invitation when pushSender throws", async () => {
     }
   );
   assertEquals(result.invitation, { id: "inv-3", title: "X" });
+});
+
+// B11
+Deno.test("push title names the sender by their display_name", async () => {
+  const client = fakeClient({
+    invitation: { id: "inv-4", title: "Take BP tablets" },
+    deviceTokens: ["ExponentPushToken[abc]"],
+    senderDisplayName: "Amma",
+  });
+  let pushedTitle = "";
+  await handleSendInvitation(
+    client,
+    "sender-1",
+    {
+      recipientAppUserId: "user-1",
+      title: "Take BP tablets",
+      description: "After breakfast",
+      datetime: new Date().toISOString(),
+    },
+    async (tokens, message) => {
+      pushedTitle = message.title;
+      return { sent: tokens, failed: [] };
+    }
+  );
+  assertEquals(pushedTitle, "Amma sent you a reminder");
+});
+
+Deno.test("push title falls back to 'Someone' when the sender has no display_name", async () => {
+  const client = fakeClient({
+    invitation: { id: "inv-5", title: "Take BP tablets" },
+    deviceTokens: ["ExponentPushToken[abc]"],
+    senderDisplayName: null,
+  });
+  let pushedTitle = "";
+  await handleSendInvitation(
+    client,
+    "sender-1",
+    {
+      recipientAppUserId: "user-1",
+      title: "Take BP tablets",
+      description: "After breakfast",
+      datetime: new Date().toISOString(),
+    },
+    async (tokens, message) => {
+      pushedTitle = message.title;
+      return { sent: tokens, failed: [] };
+    }
+  );
+  assertEquals(pushedTitle, "Someone sent you a reminder");
 });
