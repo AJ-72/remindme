@@ -9,6 +9,14 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-11 — B14 fixed: redeploying an Edge Function needs no mobile app rebuild, and the drift was isolated to one function
+
+**WHAT:** Redeployed `send-invitation` to `remindme-tier2` (v2→v3) via `mcp__Supabase__deploy_edge_function`, confirmed via `get_edge_function` that the live source now matches the repo exactly. Audited the other 4 functions for the same class of drift (`lookup`, `claim-invitations`, `respond-invitation`, `expire-invitations-cron`) by diffing their live `get_edge_function` output against repo source — all 4 matched byte-for-byte, so the staleness was isolated to `send-invitation` alone, not a systemic redeploy gap.
+
+**WHY:** The user asked whether the mobile app also needed redeploying to both test devices for this fix. It does not: `send-invitation`'s push-title logic (sender name lookup, "{name} sent you a reminder" string) runs entirely server-side in the Edge Function — the app only calls it over HTTPS and displays whatever push arrives, with zero client-side copy of that string-building logic. A server-only Edge Function fix takes effect on the very next invitation sent, with no app-side involvement at all. This is the same "server is a store-and-forward mailbox, not a runtime" property CLAUDE.md's M4 Tier 2 design section already documents for reminder delivery — it turns out to hold for notification copy too, not just scheduling.
+
+**WHERE:** `supabase/functions/send-invitation/` vs. live `remindme-tier2` (now in sync, v3) — see `backlog.md` B14 (`DONE`). General rule for future Edge Function changes: after deploying, verify with `get_edge_function` (or CLI equivalent) rather than assuming the deploy worked or that a sibling function needs the same treatment — this session's audit found the other 4 functions were fine, so drift is not automatic across every function once one goes stale.
+
 ## 2026-09-11 — A landed Edge Function fix (B11) went stale on the live Supabase project with nothing to catch it
 
 **WHAT:** `send-invitation`'s code in the repo (commit `5ce5677`) has had the sender-name push title (`"{name} sent you a reminder"`) and `senderId`/`data.type` params since B11 landed, but `mcp__Supabase__get_edge_function` against the live `remindme-tier2` project showed the deployed function was still the old pre-B11 version (`"New reminder"`, no `senderId` param, no `data.type` tag) — confirmed by reading the live source directly, not assumed. Filed as B14 rather than silently redeployed, since the user asked for backlog-first triage.
