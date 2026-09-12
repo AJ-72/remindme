@@ -3,6 +3,7 @@ import {
   getMicPermissionStatus,
   requestMicPermission,
   ensureOfflineModelReady,
+  resolveDictationReadiness,
 } from "@/services/SpeechService";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 
@@ -128,6 +129,34 @@ describe("ensureOfflineModelReady", () => {
     expect(ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload).toHaveBeenCalledWith({
       locale: "en-US",
     });
+  });
+});
+
+describe("resolveDictationReadiness", () => {
+  it("resolves onDevice=true, shouldBail=false when the model is ready", async () => {
+    (ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload as jest.Mock).mockResolvedValueOnce({
+      status: "download_success",
+      message: "ok",
+    });
+    const result = await resolveDictationReadiness("en-US");
+    expect(result).toEqual({ status: "ready", onDevice: true, shouldBail: false });
+  });
+
+  it("resolves onDevice=false, shouldBail=true while the model is still downloading — the one status a caller must not silently proceed past", async () => {
+    (ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload as jest.Mock).mockResolvedValueOnce({
+      status: "opened_dialog",
+      message: "dialog shown",
+    });
+    const result = await resolveDictationReadiness("en-US");
+    expect(result).toEqual({ status: "preparing", onDevice: false, shouldBail: true });
+  });
+
+  it("resolves onDevice=false, shouldBail=false when no offline model exists for the locale at all — callers fall back to online recognition", async () => {
+    (ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload as jest.Mock).mockRejectedValueOnce(
+      Object.assign(new Error("ERROR_LANGUAGE_UNAVAILABLE"), { code: 12 })
+    );
+    const result = await resolveDictationReadiness("en-US");
+    expect(result).toEqual({ status: "unavailable", onDevice: false, shouldBail: false });
   });
 });
 

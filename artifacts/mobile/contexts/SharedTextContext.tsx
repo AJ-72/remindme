@@ -9,8 +9,8 @@ import React, {
 import { Platform } from "react-native";
 import { logDebug } from "@/services/DebugLogService";
 import {
-  ensureOfflineModelReady,
   isFileTranscriptionSupported,
+  resolveDictationReadiness,
   transcribeAudioFile,
 } from "@/services/SpeechService";
 import { getDictationLanguage } from "@/services/ReminderService";
@@ -129,8 +129,20 @@ function NativeShareIntentCapture({
           // correct and deterministic — no race with RemindersProvider's
           // own async load, no polling needed.
           const dictationLanguage = await getDictationLanguage();
-          const modelStatus = await ensureOfflineModelReady(dictationLanguage);
-          const onDevice = modelStatus !== "unavailable";
+          const { status, onDevice, shouldBail } = await resolveDictationReadiness(
+            dictationLanguage
+          );
+          if (shouldBail) {
+            // The offline model is still downloading. Unlike live mic (a
+            // person waiting right now, worth falling back to online for),
+            // pre-recorded shared audio isn't worth guessing at with online
+            // recognition — fall back to the filename the same way a hard
+            // failure does, rather than silently proceeding.
+            logDebug(`offline model status=${status} — bailing to filename fallback`);
+            onText(audioFile.fileName);
+            onNotice(AUDIO_TRANSCRIPTION_FALLBACK_NOTICE);
+            return;
+          }
           logDebug(
             `calling transcribeAudioFile(${audioFile.path}, ${audioFile.fileName}, ${dictationLanguage}, onDevice=${onDevice})`
           );

@@ -889,6 +889,46 @@ export async function deleteReminders(
   return reminders;
 }
 
+/**
+ * The one place that cancels a reminder's existing notification(s) and
+ * schedules its replacement. Every caller that needs to re-arm a reminder —
+ * un-completing it, snoozing it, a bulk reschedule sweep, a retroactive
+ * alarm-default rewrite — goes through this, so the sweep-by-payload
+ * discipline and the guard live in one place instead of being re-derived
+ * (and drifting) at each call site.
+ *
+ * Always sweeps by payload AND cancels by stored id before scheduling: a
+ * reminder that picked up an orphan notification has a pending trigger the
+ * stored id alone can't reach, which would otherwise fire alongside the
+ * newly scheduled copy. See cancelScheduledForReminder's own doc comment.
+ *
+ * `guard` decides whether to schedule at all — the default,
+ * `isPendingForAlarmRewrite`-shaped ("not completed, still in the future"),
+ * covers every call site including snooze: a reminder snoozed to a time
+ * that's already passed by the time this runs should end up unscheduled and
+ * overdue, the same as un-completing a past-due reminder, rather than
+ * silently registering a notification that will never usefully fire.
+ * `schedule` produces the new notificationId; callers differ only in WHAT
+ * they schedule (a plain reminder vs. a snooze payload), never in the
+ * cancel/guard machinery around it.
+ *
+ * Returns the new notificationId, or undefined if the guard rejected the
+ * re-arm or scheduling itself declined (e.g. a past trigger).
+ */
+async function rearmReminder(
+  reminder: Reminder,
+  options: {
+    guard?: (reminder: Reminder, now: number) => boolean;
+    schedule: () => Promise<string | undefined>;
+  }
+): Promise<string | undefined> {
+  const guard = options.guard ?? isPendingForAlarmRewrite;
+  if (!guard(reminder, Date.now())) return undefined;
+  await cancelScheduledForReminder(reminder.id);
+  await cancelNotification(reminder.notificationId);
+  return options.schedule();
+}
+
 export async function toggleComplete(
   current: Reminder[],
   id: string
@@ -908,21 +948,13 @@ export async function toggleComplete(
   // fires. Deliberately NOT done for a reminder whose datetime has already
   // passed: it stays overdue and unscheduled (the list already surfaces
   // overdue items), rather than us inventing a new time on the user's behalf.
-  // scheduleNotification independently returns undefined for a past trigger,
-  // so this stays correct even if the guard below is ever relaxed.
-  let notificationId = completing ? undefined : target.notificationId;
-  if (!completing) {
-    if (new Date(target.datetime).getTime() > Date.now()) {
-      // Sweep by payload too: a reminder that picked up an orphan has a
-      // pending trigger the stored id can't reach, which would otherwise fire
-      // alongside the copy scheduled here.
-      await cancelScheduledForReminder(id);
-      await cancelNotification(target.notificationId);
-      notificationId = await scheduleNotification(target, id);
-    } else {
-      notificationId = undefined;
-    }
-  }
+  // rearmReminder's default guard enforces exactly this.
+  const notificationId = completing
+    ? undefined
+    : await rearmReminder(
+        { ...target, completed: false },
+        { schedule: () => scheduleNotification(target, id) }
+      );
 
   const reminders = current.map((r) =>
     r.id === id
@@ -947,25 +979,30 @@ export async function snoozeReminder(
 ): Promise<Reminder[]> {
   const target = current.find((r) => r.id === id);
   if (!target) return current;
-  // Sweep by payload as well as by the stored id: the stored id is the only
-  // handle on ONE notification, so any orphan this reminder picked up would
-  // otherwise stay armed and fire next to the snoozed copy.
-  await cancelScheduledForReminder(id);
-  await cancelNotification(target.notificationId);
   const alarmOn = target.alarm !== false;
-  const body = await resolveNotificationBody(target.description);
   const snoozeTarget = resolveSnoozeTarget(preset, target.datetime, new Date());
-  const notificationId = await scheduleSnoozeNotification(
-    {
-      reminderId: id,
-      title: target.title,
-      body,
-      alarm: alarmOn,
-      exactTiming: target.exactTiming !== false,
-      channelId: channelIdForAlarm(alarmOn, await getVibrationEnabled()),
+  const projected: Reminder = { ...target, datetime: snoozeTarget.toISOString() };
+  // Guarded by the shared default (still-in-the-future, not completed),
+  // evaluated against the PROJECTED snooze time — a snooze target that has
+  // already passed by the time this runs should leave the reminder
+  // unscheduled and overdue, the same as any other past-due re-arm, rather
+  // than registering a notification that can never fire.
+  const notificationId = await rearmReminder(projected, {
+    schedule: async () => {
+      const body = await resolveNotificationBody(target.description);
+      return scheduleSnoozeNotification(
+        {
+          reminderId: id,
+          title: target.title,
+          body,
+          alarm: alarmOn,
+          exactTiming: target.exactTiming !== false,
+          channelId: channelIdForAlarm(alarmOn, await getVibrationEnabled()),
+        },
+        snoozeTarget
+      );
     },
-    snoozeTarget
-  );
+  });
   const datetime = snoozeTarget.toISOString();
   const reminders = current.map((r) =>
     r.id === id
@@ -987,24 +1024,16 @@ export async function snoozeReminder(
 
 export async function rescheduleAllFutureReminders(): Promise<void> {
   const reminders = await loadReminders();
-  const now = new Date();
   let changed = false;
   const updated = await Promise.all(
     reminders.map(async (reminder) => {
-      // A reminder whose datetime has passed has ALREADY been delivered.
-      // Rescheduling it cancels nothing — cancelScheduledNotificationAsync
-      // only stops a pending trigger, it can't un-deliver a notification
-      // sitting in the tray — and shows a second copy, while overwriting
-      // notificationId so the first becomes an orphan nothing can cancel.
-      if (reminder.completed || new Date(reminder.datetime).getTime() <= now.getTime()) {
-        return reminder;
-      }
-      // Cancel by payload, not just by the stored id: a reminder that already
-      // picked up a duplicate has an orphan the stored id can't reach, and
-      // this is the path that would otherwise re-arm it every 15 minutes.
-      await cancelScheduledForReminder(reminder.id);
-      await cancelNotification(reminder.notificationId);
-      const notificationId = await scheduleNotification(reminder, reminder.id);
+      // rearmReminder's default guard (not completed, still in the future)
+      // is exactly right here too: a reminder whose datetime has passed has
+      // ALREADY been delivered, and rescheduling it would show a second copy
+      // while orphaning the first — see isPendingForAlarmRewrite's doc.
+      const notificationId = await rearmReminder(reminder, {
+        schedule: () => scheduleNotification(reminder, reminder.id),
+      });
       if (notificationId !== undefined) {
         changed = true;
         return { ...reminder, notificationId };
@@ -1071,12 +1100,13 @@ export async function setAlarmForPendingReminders(
     current.map(async (reminder) => {
       if (!isPendingForAlarmRewrite(reminder, now)) return reminder;
       if ((reminder.alarm !== false) === alarm) return reminder;
-      // Cancel by payload as well as by stored id: a reminder that already
-      // picked up a duplicate has an orphan the stored id cannot reach.
-      await cancelScheduledForReminder(reminder.id);
-      await cancelNotification(reminder.notificationId);
       const next = { ...reminder, alarm };
-      const notificationId = await scheduleNotification(next, next.id);
+      // Eligibility already checked above; rearmReminder's default guard
+      // would re-derive the same answer, so pass one that always proceeds.
+      const notificationId = await rearmReminder(next, {
+        guard: () => true,
+        schedule: () => scheduleNotification(next, next.id),
+      });
       changed = true;
       return { ...next, notificationId };
     })

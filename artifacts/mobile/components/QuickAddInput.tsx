@@ -3,7 +3,6 @@ import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
-  Linking,
   Modal,
   Platform,
   Pressable,
@@ -19,13 +18,7 @@ import QuietHoursSheet from "@/components/QuietHoursSheet";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
-import {
-  ensureOfflineModelReady,
-  getMicPermissionStatus,
-  requestMicPermission,
-  startListening,
-  stopListening,
-} from "@/services/SpeechService";
+import { useSharedAwareDictation } from "@/hooks/useSharedAwareDictation";
 import { checkReachability, isReachabilityStale } from "@/services/RecipientLookupService";
 import { sendInvitation } from "@/services/InvitationService";
 import type { PickableContact } from "@/services/ContactsService";
@@ -36,12 +29,12 @@ import type { ParsedAmbiguity } from "@/utils/malayalamDateParser";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
 import { detectVagueOpener } from "@/utils/vagueTask";
 import { getFontFamily } from "@/utils/getFontFamily";
-
-type DateTimePickerEvent = { type: string; nativeEvent: object };
-const DateTimePicker: React.ComponentType<any> | null =
-  Platform.OS !== "web"
-    ? require("@react-native-community/datetimepicker").default
-    : null;
+import {
+  DateTimePicker,
+  toDateInput,
+  toTimeInput,
+  type DateTimePickerEvent,
+} from "@/utils/dateTimePicker";
 
 type PickerMode = "date" | "time" | null;
 
@@ -53,22 +46,6 @@ function roundToNextHour(d: Date): Date {
     result.setHours(result.getHours() + 1);
   }
   return result;
-}
-
-function roundToNext5(d: Date): Date {
-  const ms = 1000 * 60 * 5;
-  return new Date(Math.ceil((d.getTime() + 60000) / ms) * ms);
-}
-
-function toDateInput(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function toTimeInput(d: Date): string {
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 function formatDatePill(d: Date): string {
@@ -137,12 +114,7 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [ambiguityPrompt, setAmbiguityPrompt] = useState<ParsedAmbiguity | null>(null);
   const [dismissedVagueText, setDismissedVagueText] = useState<string | null>(null);
   const [description, setDescription] = useState("");
-  const [listening, setListening] = useState(false);
-  const [micNotice, setMicNotice] = useState<string | null>(null);
-  const [micNoticeDebugInfo, setMicNoticeDebugInfo] = useState<string | null>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
-  const micPulse = useRef(new Animated.Value(1)).current;
-  const micSourceRef = useRef<"live" | "shared" | null>(null);
 
   const [showNoTimeSheet, setShowNoTimeSheet] = useState(false);
   const [suggestedTime, setSuggestedTime] = useState<Date>(roundToNextHour(new Date()));
@@ -151,33 +123,12 @@ export default function QuickAddInput({ onSaved }: Props) {
   const pillAnim = useRef(new Animated.Value(0)).current;
   const pillTranslate = useRef(new Animated.Value(-6)).current;
 
-  useEffect(() => {
-    if (sharedAudioTranscribing) {
-      if (micSourceRef.current === "live") {
-        // A live mic session already owns listening/pulse state — don't let
-        // this (typically near-instantly-busy) shared-audio attempt touch it.
-        return;
-      }
-      micSourceRef.current = "shared";
-      setListening(true);
-      startMicPulse();
-      setMicNotice(null);
-    } else if (micSourceRef.current === "shared") {
-      micSourceRef.current = null;
-      setListening(false);
-      stopMicPulse();
-    }
-  }, [sharedAudioTranscribing]);
-
-  useEffect(() => {
-    if (sharedAudioNotice) {
-      setMicNotice(sharedAudioNotice);
-    }
-  }, [sharedAudioNotice]);
-
-  useEffect(() => {
-    setMicNoticeDebugInfo(sharedAudioDebugInfo);
-  }, [sharedAudioDebugInfo]);
+  const { listening, micNotice, micNoticeDebugInfo, micPulse, handleMicPress } =
+    useSharedAwareDictation(input, setInput, dictationLanguage, {
+      sharedAudioTranscribing,
+      sharedAudioNotice,
+      sharedAudioDebugInfo,
+    });
 
   useEffect(() => {
     if (sharedText) {
@@ -373,91 +324,6 @@ export default function QuickAddInput({ onSaved }: Props) {
       setPickerMode("date");
     } else {
       setPickerMode((m) => (m !== null ? null : "date"));
-    }
-  };
-
-  const startMicPulse = () => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(micPulse, { toValue: 1.15, duration: 400, useNativeDriver: true }),
-        Animated.timing(micPulse, { toValue: 1, duration: 400, useNativeDriver: true }),
-      ])
-    ).start();
-  };
-
-  const stopMicPulse = () => {
-    micPulse.stopAnimation();
-    micPulse.setValue(1);
-  };
-
-  const startSpeakMode = async () => {
-    setMicNotice(null);
-    const { granted, canAskAgain } = await getMicPermissionStatus();
-    if (!granted) {
-      if (!canAskAgain) {
-        Linking.openSettings();
-        return;
-      }
-      const nowGranted = await requestMicPermission();
-      if (!nowGranted) return;
-    }
-
-    const locale = dictationLanguage;
-    const modelStatus = await ensureOfflineModelReady(locale);
-    if (modelStatus === "preparing") {
-      setMicNotice("Preparing voice recognition — try again in a moment");
-      return;
-    }
-
-    const { busy } = startListening(
-      input,
-      locale,
-      (fullText) => setInput(fullText),
-      () => {
-        micSourceRef.current = null;
-        setListening(false);
-        stopMicPulse();
-      },
-      () => {
-        micSourceRef.current = null;
-        setListening(false);
-        stopMicPulse();
-        setMicNotice("Couldn't hear that — try again or type it in.");
-      },
-      modelStatus !== "unavailable"
-    );
-    if (busy) {
-      setMicNotice("Still transcribing the shared audio…");
-      return;
-    }
-    micSourceRef.current = "live";
-    setListening(true);
-    startMicPulse();
-  };
-
-  const stopSpeakMode = () => {
-    if (micSourceRef.current === "shared") {
-      // A shared audio file is transcribing right now — stopping here would
-      // kill its native listeners and permanently wedge the concurrency
-      // guard (see Finding 2b). Surface a notice instead of stopping it.
-      setMicNotice("Still transcribing the shared audio…");
-      return;
-    }
-    stopListening();
-    micSourceRef.current = null;
-    setListening(false);
-    stopMicPulse();
-  };
-
-  const handleMicPress = () => {
-    if (!listening) {
-      startSpeakMode();
-    } else if (micSourceRef.current === "shared") {
-      // A shared audio file is already transcribing — surface a busy
-      // notice rather than silently no-op'ing.
-      setMicNotice("Still transcribing the shared audio…");
-    } else {
-      stopSpeakMode();
     }
   };
 
@@ -994,17 +860,16 @@ export default function QuickAddInput({ onSaved }: Props) {
           // contact; the existing Tier 1 WhatsApp-link flow keeps working
           // unmodified whether this resolves, fails, or is still in flight.
           const deviceRegion = getLocales()[0]?.regionCode ?? null;
-          console.log("[TEMP-DIAG2] calling checkReachability, phone=", picked.phone, "region=", deviceRegion);
           checkReachability(picked, deviceRegion).then((result) => {
-            console.log("[TEMP-DIAG2] checkReachability resolved:", JSON.stringify(result));
             if (!result) return;
             setRecipient((current) =>
               current && current.phone === picked.phone
                 ? { ...current, appUserId: result.appUserId, lookedUpAt: result.lookedUpAt }
                 : current
             );
-          }).catch((err) => {
-            console.log("[TEMP-DIAG2] checkReachability threw:", String(err));
+          }).catch(() => {
+            // Additive check — a failure here degrades silently to the
+            // existing WhatsApp-link flow.
           });
         }}
       />
