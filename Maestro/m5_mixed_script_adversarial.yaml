@@ -1,0 +1,32 @@
+# M5: Mixed-script adversarial title
+# Types a title mixing English, digits and emoji in one string (Malayalam
+# script itself can't be typed via Maestro's inputText - see CLAUDE.md's
+# ADBKeyboard note - so this covers the non-Malayalam mixed-script case).
+# Verifies no crash and the raw text renders back correctly, un-mangled.
+#
+# Note: asserting on the emoji glyph itself via Maestro's text matcher is
+# unreliable (confirmed 2026-09-12 - the emoji rendered correctly on-screen
+# per a manual screenshot check, but assertVisible with the emoji in the
+# string still failed to match); assert on the surrounding text instead,
+# which is a sufficient proxy for "the string wasn't mangled/dropped".
+# The list sorts newest/soonest-first: a reminder for "today" lands at the
+# TOP under "Today", not the bottom - scrolling DOWN moves away from it.
+# No scroll needed here since it renders immediately after save.
+#
+# AUTO: fully scriptable
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Call Priya 🎉 re: invoice #42 at 5pm"
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+- assertVisible: "Call Priya"
+- assertVisible: "invoice #42"

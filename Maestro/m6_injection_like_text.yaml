@@ -1,0 +1,43 @@
+# M6 / M35: Injection-like text is inert
+# Types a title containing HTML/script-tag-shaped and SQL-injection-shaped
+# text. React Native has no webview/dangerouslySetInnerHTML rendering user
+# content, so this should be a non-issue - the point is to actually prove
+# it on-device: the literal text renders back unexecuted and unmodified,
+# never breaks layout, never triggers a crash.
+#
+# AUTO: fully scriptable
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+- tapOn:
+    id: "quick-add-input"
+- inputText: "<script>alert(1)</script> meeting at 6pm"
+- assertVisible: "<script>alert(1)</script> meeting"
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      text: "<script>alert(1)</script>"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "<script>alert(1)</script> meeting"
+
+# Second pass: SQL-injection-shaped text, same expectation (literal, inert).
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Task'; DROP TABLE reminders;-- at 7pm"
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      text: "DROP TABLE reminders"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "DROP TABLE reminders"
