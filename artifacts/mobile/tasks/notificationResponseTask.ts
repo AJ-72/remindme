@@ -46,7 +46,6 @@ import {
   type NotificationResponseHandlerDeps,
   type NotificationResponseLike,
 } from "@/services/notificationResponseHandler";
-import { checkForInvitations } from "@/services/InvitationService";
 import { setPushPending } from "@/services/invitationClaimThrottle";
 
 // eslint-disable-next-line
@@ -90,13 +89,27 @@ export function buildBackgroundResponseDeps(): NotificationResponseHandlerDeps {
     // taking down the task before the storage write.
     navigateToDetail: () => {},
     navigateToSend: () => {},
-    // No-op navigate: headless, same constraint as above. Tapping the push
-    // still launches the app, which runs useInvitationCheck() on mount and
-    // navigates from there once this claim has something to show. Set
-    // pushPending so the next launch claims even if inside the cooldown.
-    checkForInvitations: async () => {
+    // THE HEADLESS PATH MUST NOT CLAIM. It arms a flag and stops.
+    //
+    // claim_invitations() CONSUMES the row: it sets recipient_id, and its own
+    // `recipient_id is null` guard means a second call returns nothing. This
+    // context has no navigator, so claiming here handed the invitation to the
+    // recipient's account and then dropped it on the floor - the tap launched
+    // the app, useInvitationCheck claimed an empty list, and the user watched
+    // their notification open the home screen with no invitation anywhere.
+    // The cold-start replay could not rescue it either: markResponseHandled()
+    // above has already fired, so getLastNotificationResponseAsync()'s pass
+    // through handleNotificationResponse() dedupes straight out.
+    //
+    // Arming pushPending instead leaves the row unclaimed for the one context
+    // that can actually present it. An invitation push carries no custom
+    // actions, so every tap is the default open-the-app action; the app
+    // launches, useInvitationCheck claims with the cooldown bypassed, and
+    // navigates with a real navigator. If that launch somehow never happens,
+    // nothing is lost - the invitation simply stays pending server-side and
+    // the next app open collects it.
+    onInvitationPush: async () => {
       await setPushPending(true);
-      return checkForInvitations(() => {});
     },
   };
 }

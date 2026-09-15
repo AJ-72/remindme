@@ -430,3 +430,35 @@ confirm a claim runs then too (the stored value repaired itself).
 
 **Fails if.** No claim runs at step 3 - the `now < lastClaimAt` guard in
 `shouldClaimNow()` is not reached.
+
+### 4. Tapping an invitation push with the app killed (PENDING)
+
+Added 2026-09-15 with the headless-claim fix. Jest cannot prove this: it
+needs the app process actually dead, which only a real device produces.
+
+**Why it was broken.** The headless task claimed the invitation, and
+`claim_invitations()` consumes the row. The launch that followed claimed an
+empty list, so the tap opened the app to the home screen with the invitation
+nowhere. The cold-start replay could not rescue it either - the headless pass
+had already called `markResponseHandled()`, so the replay deduped out.
+
+**Setup.** Two devices, push confirmed working (device test 3 above).
+
+**Steps.**
+1. On the recipient's device, force-stop the app (Settings -> Apps -> Force
+   stop). Do not just background it - the process must be dead, or the
+   foreground listener handles the tap and the headless path never runs.
+2. From the sender, send an invitation.
+3. On the recipient's device, tap the notification body.
+
+**Pass.** The app launches and lands on the invitation preview, showing the
+sender's name, the title and the time.
+
+**Fails if.** The app launches to the home screen with no preview. Read the
+invitation row: `recipient_id` populated means something still claimed it
+before a navigator existed - check that `buildBackgroundResponseDeps()`'s
+`onInvitationPush` only arms `pushPending`.
+
+**Also check.** Repeat with the device in flight mode at step 3, then restore
+the network and open the app. The invitation must still appear: `pushPending`
+survives a failed claim.

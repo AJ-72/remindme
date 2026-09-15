@@ -63,7 +63,7 @@ export default function NotificationResponseHandler() {
       // this listener is already live) - a navigator exists here, unlike the
       // headless task's own deps, so this can go straight to the invitation
       // instead of waiting for the next useInvitationCheck() foreground pass.
-      checkForInvitations: async () => {
+      onInvitationPush: async () => {
         const outcome = await checkForInvitations(
           navigateToInvitationPreview,
           navigateToPendingList
