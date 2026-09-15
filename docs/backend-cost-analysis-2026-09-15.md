@@ -193,3 +193,105 @@ move speech to a cloud API, and do not move reminder firing to the server.
 Supabase is not a must-have, and a cheaper Postgres exists. But the vendor is
 not your cost risk. Per-MAU auth billing is your cost risk, and you can remove
 it without leaving Supabase.
+
+---
+
+# Addendum: a hard budget of Rs 1,000 per month
+
+Added 2026-09-15, after the budget constraint was set.
+
+Rs 1,000 per month is about **$11.5** at Rs 87 per USD.
+
+## A1. Ceiling on Supabase Free
+
+Supabase Free gives 500 MB database, 500,000 Edge Function invocations per
+month, 50,000 MAU, and 5 GB egress. The **Edge Function invocation count is
+the binding limit**, not MAU and not storage.
+
+This app makes about 35 Edge Function calls per active Tier 2 user per month
+(`lookup`, `send-invitation`, `claim-invitations`, `respond-invitation`).
+
+| Limit | Ceiling |
+|---|---|
+| 500K calls / 35 | ~14,000 active Tier 2 users |
+| At 25% Tier 2 adoption | **~55,000 installed users** |
+| Database at that load | ~200 MB of 500 MB |
+| Egress at that load | ~1.5 GB of 5 GB |
+
+**You support about 50,000 to 60,000 installed users at Rs 0 per month.**
+
+### The polling change raises this ceiling
+
+`claim-invitations` is the largest contributor, because the client polls it.
+Call it only when a push arrives, not on every app open. The count per user
+falls from about 35 to about 12.
+
+| Mode | Active users | Installed users |
+|---|---|---|
+| Polling (today) | 14,000 | ~55,000 |
+| Push-triggered only | 41,000 | **~160,000** |
+
+Database storage becomes the next limit, near 200,000 installed users.
+
+### Supabase has no tier inside this budget
+
+Free is Rs 0. Pro is $25, which is about Rs 2,175. There is nothing between
+them. You pass from inside the budget to more than double it in one step.
+
+## A2. Options that fit inside Rs 1,000
+
+| Option | Rs/month | Installed users | Main risk |
+|---|---|---|---|
+| Supabase Free | 0 | 55k, or 160k after the polling fix | Hard cliff to Rs 2,175. No backups. |
+| **Cloudflare Workers + Neon** | ~435 | ~200k on Neon Free | You write auth and the API layer. |
+| Cloudflare Workers + Oracle Always Free | ~435 | 1M+ | Oracle reclaims idle instances. No SLA. |
+| Cloudflare Workers + Hetzner CX22 | ~825 | 1-2M | You own backups and the pager. No India region. |
+| Fly.io, unmanaged Postgres | ~520 | ~500k | Unmanaged. Manual failover. |
+| Railway | ~3,200 | - | **Over budget.** |
+| Cloudflare Workers + D1 | ~435 | 1M+ | D1 is SQLite. The 12 plpgsql functions and all RLS do not port. |
+
+### Why Cloudflare Workers
+
+- The paid plan is $5 (Rs 435) and includes 10 million requests per month.
+  The 10M-user projection was 125M requests, so requests never drive the cost.
+- The 6 Edge Functions are Deno. They port to Workers with small changes.
+- Cloudflare has Indian points of presence. Latency improves.
+- It removes the per-MAU auth charge, which section 4 named as the main risk.
+
+### Why Railway does not fit
+
+The $5 Hobby fee *includes* $5 of usage. It does not add to it. A container
+running Postgres plus an API service uses much more. Measured Node plus
+Postgres deployments land near $37 per month. Railway's default Postgres also
+has no point-in-time recovery and no read replica.
+
+### Why D1 does not fit
+
+D1 is SQLite. Your RLS policies and your 12 `SECURITY DEFINER` plpgsql
+functions have no equivalent. The rewrite costs more than it saves.
+
+## A3. Decision
+
+The user chose **managed Postgres** (2026-09-15). Safety and backups win over
+the lowest price.
+
+**Target stack: Cloudflare Workers + Neon.**
+
+| Stage | Users | Action | Rs/month |
+|---|---|---|---|
+| 1. Now | 0 - 40k | Stay on Supabase Free. No change. | 0 |
+| 2. Soon | 40k | Make the claim-polling change in the mobile client. | 0 |
+| 3. | 40k - 160k | Stay on Supabase Free. | 0 |
+| 4. | ~160k | Port the 6 Edge Functions to Cloudflare Workers. Move the database to Neon. Replace `auth.uid()` with a self-signed JWT. | ~435 |
+| 5. | 160k - 1M | Neon Free (0.5 GB), then Neon Launch. | 435 - 2,100 |
+
+The Rs 1,000 budget holds to roughly **500,000 installed users** on this path.
+Neon storage breaks it first, not request volume.
+
+### Rules that keep stage 4 cheap
+
+1. Add no Supabase Realtime and no Supabase Storage.
+2. Keep every policy in `lib/db/src/schema/` and every privileged operation in
+   `lib/db/src/functions/`.
+3. Prefer an Edge Function over a direct PostgREST call. Two direct calls
+   exist today, in `DeviceRegistrationService.ts` and `InvitationService.ts`.
