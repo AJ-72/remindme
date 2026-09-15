@@ -63,8 +63,19 @@ export default function NotificationResponseHandler() {
       // this listener is already live) - a navigator exists here, unlike the
       // headless task's own deps, so this can go straight to the invitation
       // instead of waiting for the next useInvitationCheck() foreground pass.
-      checkForInvitations: () =>
-        checkForInvitations(navigateToInvitationPreview, navigateToPendingList),
+      checkForInvitations: async () => {
+        const outcome = await checkForInvitations(
+          navigateToInvitationPreview,
+          navigateToPendingList
+        );
+        // Only a reached server starts a cooldown; a failed tap-claim must
+        // leave the polling window open so the next foreground retries.
+        if (outcome.ok) {
+          await setLastClaimAt(Date.now());
+          await setPushPending(false);
+        }
+        return outcome;
+      },
     };
 
     // NOT a queue drain: this keeps resolving with the same response on every
@@ -112,14 +123,22 @@ export default function NotificationResponseHandler() {
           const data = notification?.request?.content?.data;
           if (data?.type !== "invitation") return;
 
-          const claimed = await checkForInvitations(
+          // Set BEFORE claiming, not after. If this claim fails (offline, an
+          // expired session) the flag survives, so the next launch claims
+          // regardless of the cooldown rather than losing a push that the
+          // device demonstrably received.
+          await setPushPending(true);
+
+          const outcome = await checkForInvitations(
             navigateToInvitationPreview,
             navigateToPendingList
           );
 
-          // Record the claim time and clear the push pending flag.
-          await setLastClaimAt(Date.now());
-          await setPushPending(false);
+          if (outcome.ok) {
+            await setLastClaimAt(Date.now());
+            await setPushPending(false);
+          }
+          const claimed = outcome.claimed;
 
           // B15: a push just landed while the app was alive to see it - if
           // that leaves 2+ invitations pending, collapse the individual

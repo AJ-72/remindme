@@ -1,17 +1,26 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 /**
- * Throttle the polling claim to 6 hours between calls. This caps useInvitationCheck
- * (mount + foreground resume) to about 4 calls per day, and in practice 4-8 per
- * month since it must race with app opens. The push-triggered claim path stays
- * ungated and resets the cooldown, so devices with working push never wait.
- *
- * The three push-triggered paths are in:
+ * Cooldown between two POLLED claims (useInvitationCheck's mount and
+ * foreground-resume passes). The push-triggered paths stay ungated:
  * - NotificationResponseHandler.tsx (addNotificationReceivedListener)
- * - notificationResponseHandler.ts (deps.checkForInvitations on tap)
- * - notificationResponseTask.ts (headless, sets pushPending)
+ * - NotificationResponseHandler.tsx's deps.checkForInvitations (tap)
+ * - notificationResponseTask.ts (headless; sets pushPending instead)
+ *
+ * ONE HOUR, NOT SIX. The cooldown is an upper bound on how long a recipient
+ * whose push is broken cannot see an invitation, and `invitations.expires_at`
+ * equals the reminder's own `datetime` (see lib/db/src/schema/invitations.ts)
+ * - an unaccepted 08:00 reminder is deleted at 08:01 by expireInvitations.sql.
+ * A cooldown longer than the invitation's own horizon does not delay the
+ * invitation, it destroys it: the row expires before the next poll and the
+ * recipient never learns it existed. Six hours is longer than most reminders
+ * people send. One hour sits under the common case and still removes roughly
+ * two thirds of the polling calls.
+ *
+ * Raising this value trades a recipient's lost reminders for Edge Function
+ * quota. Do not raise it without re-reading expires_at above.
  */
-export const CLAIM_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+export const CLAIM_COOLDOWN_MS = 60 * 60 * 1000;
 
 const LAST_CLAIM_AT_KEY = "invitationClaimThrottle:lastClaimAt";
 const PUSH_PENDING_KEY = "invitationClaimThrottle:pushPending";
@@ -23,7 +32,16 @@ const PUSH_PENDING_KEY = "invitationClaimThrottle:pushPending";
  * - If pushPending is true, claim immediately. A push landed; the cooldown does
  *   not apply.
  * - If lastClaimAt is null, claim immediately. A fresh install must never wait.
+ * - If `now` is BEFORE lastClaimAt, claim immediately. Both are wall-clock
+ *   epochs, so an NTP correction, a carrier time update or a hand-set clock
+ *   can leave a timestamp in the future. Without this branch the subtraction
+ *   below stays negative and the user is locked out until real time catches
+ *   up, which can be days. The write that follows a successful claim
+ *   overwrites the bad value, so the state repairs itself.
  * - Otherwise, claim if we are past the cooldown window.
+ *
+ * Every uncertain case resolves to "claim". A wasted call costs a fraction of
+ * a cent; a skipped one can cost the user a reminder.
  */
 export function shouldClaimNow(
   lastClaimAt: number | null,
@@ -32,6 +50,7 @@ export function shouldClaimNow(
 ): boolean {
   if (pushPending) return true;
   if (lastClaimAt === null) return true;
+  if (now < lastClaimAt) return true;
   return now - lastClaimAt >= CLAIM_COOLDOWN_MS;
 }
 

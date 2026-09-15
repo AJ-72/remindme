@@ -19,8 +19,13 @@ describe("useInvitationCheck", () => {
   let activeListener: ((state: string) => void) | undefined;
 
   beforeEach(() => {
+    // Every mock here is a module automock, which jest.restoreAllMocks() does
+    // NOT reset - without this the call history of setLastClaimAt/
+    // setPushPending accumulates across tests and a "was never called"
+    // assertion reads calls made by an earlier test.
+    jest.clearAllMocks();
     mockCheck.mockReset();
-    mockCheck.mockResolvedValue([]);
+    mockCheck.mockResolvedValue({ ok: true, claimed: [] });
     mockGetLastClaimAt.mockResolvedValue(null);
     mockSetLastClaimAt.mockResolvedValue(undefined);
     mockGetPushPending.mockResolvedValue(false);
@@ -138,11 +143,50 @@ describe("useInvitationCheck", () => {
 
   it("records lastClaimAt after a claim", async () => {
     mockShouldClaimNow.mockReturnValue(true);
-    mockCheck.mockResolvedValue([{ id: "test" }]);
+    mockCheck.mockResolvedValue({ ok: true, claimed: [{ id: "test" }] });
     renderHook(() => useInvitationCheck());
 
     await waitFor(() => {
       expect(mockSetLastClaimAt).toHaveBeenCalledWith(expect.any(Number));
+    });
+  });
+
+  // An offline app-open used to start the full cooldown on a call that never
+  // reached Supabase, blinding the app until it expired.
+  it("does NOT start a cooldown when the claim never reached the server", async () => {
+    mockShouldClaimNow.mockReturnValue(true);
+    mockCheck.mockResolvedValue({ ok: false, claimed: [] });
+    renderHook(() => useInvitationCheck());
+
+    await waitFor(() => {
+      expect(mockCheck).toHaveBeenCalledTimes(1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mockSetLastClaimAt).not.toHaveBeenCalled();
+  });
+
+  it("leaves pushPending set when the claim never reached the server", async () => {
+    mockGetPushPending.mockResolvedValue(true);
+    mockCheck.mockResolvedValue({ ok: false, claimed: [] });
+    renderHook(() => useInvitationCheck());
+
+    await waitFor(() => {
+      expect(mockCheck).toHaveBeenCalledTimes(1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mockSetPushPending).not.toHaveBeenCalled();
+  });
+
+  // The headless task sets pushPending and then claims the row itself, so the
+  // launch that follows legitimately sees an empty list. Gating the clear on
+  // claimed.length left the flag set forever and disabled the throttle.
+  it("clears pushPending on a successful claim that returned no rows", async () => {
+    mockGetPushPending.mockResolvedValue(true);
+    mockCheck.mockResolvedValue({ ok: true, claimed: [] });
+    renderHook(() => useInvitationCheck());
+
+    await waitFor(() => {
+      expect(mockSetPushPending).toHaveBeenCalledWith(false);
     });
   });
 });

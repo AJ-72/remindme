@@ -7,7 +7,6 @@ import {
   type Reminder,
 } from "@/services/ReminderService";
 import { resolveSnoozeTarget, type SnoozePreset } from "@/utils/snoozePresets";
-import { setLastClaimAt } from "@/services/invitationClaimThrottle";
 
 export interface NotificationResponseLike {
   actionIdentifier: string;
@@ -107,9 +106,11 @@ export async function handleNotificationResponse(
   // custom actions, so any tap (the default action) means "open it".
   if (isInvitationData(data)) {
     await deps.markResponseHandled(responseKey);
+    // Recording the claim against the throttle is the INJECTED dep's job, not
+    // this function's: only the caller that built the dep knows whether the
+    // claim actually reached the server, and this module stays free of
+    // storage side effects so it can be tested as pure logic.
     await deps.checkForInvitations();
-    // Record the claim time from a push tap.
-    await setLastClaimAt(Date.now());
     return;
   }
 

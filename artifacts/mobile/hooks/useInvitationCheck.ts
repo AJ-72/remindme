@@ -67,14 +67,25 @@ export function useInvitationCheck(): void {
         return;
       }
 
-      const claimed = await checkForInvitations(
+      const outcome = await checkForInvitations(
         navigateToInvitationPreview,
         navigateToPendingList
       );
 
-      // Record the claim time and clear the push flag.
+      // ONLY a confirmed server response may start a cooldown. An offline
+      // app-open, an expired session or a 500 all come back ok:false, and
+      // starting the window on one of those would blind the app for the
+      // whole cooldown over a call that never reached Supabase.
+      if (!outcome.ok) return;
+
       await setLastClaimAt(now);
-      if (pushPending && claimed.length > 0) {
+
+      // Cleared on ANY successful claim, not only one that returned rows.
+      // The headless task sets this flag and then claims the row itself, so
+      // the launch that follows legitimately sees an empty list - gating the
+      // clear on claimed.length would leave the flag set forever and disable
+      // the throttle permanently for that install.
+      if (pushPending) {
         await setPushPending(false);
       }
     };

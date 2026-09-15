@@ -124,15 +124,36 @@ export interface ClaimedInvitation {
 }
 
 /**
- * Collects every pending invitation addressed to this account's bound
- * number (T4.4). Call this right after a successful bind - that is why no
- * deferred deep-linking is needed anywhere in this feature: the invitation
- * is addressed to a number, not a device or install session, so it finds
- * the recipient the moment binding proves ownership of that number.
+ * The result of one claim attempt.
+ *
+ * `ok` exists because "the server said there is nothing waiting" and "we
+ * never reached the server" are the same empty array, and the claim throttle
+ * (services/invitationClaimThrottle.ts) must tell them apart. Starting a
+ * cooldown on a failed call would let one offline app-open blind the app for
+ * the whole window - the exact regression this type prevents.
+ *
+ * A caller with no session gets ok:false too. That costs nothing: the
+ * no-session path makes no network call at all, so re-checking on every
+ * foreground stays free, and a user who binds mid-session is not locked out
+ * by a cooldown started before they had an account.
  */
-export async function claimPendingInvitations(): Promise<ClaimedInvitation[]> {
+export interface ClaimOutcome {
+  ok: boolean;
+  claimed: ClaimedInvitation[];
+}
+
+/**
+ * Collects every pending invitation addressed to this account's bound
+ * number (T4.4), reporting whether the server was actually reached.
+ *
+ * Call this right after a successful bind - that is why no deferred
+ * deep-linking is needed anywhere in this feature: the invitation is
+ * addressed to a number, not a device or install session, so it finds the
+ * recipient the moment binding proves ownership of that number.
+ */
+export async function claimPendingInvitationsOutcome(): Promise<ClaimOutcome> {
   const session = await getCurrentSession();
-  if (!session) return [];
+  if (!session) return { ok: false, claimed: [] };
 
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/claim-invitations`, {
@@ -143,12 +164,22 @@ export async function claimPendingInvitations(): Promise<ClaimedInvitation[]> {
         apikey: SUPABASE_ANON_KEY,
       },
     });
-    if (!res.ok) return [];
+    if (!res.ok) return { ok: false, claimed: [] };
     const json = await res.json();
-    return json.claimed ?? [];
+    return { ok: true, claimed: json.claimed ?? [] };
   } catch {
-    return [];
+    return { ok: false, claimed: [] };
   }
+}
+
+/**
+ * Array-only view of the above, for callers that act on a successful bind
+ * and have no cooldown to protect (bind-invite.tsx, register-number.tsx).
+ * Both treat "failed" and "nothing waiting" identically, so neither needs
+ * the outcome shape.
+ */
+export async function claimPendingInvitations(): Promise<ClaimedInvitation[]> {
+  return (await claimPendingInvitationsOutcome()).claimed;
 }
 
 /**
@@ -263,19 +294,23 @@ export async function respondToInvitation(
  * hasn't been updated yet still compiles and keeps its old "do nothing for
  * 2+" behavior rather than crashing on a missing callback.
  *
- * Never throws - claimPendingInvitations() already swallows its own
- * failures (missing session, network error) and returns [], which this
- * simply passes through with no navigation.
+ * Never throws - claimPendingInvitationsOutcome() already swallows its own
+ * failures (missing session, network error) and reports them as ok:false,
+ * which this passes through with no navigation.
+ *
+ * Returns the whole ClaimOutcome, not just the array: the throttle caller
+ * needs `ok` to decide whether a cooldown may start at all.
  */
 export async function checkForInvitations(
   navigate: (invitation: ClaimedInvitation) => void,
   navigateToList?: (invitations: ClaimedInvitation[]) => void
-): Promise<ClaimedInvitation[]> {
-  const claimed = await claimPendingInvitations();
+): Promise<ClaimOutcome> {
+  const outcome = await claimPendingInvitationsOutcome();
+  const claimed = outcome.claimed;
   if (claimed.length === 1) {
     navigate(claimed[0]);
   } else if (claimed.length > 1) {
     navigateToList?.(claimed);
   }
-  return claimed;
+  return outcome;
 }

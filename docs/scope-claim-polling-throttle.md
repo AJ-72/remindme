@@ -143,3 +143,42 @@ Item 3 is the one that proves the saving. Jest cannot prove it.
 - No change to the `claim-invitations` Edge Function.
 - No change to `lookup`, `send-invitation` or `respond-invitation`.
 - No move off Supabase.
+
+---
+
+## Correction, 2026-09-15 (post-implementation review)
+
+The design above shipped, then an adversarial review found six defects. All
+six are fixed. Three changes contradict what this document specified:
+
+1. **`CLAIM_COOLDOWN_MS` is 1 hour, not 6.** `invitations.expires_at` equals
+   the reminder's own `datetime`, so a cooldown longer than the invitation's
+   horizon does not delay the invitation, it destroys it. A 6-hour cooldown
+   outlives most reminders people send. The "Why 6 hours" section above is
+   wrong and is kept only to show what the mistake was.
+2. **A claim that fails must not start a cooldown.** `checkForInvitations()`
+   now returns `ClaimOutcome { ok, claimed }`, because "the server said
+   nothing is waiting" and "we never reached the server" were the same empty
+   array. Rule 2 above said "every successful claim writes `lastClaimAt`";
+   the code could not tell success from failure, so an offline app-open
+   blinded the app for the whole window.
+3. **`pushPending` clears on any reached-server claim, not only one that
+   returned rows.** The headless task claims the row itself, so the launch
+   that follows sees an empty list; gating the clear on `claimed.length`
+   left the flag set forever and disabled the throttle permanently.
+
+Also added: a `now < lastClaimAt` guard for a backward clock jump; the
+received-push listener arms `pushPending` *before* claiming so a failed claim
+is not lost; and `hooks/useInvitationCheck.integration.test.ts`, which runs
+the hook against the real throttle and real AsyncStorage (the original tests
+stubbed the gate, so every defect above was invisible to them).
+
+### Known gap, not fixed here
+
+A push that arrives while the app is fully backgrounded and is **dismissed
+without a tap** sets no flag, because no JS runs to set one. Closing that
+needs a background received-notification task, which is a larger change.
+
+Separately, and pre-existing: the headless tap path claims the invitation but
+has no navigator, so the launch that follows claims nothing and shows nothing.
+The row is the recipient's in the database, but no preview is presented.
