@@ -10,6 +10,9 @@
 | [D6](#d6) | Malayalam dictation end to end | `PENDING` | — | MANUAL |
 | [D11](#d11) | Quiet hours incl. midnight wrap | `PARTIAL` | 2026-09-04 | AUTO (partial) |
 | [D13](#d13) | "Why tasks slip" explainer | `PENDING` | — | SEMI |
+| [D40](#d40) | "How you're doing" adherence screen | `PENDING` | — | SEMI |
+| [D41](#d41) | Better-time suggestion on save | `PENDING` | — | SEMI |
+| [D42](#d42) | Postponed-task intervention panel | `PENDING` | — | SEMI |
 
 ---
 
@@ -280,3 +283,110 @@ background in both themes and at the largest font size.
 whole page then scrolls sideways), the article cannot be scrolled to its
 end, or body text drops to near-invisible contrast in one theme — the usual
 cause is a hardcoded colour that only suits the other.
+
+---
+
+<a id="d40"></a>
+## D40 — "How you're doing" adherence screen · `PENDING`
+
+*Added 2026-09-15.* Every number on this screen is derived from the reminder
+records themselves, so Jest proves the arithmetic. What Jest cannot see is a
+screen of stacked cards on a real viewport, the weekday bar row at a narrow
+width, and Malayalam reminder titles in the stuck list — Inter carries no
+Malayalam glyphs, so a missed `getFontFamily` call renders as boxes and only
+shows up on a device.
+
+**Setup.** A device with a real history: at least 10 reminders that have come
+due, a mix of finished and missed, spread over more than one hour of the day.
+Include at least one reminder with a Malayalam title, postponed 3+ times.
+
+**Steps.**
+1. Settings → **How you're doing**.
+2. Read every card top to bottom. Scroll to the end.
+3. Rotate to landscape, then back.
+4. Switch the theme (light → dark → system) with the screen open.
+5. Tap a task in the "keeps moving" list.
+6. Tap **Why tasks slip** at the bottom.
+7. Clear all reminders, then reopen the screen.
+
+**Pass.**
+- Step 2: no clipped text, no card overlapping the tab bar or the notch, and
+  the weekday bars sit on one row with all seven labels legible.
+- Step 2: the Malayalam title in the stuck list renders as script, not boxes.
+- Step 4: every card is readable in both themes — the warning-surface panels
+  are the ones to watch, they are the least-used colour pair in the app.
+- Step 5 opens that reminder's detail screen.
+- Step 7 shows the "Nothing has come due yet" state, with no percentage and
+  no bar chart, rather than a row of zeroes.
+
+**Fails if.** Any percentage appears that the user cannot reconcile with
+their own list, the bars wrap to a second row, or Malayalam renders as boxes.
+
+---
+
+<a id="d41"></a>
+## D41 — Better-time suggestion on save · `PENDING`
+
+*Added 2026-09-15.* Deliberately a rare banner: it needs the chosen hour to be
+measurably worse than a well-sampled strong hour. The device risk is not the
+logic (Jest covers that) but placement — it appears between the parsed
+preview and the alarm toggle, on a screen that already scrolls, with the
+keyboard possibly up.
+
+**Setup.** A device whose history gives a clear strong hour (e.g. several
+finished 8 AM reminders) and a clear weak one (several missed 10 PM ones).
+
+**Steps.**
+1. Add a reminder for 10 PM. Watch for the banner as the time resolves.
+2. With the keyboard open, scroll the screen. Check the banner is reachable.
+3. Press **Move it**. Read the Time row.
+4. Press **Save**, then reopen the reminder.
+5. Add another 10 PM reminder. Press **Keep mine**, then **Save**.
+6. Add a reminder at an hour with no history at all.
+
+**Pass.**
+- Step 1: the banner names both hours and both percentages.
+- Step 2: the banner is not stuck under the keyboard or off-screen.
+- Step 3: the Time row changes to the suggested hour and the "auto" badge
+  is gone.
+- Step 4: the saved reminder is at the suggested hour, and the notification
+  is re-armed for the NEW time — check the tray at that time, not just the UI.
+- Step 5: the reminder saves at 10 PM, unchanged.
+- Step 6: no banner. Silence on an unmeasured hour is the intended behaviour.
+
+**Fails if.** The time changes without the user pressing **Move it**, or the
+old notification still fires after an accepted move.
+
+---
+
+<a id="d42"></a>
+## D42 — Postponed-task intervention panel · `PENDING`
+
+*Added 2026-09-15.* Appears on the detail screen at the third postponement.
+Replaces a line of Settings copy that used to promise alerts go quiet on their
+own — nothing implemented that, and this check exists partly to confirm the
+promise and the behaviour now agree.
+
+**Setup.** One reminder. A history that names a strong hour (see D41).
+
+**Steps.**
+1. Snooze the reminder twice from the tray. Open its detail screen.
+2. Snooze a third time. Reopen the detail screen.
+3. Press **Make it smaller**.
+4. Back on the detail screen, press **Try 8 AM–9 AM**.
+5. Wait for the new time and watch the tray.
+6. Settings → Smart Alerts. Read the closing paragraph.
+
+**Pass.**
+- Step 1: no panel at two postponements.
+- Step 2: the panel appears and says "You have moved this 3 times".
+- Step 3 opens the edit screen with the title editable.
+- Step 4: the reminder moves to the strong hour and stays open — it must not
+  be marked done.
+- Step 5: the alert actually fires at the new time. The panel changes the
+  schedule, so a stale notification here is a real bug.
+- Step 6: the paragraph describes the panel above and does **not** claim
+  alerts stop by themselves.
+
+**Fails if.** The panel ticks the task off, the moved reminder never fires, or
+Settings still promises behaviour the app does not have.

@@ -293,6 +293,20 @@ export default function SettingsScreen() {
             </View>
             <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
           </Pressable>
+          <Pressable
+            style={[styles.row, styles.rowDivider]}
+            onPress={() => router.push("/insights")}
+            testID="insights-row"
+          >
+            <Feather name="bar-chart-2" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>How you&apos;re doing</Text>
+              <Text style={styles.rowSubLabel}>
+                Your completion rate, your strongest times, and what keeps slipping
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
+          </Pressable>
         </View>
 
         {/* When reminders go off — the settings a user actually returns for */}
