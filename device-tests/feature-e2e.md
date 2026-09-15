@@ -301,7 +301,7 @@ due, a mix of finished and missed, spread over more than one hour of the day.
 Include at least one reminder with a Malayalam title, postponed 3+ times.
 
 **Steps.**
-1. Settings → **How you're doing**.
+1. From the home screen header, tap the bar-chart icon (`header-insights-button`), left of the name avatar. Also confirm Settings → **How you're doing** still opens the same screen.
 2. Read every card top to bottom. Scroll to the end.
 3. Rotate to landscape, then back.
 4. Switch the theme (light → dark → system) with the screen open.

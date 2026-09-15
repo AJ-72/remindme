@@ -132,6 +132,19 @@ export default function HomeScreen() {
       alignItems: "center",
       justifyContent: "center",
     },
+    // Same size as the avatar so the two sit level, and separated from it
+    // (rather than merged into one control) since they open unrelated
+    // things - a name edit vs. a whole screen - and a merged control would
+    // need to guess which one a tap meant.
+    headerInsightsBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.muted,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: 8,
+    },
     headerAvatarText: {
       fontSize: 14,
       color: colors.primary,
@@ -302,6 +315,16 @@ export default function HomeScreen() {
               </Text>
             </View>
           </View>
+          <Pressable
+            style={styles.headerInsightsBtn}
+            onPress={() => router.push("/insights")}
+            accessibilityRole="button"
+            accessibilityLabel="How you're doing"
+            hitSlop={6}
+            testID="header-insights-button"
+          >
+            <Feather name="bar-chart-2" size={17} color={colors.mutedForeground} />
+          </Pressable>
           <Pressable
             style={styles.headerAvatar}
             onPress={() => setNameSheetVisible(true)}

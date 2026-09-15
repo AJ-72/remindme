@@ -470,3 +470,12 @@ describe("HomeScreen — header fits a long name", () => {
     );
   });
 });
+
+describe("the insights button in the header", () => {
+  it("opens the adherence screen", async () => {
+    const { router } = jest.requireMock("expo-router");
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("header-insights-button"));
+    expect(router.push).toHaveBeenCalledWith("/insights");
+  });
+});

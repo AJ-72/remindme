@@ -185,7 +185,7 @@ Expo Router with file-based routing under `artifacts/mobile/app/`. Screens impor
 - `(tabs)/about.tsx` — static About screen.
 - `add-reminder.tsx` — add/edit reminder modal; hosts `QuickAddInput`, natural-language parsing, mic entry.
 - `reminder-detail.tsx` — reminder detail modal (opened from the list or a notification tap).
-- `insights.tsx` — "How you're doing": the user's own completion rate, strongest/weakest hours, weekday load, typical slip, and the list of repeatedly-postponed tasks. Reads `utils/adherenceStats.ts`; renders nothing it lacks the sample size to claim.
+- `insights.tsx` — "How you're doing": the user's own completion rate, strongest/weakest hours, weekday load, typical slip, and the list of repeatedly-postponed tasks. Reads `utils/adherenceStats.ts`; renders nothing it lacks the sample size to claim. Reached from a header icon on the home screen (`(tabs)/index.tsx`) and from Settings → **How you're doing** / Smart Alerts.
 - `smart-alerts.tsx` / `why-tasks-slip.tsx` — quiet-hours settings and the cited explainer behind them.
 - `+not-found.tsx` — unmatched-route screen.
 
