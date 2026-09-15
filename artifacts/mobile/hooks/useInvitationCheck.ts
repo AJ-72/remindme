@@ -3,6 +3,13 @@ import { AppState } from "react-native";
 import { router } from "expo-router";
 
 import { checkForInvitations, type ClaimedInvitation } from "@/services/InvitationService";
+import {
+  shouldClaimNow,
+  getLastClaimAt,
+  setLastClaimAt,
+  getPushPending,
+  setPushPending,
+} from "@/services/invitationClaimThrottle";
 
 /**
  * Closes the gap where a pending invitation only surfaced by re-running
@@ -51,11 +58,32 @@ export function navigateToPendingList(invitations: ClaimedInvitation[]) {
 
 export function useInvitationCheck(): void {
   useEffect(() => {
-    checkForInvitations(navigateToInvitationPreview, navigateToPendingList);
+    const checkAndClaim = async () => {
+      const now = Date.now();
+      const lastClaimAt = await getLastClaimAt();
+      const pushPending = await getPushPending();
+
+      if (!shouldClaimNow(lastClaimAt, now, pushPending)) {
+        return;
+      }
+
+      const claimed = await checkForInvitations(
+        navigateToInvitationPreview,
+        navigateToPendingList
+      );
+
+      // Record the claim time and clear the push flag.
+      await setLastClaimAt(now);
+      if (pushPending && claimed.length > 0) {
+        await setPushPending(false);
+      }
+    };
+
+    checkAndClaim();
 
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
-        checkForInvitations(navigateToInvitationPreview, navigateToPendingList);
+        checkAndClaim();
       }
     });
     return () => sub.remove();

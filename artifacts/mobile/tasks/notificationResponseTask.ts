@@ -47,6 +47,7 @@ import {
   type NotificationResponseLike,
 } from "@/services/notificationResponseHandler";
 import { checkForInvitations } from "@/services/InvitationService";
+import { setPushPending } from "@/services/invitationClaimThrottle";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -91,8 +92,12 @@ export function buildBackgroundResponseDeps(): NotificationResponseHandlerDeps {
     navigateToSend: () => {},
     // No-op navigate: headless, same constraint as above. Tapping the push
     // still launches the app, which runs useInvitationCheck() on mount and
-    // navigates from there once this claim has something to show.
-    checkForInvitations: () => checkForInvitations(() => {}),
+    // navigates from there once this claim has something to show. Set
+    // pushPending so the next launch claims even if inside the cooldown.
+    checkForInvitations: async () => {
+      await setPushPending(true);
+      return checkForInvitations(() => {});
+    },
   };
 }
 

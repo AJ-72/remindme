@@ -18,6 +18,7 @@ import { handleNotificationResponse } from "@/services/notificationResponseHandl
 import { checkForInvitations, resolveSenderNames } from "@/services/InvitationService";
 import { navigateToInvitationPreview, navigateToPendingList } from "@/hooks/useInvitationCheck";
 import { collapseInvitationNotifications } from "@/services/invitationNotificationGrouping";
+import { setLastClaimAt, setPushPending } from "@/services/invitationClaimThrottle";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -115,6 +116,11 @@ export default function NotificationResponseHandler() {
             navigateToInvitationPreview,
             navigateToPendingList
           );
+
+          // Record the claim time and clear the push pending flag.
+          await setLastClaimAt(Date.now());
+          await setPushPending(false);
+
           // B15: a push just landed while the app was alive to see it - if
           // that leaves 2+ invitations pending, collapse the individual
           // tray notifications into one summary rather than letting them

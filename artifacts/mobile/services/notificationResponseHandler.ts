@@ -7,6 +7,7 @@ import {
   type Reminder,
 } from "@/services/ReminderService";
 import { resolveSnoozeTarget, type SnoozePreset } from "@/utils/snoozePresets";
+import { setLastClaimAt } from "@/services/invitationClaimThrottle";
 
 export interface NotificationResponseLike {
   actionIdentifier: string;
@@ -107,6 +108,8 @@ export async function handleNotificationResponse(
   if (isInvitationData(data)) {
     await deps.markResponseHandled(responseKey);
     await deps.checkForInvitations();
+    // Record the claim time from a push tap.
+    await setLastClaimAt(Date.now());
     return;
   }
 

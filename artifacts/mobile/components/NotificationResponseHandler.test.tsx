@@ -9,14 +9,19 @@ import {
 } from "expo-notifications";
 import { MARK_DONE_ACTION_ID } from "@/services/ReminderService";
 import * as InvitationService from "@/services/InvitationService";
+import * as Throttle from "@/services/invitationClaimThrottle";
 
 jest.mock("@/services/InvitationService", () => ({
   checkForInvitations: jest.fn().mockResolvedValue([]),
 }));
 
+jest.mock("@/services/invitationClaimThrottle");
+
 beforeEach(() => {
   jest.clearAllMocks();
   (InvitationService.checkForInvitations as jest.Mock).mockResolvedValue([]);
+  (Throttle.setLastClaimAt as jest.Mock).mockResolvedValue(undefined);
+  (Throttle.setPushPending as jest.Mock).mockResolvedValue(undefined);
 });
 
 describe("NotificationResponseHandler", () => {
@@ -87,5 +92,25 @@ describe("NotificationResponseHandler", () => {
     const { unmount } = render(<NotificationResponseHandler />);
     unmount();
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("records lastClaimAt when an invitation push is received", async () => {
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    onReceived({ request: { content: { data: { type: "invitation" } } } });
+
+    await waitFor(() =>
+      expect(Throttle.setLastClaimAt).toHaveBeenCalledWith(expect.any(Number))
+    );
+  });
+
+  it("clears pushPending when an invitation push is received", async () => {
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    onReceived({ request: { content: { data: { type: "invitation" } } } });
+
+    await waitFor(() =>
+      expect(Throttle.setPushPending).toHaveBeenCalledWith(false)
+    );
   });
 });
