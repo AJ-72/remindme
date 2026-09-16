@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import React, { useEffect, useRef } from "react";
 
 import {
+  applyRecipientTimeChangeByInvitationId,
   cancelNotification,
   cancelScheduledForReminder,
   getSnoozePreset,
@@ -65,6 +66,18 @@ export default function NotificationResponseHandler() {
       // instead of waiting for the next useInvitationCheck() foreground pass.
       checkForInvitations: () =>
         checkForInvitations(navigateToInvitationPreview, navigateToPendingList),
+      applyRecipientTimeChange: (data: {
+        invitationId: string;
+        toDatetime: string;
+        fromDatetime: string;
+        recipientName: string;
+      }) =>
+        applyRecipientTimeChangeByInvitationId(
+          data.invitationId,
+          data.toDatetime,
+          data.fromDatetime,
+          data.recipientName
+        ),
     };
 
     // NOT a queue drain: this keeps resolving with the same response on every
@@ -110,6 +123,20 @@ export default function NotificationResponseHandler() {
       receivedSubscription = Notifications.addNotificationReceivedListener(
         async (notification: any) => {
           const data = notification?.request?.content?.data;
+
+          // Applied immediately, not deferred to a tap: this is the
+          // sender's OWN reminder being corrected to match what the
+          // receiver actually chose - the local alert must not fire at the
+          // stale time just because the sender never tapped the tray.
+          if (data?.type === "invitation_time_changed" && typeof data.invitationId === "string") {
+            await applyRecipientTimeChangeByInvitationId(
+              data.invitationId,
+              data.toDatetime,
+              data.fromDatetime,
+              data.recipientName
+            );
+            return;
+          }
 
           // A reminder's own scheduled notification carries reminderId, not
           // an invitation's `type`. Stamped here rather than in the tap

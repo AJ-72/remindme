@@ -57,8 +57,14 @@ type PickerMode = "date" | "time" | null;
 export default function AddReminderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { reminders, loading, addReminder, editReminder, defaultAlarmEnabled } =
-    useReminders();
+  const {
+    reminders,
+    loading,
+    addReminder,
+    attachInvitationId,
+    editReminder,
+    defaultAlarmEnabled,
+  } = useReminders();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const isEditing = !!id;
 
@@ -218,10 +224,12 @@ export default function AddReminderScreen() {
         // entirely - `'recipient' in obj` is true even when it holds undefined.
         ...(recipient ? { recipient } : {}),
       };
+      let localId = id;
       if (isEditing && id) {
         await editReminder(id, payload);
       } else {
-        await addReminder(payload);
+        const added = await addReminder(payload);
+        localId = added.id;
       }
 
       // Additive Tier 2 send - never blocks the Tier 1 save above, which has
@@ -236,6 +244,12 @@ export default function AddReminderScreen() {
         );
         if (!result.ok) {
           setInvitationError("Couldn't send in-app — you can still message via WhatsApp.");
+        } else if (localId) {
+          // Lets a later invitation_time_changed push find this exact local
+          // reminder (see Reminder.invitationId's header) - same wiring as
+          // QuickAddInput.tsx#performSave, duplicated here because this
+          // screen has its own independent save path.
+          await attachInvitationId(localId, result.invitationId);
         }
       }
 

@@ -263,6 +263,52 @@ describe("AddReminderScreen — Tier 2 reachability + invitation send", () => {
     expect(stored[0].recipient.appUserId).toBe("user-1");
   });
 
+  it("attaches the returned invitation id to the local reminder on a successful send", async () => {
+    jest.spyOn(RecipientLookupService, "checkReachability").mockResolvedValue({
+      appUserId: "user-1",
+      lookedUpAt: new Date().toISOString(),
+    });
+    jest
+      .spyOn(InvitationService, "sendInvitation")
+      .mockResolvedValue({ ok: true, invitationId: "inv-1" });
+
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText } = renderScreen();
+
+    fireEvent.press(await findByTestId("recipient-row"));
+    fireEvent.press(await findByText("Priya Menon"));
+    await findByTestId("recipient-in-app-badge");
+    fireEvent.changeText(await findByTestId("edit-title-input"), "Take BP tablets");
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    const added = stored.find((r: { title: string }) => r.title === "Take BP tablets");
+    expect(added.invitationId).toBe("inv-1");
+  });
+
+  it("does not attach an invitation id when the send fails", async () => {
+    jest.spyOn(RecipientLookupService, "checkReachability").mockResolvedValue({
+      appUserId: "user-1",
+      lookedUpAt: new Date().toISOString(),
+    });
+    jest
+      .spyOn(InvitationService, "sendInvitation")
+      .mockResolvedValue({ ok: false, error: "network_error" });
+
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText } = renderScreen();
+
+    fireEvent.press(await findByTestId("recipient-row"));
+    fireEvent.press(await findByText("Priya Menon"));
+    await findByTestId("recipient-in-app-badge");
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].invitationId).toBeUndefined();
+  });
+
   it("does not call sendInvitation for a recipient with no app", async () => {
     jest.spyOn(RecipientLookupService, "checkReachability").mockResolvedValue({
       appUserId: null,

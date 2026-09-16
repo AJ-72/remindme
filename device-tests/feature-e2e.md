@@ -392,6 +392,56 @@ promise and the behaviour now agree.
 **Fails if.** The panel ticks the task off, the moved reminder never fires, or
 Settings still promises behaviour the app does not have.
 
+<a id="d47"></a>
+## D47 — Registration "Skip for now" actually dismisses the screen · `PENDING`
+Jest's `expo-router` mock hardcodes `canGoBack()` to `true`, so the real
+router's behavior on first launch (no back stack under the pushed
+`register-number` screen) can only be proven on a device.
+
+**Setup.** Fresh install, or `@registration_onboarding_v1` cleared from
+AsyncStorage so first-run onboarding fires again.
+
+**Steps.**
+1. Launch the app, let permission onboarding settle, and wait for the
+   "Add your number" screen to appear.
+2. Tap **Skip for now**.
+3. Repeat from a fresh install, this time tapping the **X** close button
+   instead.
+
+**Pass.** Both dismiss the screen back to the home tab immediately, and
+relaunching the app does not show the registration screen again.
+
+**Fails if.** Either button leaves the same screen on-screen (the bug this
+fixed — a bare `router.back()` no-ops when there's nothing under this
+screen in the stack).
+
+<a id="d45"></a>
+## D45 — Country-code picker on registration · `PENDING`
+Malayalam-supporting app, real NRI user base — the device-region guess in
+`normalizeForIdentity` is wrong whenever a phone's system region doesn't
+match its SIM/carrier country (see `system_learnings.md`'s 2026-09-11
+entry). The picker's whole purpose is letting a real device with a
+mismatched region still register correctly, so it needs a device with an
+actually mismatched region to prove, not just Jest's mocked one.
+
+**Setup.** A device whose system locale region differs from its SIM/carrier
+country (or Settings → change system region temporarily).
+
+**Steps.**
+1. Open registration. Confirm the calling code shown matches the device's
+   guessed region.
+2. Tap the calling-code button, pick a different country from the list.
+3. Enter a national number for that country and register.
+
+**Pass.** The calling code button updates immediately on picking a country.
+The number sent to `selfRegister` uses the explicitly picked country's
+calling code, not the device's guessed one — confirm via the account this
+creates actually being reachable by lookup from a sender who expects that
+country's number.
+
+**Fails if.** The picker's selection doesn't change what gets submitted, or
+the device's guessed region silently wins anyway.
+
 ---
 
 <a id="d43"></a>

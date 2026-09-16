@@ -364,3 +364,71 @@ step 4's curl response first: `{"status":"error",...,"details":{"error":
 "InvalidCredentials","fault":"developer"}}` means the FCM service-account
 credential is missing from Expo's dashboard (a separate step from
 `google-services.json` - see CLAUDE.md Gotchas), not a device or app bug.
+
+<a id="d44"></a>
+## D44 — Receiver's own quiet hours gate the accepted reminder, not the sender's · `BLOCKED` — needs two devices with different quiet-hours settings
+Jest can drive this (see `invitation-preview.test.tsx`'s "recipient's own
+quiet hours" cases), but it cannot prove the sender's own quiet-hours prompt
+in `QuickAddInput` is truly independent of this one — that needs two real
+devices with two different quiet-hours settings, confirming the sender's
+prompt never influences what the receiver sees.
+
+**Setup.** Two devices, sender and receiver already bound. Set the
+receiver's quiet hours (Settings → Smart Alerts) to a window that will
+cover the test time; set the sender's quiet hours to something that does
+NOT cover it (or turn the sender's off) — the two devices must disagree.
+
+**Steps.**
+1. On the sender's device, create a reminder for the receiver at a time
+   inside the receiver's quiet window (and outside the sender's). Confirm
+   the sender sees no quiet-hours prompt of their own for a time that, on
+   their device, isn't quiet.
+2. On the receiver's device, open the invitation and tap Accept.
+3. Confirm the receiver's own quiet-hours sheet appears ("inside your quiet
+   hours"), referencing the receiver's window, not the sender's.
+4. Tap "Move to <time>" and confirm the locally scheduled reminder lands at
+   the receiver's quiet-hours end, not the sender's.
+
+**Pass.** The quiet-hours prompt the receiver sees is driven entirely by
+the receiver's own device settings; the sender's settings have no bearing
+on it at any step.
+
+**Fails if.** The receiver's accepted reminder schedules silently inside
+their own quiet hours (no prompt at all), or the "Move to" time it offers
+matches the sender's quiet-hours window instead of the receiver's.
+
+<a id="d46"></a>
+## D46 — Sender is notified when the receiver moves the reminder's time · `BLOCKED` — needs two physical devices, real FCM push
+Jest covers the SQL function (`respondToInvitation.test.ts`), the Edge
+Function logic (`respond-invitation/index.test.ts`), and every mobile-side
+piece in isolation (`ReminderService.test.ts`, `notificationResponseHandler.test.ts`,
+`NotificationResponseHandler.test.tsx`, `ReminderCard.test.tsx`,
+`reminder-detail.test.tsx`, `QuickAddInput.test.tsx`, `add-reminder.test.tsx`).
+None of that proves a real push reaches a real second device and updates
+its screen - see D39's own header for why a mocked push API can report
+success while Expo's real service silently rejects the send.
+
+**Setup.** Two devices, both registered/bound (same setup as D39/D44).
+Sender's quiet hours must NOT cover the chosen time; receiver's quiet
+hours MUST cover it, so accepting forces a move.
+
+**Steps.**
+1. Sender creates a reminder for the receiver.
+2. Receiver opens the invitation, accepts, and chooses "Move to <time>" on
+   their own quiet-hours prompt.
+3. Watch the sender's device without touching it.
+4. Once the push arrives, open the reminder from the sender's home list.
+
+**Pass.** The sender's device receives a push naming the receiver
+("{name} moved a reminder") within seconds of step 2. The reminder card
+on the sender's home list shows "Moved by {name}" under the recipient
+chip. Opening the reminder shows the full sentence with the original and
+new times, correctly rendered in the SENDER's own local timezone. The
+sender's own local alarm/notification for this reminder is rescheduled to
+the new time, not the original one.
+
+**Fails if.** No push arrives despite `respond-invitation` returning 200
+(check the same diagnostic curl as D39 first - FCM credential issues look
+identical from inside the app), the card/detail screen shows the moved
+time with no explanation, or the sender's own local alert still fires at
+the stale original time.

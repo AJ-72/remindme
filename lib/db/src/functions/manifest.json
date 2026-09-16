@@ -11,6 +11,7 @@
     "sendInvitation.sql",
     "getPushTokensForUser.sql",
     "respondToInvitation.sql",
+    "getSenderPushTokens.sql",
     "expireInvitations.sql"
   ]
 }

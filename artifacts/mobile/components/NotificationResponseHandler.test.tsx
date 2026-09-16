@@ -15,12 +15,21 @@ jest.mock("@/services/InvitationService", () => ({
   checkForInvitations: jest.fn().mockResolvedValue([]),
 }));
 
-// Only markNotifiedById is mocked; everything else stays real so the
-// existing tap-handling tests (which exercise the real notificationResponseHandler
-// deps) are unaffected.
+// Only markNotifiedById/applyRecipientTimeChangeByInvitationId are mocked;
+// everything else stays real so the existing tap-handling tests (which
+// exercise the real notificationResponseHandler deps) are unaffected.
+//
+// Both must be jest.fn() FROM HERE, not spied on later via `import * as
+// ReminderService` - Babel's wildcard-import interop copies this factory's
+// properties into a SEPARATE object for a `* as` import (no __esModule flag
+// on a plain object literal), so a `jest.spyOn(ReminderService, ...)` done
+// afterwards in a test only mutates that copy, never the property the
+// component's own named import actually reads. Defining the jest.fn() here
+// keeps both references pointing at the identical mock function.
 jest.mock("@/services/ReminderService", () => ({
   ...jest.requireActual("@/services/ReminderService"),
   markNotifiedById: jest.fn(),
+  applyRecipientTimeChangeByInvitationId: jest.fn(),
 }));
 
 beforeEach(() => {
@@ -104,5 +113,34 @@ describe("NotificationResponseHandler", () => {
     const { unmount } = render(<NotificationResponseHandler />);
     unmount();
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies an invitation_time_changed push immediately on receipt, without waiting for a tap", async () => {
+    const applySpy = ReminderService.applyRecipientTimeChangeByInvitationId as jest.Mock;
+    applySpy.mockResolvedValue("r1");
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    await onReceived({
+      request: {
+        content: {
+          data: {
+            type: "invitation_time_changed",
+            invitationId: "inv-1",
+            toDatetime: "2026-09-10T08:00:00.000Z",
+            fromDatetime: "2026-09-09T23:00:00.000Z",
+            recipientName: "Amma",
+          },
+        },
+      },
+    });
+    expect(applySpy).toHaveBeenCalledWith(
+      "inv-1",
+      "2026-09-10T08:00:00.000Z",
+      "2026-09-09T23:00:00.000Z",
+      "Amma"
+    );
+    // Does not also go through the invitation-poll path - this push already
+    // carries everything needed, unlike a plain "invitation" push.
+    expect(InvitationService.checkForInvitations).not.toHaveBeenCalled();
   });
 });
