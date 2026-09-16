@@ -1,0 +1,32 @@
+# M8: Rapid double-tap on Save
+# Double-tapping Save in quick succession must create exactly one reminder,
+# not two - guards against a missing debounce/disabled-state on the button.
+#
+# AUTO: fully scriptable (count occurrences of the unique title in the list)
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Double tap save guard task at 8pm"
+- tapOn:
+    id: "quick-add-save"
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      text: "Double tap save guard task"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Double tap save guard task"
+
+# Real assertion (single occurrence, not two) needs an accumulated-state-aware
+# count outside Maestro's own assertion language - e.g.:
+#   adb shell run-as com.curios.remindme cat <storage file> | grep -c "Double tap save guard task"
+# expected: 1

@@ -1,0 +1,25 @@
+# M3: Empty-title boundary
+# Tests that saving with only whitespace as the title is not accepted as a
+# valid reminder - no blank/empty-titled entry should appear in the list.
+#
+# AUTO: fully scriptable
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+- tapOn:
+    id: "quick-add-input"
+- inputText: "   "
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+
+# Whitespace-only input must not produce a saved reminder or a time-confirm
+# sheet - the input should still be sitting there un-submitted.
+- assertNotVisible: "Confirm"
+- assertVisible:
+    id: "quick-add-input"
