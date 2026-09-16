@@ -17,7 +17,7 @@ ships it.**
 | --- | --- | --- |
 | [cross-cutting.md](cross-cutting.md) | Alarm delivery mechanics — the OEM battery/Doze/AlarmManager behavior everything else depends on | D1, D7, D19, D20, D22, D25, D26 |
 | [notifications.md](notifications.md) | Notification actions, channels, dedupe | D2, D3, D4, D15, D16 |
-| [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9, D10, D11, D12, D13, D40, D41, D42, D43, D45, D47, D48, D49, D50, D51, D52, D53, D54, D55, D56, D57, D58, D59, D60, D61, D62, D63, D64, D65, D66, D67, D68, D69 |
+| [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9, D10, D11, D12, D13, D40, D41, D42, D43, D45, D47, D48, D49, D50, D51, D52, D53, D54, D55, D56, D57, D58, D59, D60, D61, D62, D63, D64, D65, D66, D67, D68, D69, D70, D71, D72, D73 |
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14 |
 | [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete | D17, D18, D21, D23 |
 | [malayalam-parsing.md](malayalam-parsing.md) | On-device Malayalam input/parsing (numerals, ambiguous readings, AM/PM) | D24, + 2 unnumbered checklists |
@@ -120,6 +120,10 @@ discovering.
 | D67 | The cold open shows examples, not an empty list | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d67) |
 | D68 | The send-to-a-person chip reads the name | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d68) |
 | D69 | The number offer arrives on the third reminder | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d69) |
+| D70 | The waveform answers the user's own voice | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d70) |
+| D71 | The guessed words read as guesses | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d71) |
+| D72 | The pause bar tells the truth about the clock | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d72) |
+| D73 | The mic says which languages it takes, once | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d73) |
 
 **2026-09-04 note:** D4, D11, D16, D17, D18 moved from `PENDING` to
 `PARTIAL` — new Maestro flows (`Maestro/d4_*`, `d11_*`, `d16_*`, `d17_*`,

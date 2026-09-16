@@ -10,6 +10,10 @@ import {
   startListening,
   stopListening,
 } from "@/services/SpeechService";
+import {
+  markMicLanguageLineSeen,
+  shouldShowMicLanguageLine,
+} from "@/services/ReminderService";
 import { createDictationTimer, type DictationTimer } from "@/utils/dictationTimer";
 import { useReminders } from "@/contexts/RemindersContext";
 
@@ -30,6 +34,16 @@ export interface UseDictationResult {
   listening: boolean;
   /** True once the recognizer has returned at least one word this session. */
   heardSpeech: boolean;
+  /** Input loudness, 0..1, for the waveform. */
+  level: number;
+  /** The segment the recognizer has not committed yet. */
+  interim: string;
+  /** Date.now() when this session opened, or null between sessions. */
+  startedAt: number | null;
+  /** Date.now() of the last word heard, for the pause bar. */
+  lastHeardAt: number | null;
+  /** Say which languages the mic takes. Once per install. */
+  showLanguageLine: boolean;
   notice: string | null;
   toggle: () => void;
   /** End the session and keep what was heard. */
@@ -46,6 +60,11 @@ export function useDictation(
   const { dictationLanguage } = useReminders();
   const [listening, setListening] = useState(false);
   const [heardSpeech, setHeardSpeech] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [interim, setInterim] = useState("");
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [lastHeardAt, setLastHeardAt] = useState<number | null>(null);
+  const [showLanguageLine, setShowLanguageLine] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   // The same fact as `heardSpeech`, readable from inside a timer callback,
@@ -61,6 +80,11 @@ export function useDictation(
     heardSpeechRef.current = false;
     setHeardSpeech(false);
     setListening(false);
+    setLevel(0);
+    setInterim("");
+    setStartedAt(null);
+    setLastHeardAt(null);
+    setShowLanguageLine(false);
   }, []);
 
   const stop = useCallback(() => {
@@ -123,23 +147,39 @@ export function useDictation(
     });
     timerRef.current = timer;
 
+    /** A word reached the recognizer: reset the pause clock and the bar. */
+    const heard = () => {
+      if (!heardSpeechRef.current) {
+        heardSpeechRef.current = true;
+        setHeardSpeech(true);
+      }
+      setLastHeardAt(Date.now());
+      timer.heard();
+    };
+
     const { busy } = startListening(
       baseline,
       dictationLanguage,
       (fullText) => {
         onText(fullText);
-        if (!heardSpeechRef.current) {
-          heardSpeechRef.current = true;
-          setHeardSpeech(true);
-        }
-        timer.heard();
+        heard();
       },
       () => settle(),
       () => {
         settle();
         setNotice("Couldn't hear that — try again or type it in.");
       },
-      modelStatus !== "unavailable"
+      modelStatus !== "unavailable",
+      {
+        // An interim segment is speech too, so it resets the pause clock.
+        // Without this the session would close 2.5s into a long word the
+        // recognizer has not finished committing.
+        onInterim: (segment) => {
+          setInterim(segment);
+          if (segment !== "") heard();
+        },
+        onVolume: setLevel,
+      }
     );
     if (busy) {
       setNotice("Still transcribing the shared audio…");
@@ -147,7 +187,16 @@ export function useDictation(
     }
     heardSpeechRef.current = false;
     setHeardSpeech(false);
+    setLevel(0);
+    setInterim("");
+    setLastHeardAt(null);
+    setStartedAt(Date.now());
     setListening(true);
+    void shouldShowMicLanguageLine().then((show) => {
+      if (!show) return;
+      setShowLanguageLine(true);
+      return markMicLanguageLineSeen();
+    });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     timer.begin();
   }, [currentText, dictationLanguage, onText, settle]);
@@ -187,6 +236,11 @@ export function useDictation(
   return {
     listening,
     heardSpeech,
+    level,
+    interim,
+    startedAt,
+    lastHeardAt,
+    showLanguageLine,
     notice,
     toggle,
     stop,

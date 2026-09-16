@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { File, Paths } from "expo-file-system";
 import { logDebug } from "@/services/DebugLogService";
+import { normaliseMicLevel } from "@/utils/micLevel";
 
 export async function getMicPermissionStatus(): Promise<{
   granted: boolean;
@@ -49,11 +50,34 @@ export async function ensureOfflineModelReady(
 
 let activeMode: "live" | "file" | null = null;
 let activeSubscriptions: { remove: () => void }[] = [];
+/**
+ * Hands the segment still in progress to the field before the session closes.
+ * stopListening() clears the listeners synchronously, so a final result the
+ * recognizer emits on stop has nobody left to receive it - without this, the
+ * last words spoken before Done would be dropped.
+ */
+let flushPending: (() => void) | null = null;
 
 function clearActiveSession(): void {
   activeSubscriptions.forEach((sub) => sub.remove());
   activeSubscriptions = [];
   activeMode = null;
+  flushPending = null;
+}
+
+/** How often the recognizer reports loudness. Fast enough to read as a voice. */
+export const VOLUME_EVENT_INTERVAL_MS = 100;
+
+export interface LiveSessionHooks {
+  /**
+   * The segment the recognizer has not committed yet, or "" when there is
+   * none. Kept out of the text field on purpose: a guess and a committed
+   * word look identical once they are in the same input, and the field
+   * cannot render two colours.
+   */
+  onInterim?: (segment: string) => void;
+  /** Input loudness, already normalised to 0..1 by normaliseMicLevel(). */
+  onVolume?: (level: number) => void;
 }
 
 export function startListening(
@@ -62,7 +86,8 @@ export function startListening(
   onResult: (fullText: string) => void,
   onEnd: () => void,
   onError: (message: string) => void,
-  onDevice: boolean = true
+  onDevice: boolean = true,
+  hooks?: LiveSessionHooks
 ): { busy: boolean } {
   if (activeMode !== null) return { busy: true };
   activeMode = "live";
@@ -75,15 +100,28 @@ export function startListening(
   // segments are kept here instead, and only the segment still in progress is
   // replaced on each interim event.
   let committed = "";
+  let pending = "";
   const join = (...parts: string[]) => parts.filter((p) => p !== "").join(" ").trim();
+  const commit = (segment: string) => {
+    committed = join(committed, segment);
+    pending = "";
+    hooks?.onInterim?.("");
+    onResult(join(baseline, committed));
+  };
+  flushPending = () => {
+    if (pending === "") return;
+    commit(pending);
+  };
   const resultSub = ExpoSpeechRecognitionModule.addListener("result", (event: any) => {
     const transcript = event.results?.[0]?.transcript ?? "";
     if (event.isFinal) {
-      committed = join(committed, transcript);
-      onResult(join(baseline, committed));
+      commit(transcript);
       return;
     }
-    onResult(join(baseline, committed, transcript));
+    // The field keeps only committed words. The segment in progress goes to
+    // the listening surface, where it can be drawn grey and read as a guess.
+    pending = transcript;
+    hooks?.onInterim?.(transcript);
   });
   const endSub = ExpoSpeechRecognitionModule.addListener("end", () => {
     clearActiveSession();
@@ -94,11 +132,28 @@ export function startListening(
     onError(event?.message ?? "Speech recognition error");
   });
   activeSubscriptions = [resultSub, endSub, errorSub];
+  if (hooks?.onVolume) {
+    activeSubscriptions.push(
+      ExpoSpeechRecognitionModule.addListener("volumechange", (event: any) => {
+        hooks.onVolume?.(normaliseMicLevel(event?.value));
+      })
+    );
+  }
 
   ExpoSpeechRecognitionModule.start({
     lang: locale,
     interimResults: true,
     requiresOnDeviceRecognition: onDevice,
+    // Off by default in the module, and silent rather than an error when it
+    // is left off - so the waveform would simply never move.
+    ...(hooks?.onVolume
+      ? {
+          volumeChangeEventOptions: {
+            enabled: true,
+            intervalMillis: VOLUME_EVENT_INTERVAL_MS,
+          },
+        }
+      : {}),
     // Without this, recognition ends at the first pause in speech (iOS
     // 17-: after 3s of silence; iOS 18+/Android: as soon as any isFinal
     // result comes in) — the mic then reads as "stopped" mid-sentence.
@@ -112,6 +167,9 @@ export function startListening(
 
 export function stopListening(): void {
   if (activeMode === null) return;
+  // Before the listeners go, not after: Done must keep the half-spoken
+  // segment the user had just finished saying.
+  flushPending?.();
   ExpoSpeechRecognitionModule.stop();
   clearActiveSession();
 }

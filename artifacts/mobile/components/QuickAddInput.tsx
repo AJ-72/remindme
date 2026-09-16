@@ -33,8 +33,10 @@ import { sendInvitation } from "@/services/InvitationService";
 import type { PickableContact } from "@/services/ContactsService";
 import {
   incrementRegisterPromptCount,
+  markMicLanguageLineSeen,
   markRegisterPromptShown,
   shouldOfferNumberRegistration,
+  shouldShowMicLanguageLine,
   type ReminderRecipient,
 } from "@/services/ReminderService";
 import { formatTime12h } from "@/utils/formatDatetime";
@@ -178,6 +180,13 @@ export default function QuickAddInput({ onSaved }: Props) {
   // transcribing in the background also sets `listening`, but it has no
   // silence to time and no session the user can stop or cancel.
   const [liveListening, setLiveListening] = useState(false);
+  // The listening surface's own state: loudness for the waveform, the
+  // uncommitted segment, and the two clocks it draws.
+  const [micLevel, setMicLevel] = useState(0);
+  const [micInterim, setMicInterim] = useState("");
+  const [micStartedAt, setMicStartedAt] = useState<number | null>(null);
+  const [micLastHeardAt, setMicLastHeardAt] = useState<number | null>(null);
+  const [micLanguageLine, setMicLanguageLine] = useState(false);
   const [heardSpeech, setHeardSpeech] = useState(false);
   // The same fact as `heardSpeech`, readable from inside the timer callback,
   // which closes over the state value as it was when the timer was armed.
@@ -450,6 +459,11 @@ export default function QuickAddInput({ onSaved }: Props) {
     setLiveListening(false);
     setHeardSpeech(false);
     heardSpeechRef.current = false;
+    setMicLevel(0);
+    setMicInterim("");
+    setMicStartedAt(null);
+    setMicLastHeardAt(null);
+    setMicLanguageLine(false);
     stopMicPulse();
   };
 
@@ -531,16 +545,22 @@ export default function QuickAddInput({ onSaved }: Props) {
     });
     dictationTimerRef.current = timer;
 
+    /** A word reached the recognizer: reset the pause clock and the bar. */
+    const heard = () => {
+      if (!heardSpeechRef.current) {
+        heardSpeechRef.current = true;
+        setHeardSpeech(true);
+      }
+      setMicLastHeardAt(Date.now());
+      timer.heard();
+    };
+
     const { busy } = startListening(
       baseline,
       locale,
       (fullText) => {
         setInput(fullText);
-        if (!heardSpeechRef.current) {
-          heardSpeechRef.current = true;
-          setHeardSpeech(true);
-        }
-        timer.heard();
+        heard();
       },
       () => {
         settleAfterListening();
@@ -549,7 +569,17 @@ export default function QuickAddInput({ onSaved }: Props) {
         settleAfterListening();
         setMicNotice("Couldn't hear that — try again or type it in.");
       },
-      modelStatus !== "unavailable"
+      modelStatus !== "unavailable",
+      {
+        // An interim segment is speech too, so it resets the pause clock.
+        // Without this the session would close 2.5s into a long word the
+        // recognizer has not finished committing.
+        onInterim: (segment) => {
+          setMicInterim(segment);
+          if (segment !== "") heard();
+        },
+        onVolume: setMicLevel,
+      }
     );
     if (busy) {
       setMicNotice("Still transcribing the shared audio…");
@@ -558,6 +588,15 @@ export default function QuickAddInput({ onSaved }: Props) {
     micSourceRef.current = "live";
     heardSpeechRef.current = false;
     setHeardSpeech(false);
+    setMicLevel(0);
+    setMicInterim("");
+    setMicLastHeardAt(null);
+    setMicStartedAt(Date.now());
+    void shouldShowMicLanguageLine().then((show) => {
+      if (!show) return;
+      setMicLanguageLine(true);
+      return markMicLanguageLineSeen();
+    });
     setListening(true);
     setLiveListening(true);
     startMicPulse();
@@ -1044,6 +1083,11 @@ export default function QuickAddInput({ onSaved }: Props) {
         {liveListening && (
           <ListeningSurface
             heardSpeech={heardSpeech}
+            level={micLevel}
+            interim={micInterim}
+            startedAt={micStartedAt ?? undefined}
+            lastHeardAt={micLastHeardAt}
+            showLanguageLine={micLanguageLine}
             onDone={() => stopSpeakMode("user")}
             onCancel={cancelSpeakMode}
           />

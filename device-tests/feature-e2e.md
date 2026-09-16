@@ -933,3 +933,92 @@ opens the registration screen. After two refusals the offer never returns.
 
 **Fails if.** The offer appears early, appears twice in one run of the app,
 or keeps returning after the second refusal.
+
+## D70 — The waveform answers the user's own voice — `PENDING`
+
+**Why hardware only.** Jest has no microphone. It can prove the bars are wired
+to `volumechange` and nothing else; only a person speaking can prove the
+recogniser emits those events on this device at all. Android drives them from
+`onRmsChanged`, which some OEM speech services report sparsely or not at all.
+
+**Setup.** A debug build on a real device, in a quiet room.
+
+**Steps.**
+1. Tap the mic on the home screen and stay silent for three seconds.
+2. Say "call Amma at seven" in a normal voice.
+3. Say the same words loudly, then almost whisper them.
+4. Cover the microphone with a finger and speak.
+5. Repeat all of the above in the add-reminder sheet, on both fields.
+
+**Pass.** The bars sit flat and low while the room is quiet. They rise as soon
+as speech starts and follow its loudness: a loud voice makes a visibly taller
+wave than a whisper. A covered microphone keeps the bars flat.
+
+**Fails if.** The bars never move, move on their own while the room is silent,
+or move identically whatever the volume. A flat wave during clear speech means
+this device sends no volume events — record the device and Android version,
+because the surface then needs a fallback.
+
+## D71 — The guessed words read as guesses — `PENDING`
+
+**Why hardware only.** Only a real recogniser decides when a segment becomes
+final. jsdom fires whatever the test tells it to.
+
+**Setup.** A debug build. Dictation language English, then Malayalam.
+
+**Steps.**
+1. Tap the mic and say a long sentence without pausing.
+2. Watch the grey line under the waveform while speaking.
+3. Pause and watch what happens to the field.
+4. Switch the dictation language to Malayalam and dictate a Malayalam reminder.
+5. Tap **Done** in the middle of a word.
+
+**Pass.** The words appear in grey under the waveform first, and move into the
+field when the recogniser settles on them. The field never shows a half-guessed
+word in the same colour as a settled one. The Malayalam guess renders as
+Malayalam letters, not boxes. **Done** keeps the half-spoken segment.
+
+**Fails if.** The grey line stays empty during speech, the field fills with
+guesses, Malayalam shows as boxes, or **Done** loses the last words.
+
+## D72 — The pause bar tells the truth about the clock — `PENDING`
+
+**Why hardware only.** The bar is drawn from wall-clock time against a real
+recogniser's result timing. A fake clock proves the arithmetic, not the fit.
+
+**Setup.** A debug build.
+
+**Steps.**
+1. Tap the mic and say two words, then stop speaking and watch the bar.
+2. Before the bar fills, say another word.
+3. Let the bar fill completely without speaking.
+4. Tap the mic and say nothing at all for ten seconds.
+
+**Pass.** The bar appears only after the first word. It fills over about two
+and a half seconds. A new word sends it back to empty. The label changes to
+*Stopping…* about halfway. The session ends as the bar completes, and the words
+are kept. With nothing said at all, no bar appears and the session closes at
+about six seconds with *Didn't hear anything*.
+
+**Fails if.** The bar appears before any speech, does not reset on a new word,
+or finishes at a visibly different moment from the session itself.
+
+## D73 — The mic says which languages it takes, once — `PENDING`
+
+**Why hardware only.** The line is once per install, so only real storage
+across real app restarts proves it stays gone.
+
+**Setup.** A fresh install.
+
+**Steps.**
+1. Tap the mic and read the line under the waveform.
+2. Cancel, tap the mic again, and read the same place.
+3. Close the app fully, reopen it, and tap the mic.
+4. Open the add-reminder sheet and tap the mic on both fields.
+
+**Pass.** The first microphone of the install says *Speak your reminder.
+English or Malayalam — change it in Settings.* No later microphone says it
+again, in any field, in any run of the app.
+
+**Fails if.** The line returns on a second tap or after a restart, or never
+appears at all on a fresh install.

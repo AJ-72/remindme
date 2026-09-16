@@ -8,6 +8,7 @@ import { SharedTextProvider, useSharedText } from "@/contexts/SharedTextContext"
 import {
   DEFAULT_ALARM_KEY,
   MAX_REGISTER_PROMPTS,
+  MIC_LANGUAGE_LINE_KEY,
   REGISTERED_PHONE_KEY,
   REGISTER_PROMPT_COUNT_KEY,
   resetRegisterPromptSession,
@@ -16,6 +17,7 @@ import {
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { AppState, Linking, Platform, StyleSheet } from "react-native";
 import * as SpeechService from "@/services/SpeechService";
+import { WAVEFORM_BARS } from "@/utils/micLevel";
 import * as ContactsService from "@/services/ContactsService";
 import * as InvitationService from "@/services/InvitationService";
 import * as RecipientLookupService from "@/services/RecipientLookupService";
@@ -857,12 +859,22 @@ describe("QuickAddInput — the listening surface", () => {
   // utils/dictationTimer.test.ts, against a plain fake clock. These tests
   // cover what the component does around them: the surface, the two ways out
   // of a session, and an interruption.
-  function fireResult(transcript: string) {
+  function fireResult(transcript: string, isFinal = false) {
     const call = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
       (c) => c[0] === "result"
     );
     act(() => {
-      call[1]({ isFinal: false, results: [{ transcript }] });
+      call[1]({ isFinal, results: [{ transcript }] });
+    });
+  }
+
+  /** One loudness reading from the recognizer, as the waveform receives it. */
+  function fireVolume(value: number) {
+    const call = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (c) => c[0] === "volumechange"
+    );
+    act(() => {
+      call[1]({ value });
     });
   }
 
@@ -930,7 +942,7 @@ describe("QuickAddInput — the listening surface", () => {
   it("throws the words away when Cancel is pressed", async () => {
     const { findByTestId, queryByTestId } = await startMic();
     const titleInput = await findByTestId("quick-add-input");
-    fireResult("something the user did not mean");
+    fireResult("something the user did not mean", true);
     expect(titleInput.props.value).toBe("something the user did not mean");
 
     fireEvent.press(await findByTestId("listening-cancel"));
@@ -976,6 +988,125 @@ describe("QuickAddInput — the listening surface", () => {
     expect(titleInput.props.value).toBe("book the tickets");
     expect(await findByText(/stopped when you left the app/i)).toBeTruthy();
   });
+
+  // Frames 7, 8 and 9 of the first-run study. A scale pulse says something is
+  // happening; it says nothing about whether the device can hear THIS user,
+  // which is the question a person who has just been ignored by a microphone
+  // is actually asking.
+  describe("the waveform", () => {
+    function barHeights(utils: any) {
+      return Array.from({ length: WAVEFORM_BARS }, (_, i) =>
+        StyleSheet.flatten(utils.getByTestId(`listening-wave-bar-${i}`).props.style).height
+      );
+    }
+
+    it("is on screen for the whole session", async () => {
+      const utils = await startMic();
+      expect(await utils.findByTestId("listening-wave")).toBeTruthy();
+    });
+
+    it("grows with the user's own voice", async () => {
+      const utils = await startMic();
+      await utils.findByTestId("listening-wave");
+      const quiet = barHeights(utils);
+
+      fireVolume(8);
+      const loud = barHeights(utils);
+
+      loud.forEach((h, i) => expect(h).toBeGreaterThan(quiet[i]));
+    });
+
+    // The one thing this surface must never do. A waveform that animates on
+    // its own would perform just as convincingly with the mic switched off,
+    // which is the exact lie it exists to rule out.
+    it("stays flat while the recognizer reports silence", async () => {
+      const utils = await startMic();
+      await utils.findByTestId("listening-wave");
+      const before = barHeights(utils);
+
+      fireVolume(-2);
+
+      expect(barHeights(utils)).toEqual(before);
+    });
+
+    it("counts the seconds the mic has been open", async () => {
+      const utils = await startMic();
+      expect((await utils.findByTestId("listening-timer")).props.children).toBe("0:00");
+    });
+  });
+
+  describe("the words still being guessed", () => {
+    it("shows them on the surface, not in the field", async () => {
+      const utils = await startMic();
+      fireResult("call Amma at seven");
+
+      expect((await utils.findByTestId("listening-interim")).props.children).toContain(
+        "call Amma at seven"
+      );
+      expect((await utils.findByTestId("quick-add-input")).props.value).toBe("");
+    });
+
+    it("moves them into the field once the recognizer commits", async () => {
+      const utils = await startMic();
+      fireResult("call Amma at seven");
+      fireResult("call Amma at seven", true);
+
+      expect((await utils.findByTestId("quick-add-input")).props.value).toBe(
+        "call Amma at seven"
+      );
+      expect(utils.queryByTestId("listening-interim")).toBeNull();
+    });
+
+    // Inter carries no Malayalam glyphs, so a dictated Malayalam guess would
+    // render as boxes with the default family.
+    it("renders a Malayalam guess in the Malayalam face", async () => {
+      const utils = await startMic();
+      fireResult("നാളെ വിളിക്കണം");
+
+      const style = StyleSheet.flatten(
+        (await utils.findByTestId("listening-interim")).props.style
+      );
+      expect(style.fontFamily).toBe("NotoSansMalayalam_400Regular");
+    });
+  });
+
+  describe("the pause clock, made visible", () => {
+    it("stays hidden until something has actually been heard", async () => {
+      const utils = await startMic();
+      await utils.findByTestId("listening-surface");
+      expect(utils.queryByTestId("listening-silence")).toBeNull();
+    });
+
+    it("appears once the first word lands", async () => {
+      const utils = await startMic();
+      fireResult("buy milk", true);
+      expect(await utils.findByTestId("listening-silence")).toBeTruthy();
+    });
+  });
+
+  describe("naming the languages the mic takes", () => {
+    it("says so on the first microphone of the install", async () => {
+      const utils = await startMic();
+      const line = await utils.findByTestId("listening-language");
+      expect(line.props.children).toMatch(/English or Malayalam/);
+    });
+
+    it("says it once, and never again", async () => {
+      await AsyncStorage.setItem(MIC_LANGUAGE_LINE_KEY, "1");
+      const utils = await startMic();
+      await utils.findByTestId("listening-surface");
+      expect(utils.queryByTestId("listening-language")).toBeNull();
+    });
+
+    it("records that it was said, so the next install is the next chance", async () => {
+      const utils = await startMic();
+      await utils.findByTestId("listening-language");
+      await waitFor(async () =>
+        expect(await AsyncStorage.getItem(MIC_LANGUAGE_LINE_KEY)).toBe("1")
+      );
+    });
+  });
+
 });
 
 // The first-run "Add your number" modal was removed, and the action-row icon

@@ -662,6 +662,11 @@ export default function AddReminderScreen() {
               {editDictation.listening && (
                 <ListeningSurface
                   heardSpeech={editDictation.heardSpeech}
+                  level={editDictation.level}
+                  interim={editDictation.interim}
+                  startedAt={editDictation.startedAt ?? undefined}
+                  lastHeardAt={editDictation.lastHeardAt}
+                  showLanguageLine={editDictation.showLanguageLine}
                   onDone={editDictation.stop}
                   onCancel={editDictation.cancel}
                   testIDPrefix="edit-listening"
@@ -715,6 +720,11 @@ export default function AddReminderScreen() {
               {newDictation.listening && (
                 <ListeningSurface
                   heardSpeech={newDictation.heardSpeech}
+                  level={newDictation.level}
+                  interim={newDictation.interim}
+                  startedAt={newDictation.startedAt ?? undefined}
+                  lastHeardAt={newDictation.lastHeardAt}
+                  showLanguageLine={newDictation.showLanguageLine}
                   onDone={newDictation.stop}
                   onCancel={newDictation.cancel}
                   testIDPrefix="new-listening"

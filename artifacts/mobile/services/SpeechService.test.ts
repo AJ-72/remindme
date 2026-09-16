@@ -131,7 +131,11 @@ describe("ensureOfflineModelReady", () => {
   });
 });
 
-import { startListening, stopListening } from "@/services/SpeechService";
+import {
+  VOLUME_EVENT_INTERVAL_MS,
+  startListening,
+  stopListening,
+} from "@/services/SpeechService";
 
 describe("startListening", () => {
   it("starts the native module and returns busy: false when idle", () => {
@@ -154,7 +158,7 @@ describe("startListening", () => {
     stopListening();
   });
 
-  it("combines the baseline with each result event's transcript", () => {
+  it("combines the baseline with each committed transcript", () => {
     const onResult = jest.fn();
     startListening("call mom", "en-US", onResult, jest.fn(), jest.fn());
 
@@ -162,9 +166,79 @@ describe("startListening", () => {
       (call) => call[0] === "result"
     );
     const resultHandler = resultListenerCall[1];
-    resultHandler({ isFinal: false, results: [{ transcript: "tomorrow at 3pm" }] });
+    resultHandler({ isFinal: true, results: [{ transcript: "tomorrow at 3pm" }] });
 
     expect(onResult).toHaveBeenCalledWith("call mom tomorrow at 3pm");
+    stopListening();
+  });
+
+  // The field holds words the recognizer has settled on. A guess still being
+  // revised goes to the listening surface instead, where it can be drawn grey
+  // - once both are in the same input, neither can be told from the other.
+  it("keeps an uncommitted segment out of the field", () => {
+    const onResult = jest.fn();
+    const onInterim = jest.fn();
+    startListening("call mom", "en-US", onResult, jest.fn(), jest.fn(), true, { onInterim });
+
+    const resultHandler = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (call) => call[0] === "result"
+    )[1];
+    resultHandler({ isFinal: false, results: [{ transcript: "tomorrow at" }] });
+
+    expect(onInterim).toHaveBeenCalledWith("tomorrow at");
+    expect(onResult).not.toHaveBeenCalled();
+    stopListening();
+  });
+
+  // Done arrives mid-segment more often than not: the user stops speaking and
+  // taps. stopListening() clears the listeners, so a final emitted on stop has
+  // nowhere to land - without the flush those last words are simply lost.
+  it("keeps the segment in progress when the session is stopped", () => {
+    const onResult = jest.fn();
+    const onInterim = jest.fn();
+    startListening("", "en-US", onResult, jest.fn(), jest.fn(), true, { onInterim });
+
+    const resultHandler = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (call) => call[0] === "result"
+    )[1];
+    resultHandler({ isFinal: false, results: [{ transcript: "buy milk" }] });
+    stopListening();
+
+    expect(onResult).toHaveBeenCalledWith("buy milk");
+    expect(onInterim).toHaveBeenLastCalledWith("");
+  });
+
+  it("asks the recognizer for loudness only when something will draw it", () => {
+    startListening("", "en-US", jest.fn(), jest.fn(), jest.fn());
+    expect(
+      (ExpoSpeechRecognitionModule.start as jest.Mock).mock.calls[0][0]
+        .volumeChangeEventOptions
+    ).toBeUndefined();
+    stopListening();
+
+    (ExpoSpeechRecognitionModule.start as jest.Mock).mockClear();
+    startListening("", "en-US", jest.fn(), jest.fn(), jest.fn(), true, {
+      onVolume: jest.fn(),
+    });
+    expect(
+      (ExpoSpeechRecognitionModule.start as jest.Mock).mock.calls[0][0]
+        .volumeChangeEventOptions
+    ).toEqual({ enabled: true, intervalMillis: VOLUME_EVENT_INTERVAL_MS });
+    stopListening();
+  });
+
+  it("hands the waveform a normalised level, not the raw reading", () => {
+    const onVolume = jest.fn();
+    startListening("", "en-US", jest.fn(), jest.fn(), jest.fn(), true, { onVolume });
+
+    const volumeHandler = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (call) => call[0] === "volumechange"
+    )[1];
+    volumeHandler({ value: 8 });
+    volumeHandler({ value: -2 });
+
+    expect(onVolume).toHaveBeenNthCalledWith(1, 1);
+    expect(onVolume).toHaveBeenNthCalledWith(2, 0);
     stopListening();
   });
 
@@ -186,6 +260,7 @@ describe("startListening", () => {
     resultHandler({ isFinal: false, results: [{ transcript: "and bread" }] });
     resultHandler({ isFinal: true, results: [{ transcript: "and bread" }] });
 
+
     expect(onResult).toHaveBeenLastCalledWith("buy milk and bread");
     stopListening();
   });
@@ -197,11 +272,13 @@ describe("startListening", () => {
       (call) => call[0] === "result"
     )[1];
 
+    const onInterim = jest.fn();
     resultHandler({ isFinal: true, results: [{ transcript: "call Amma" }] });
     resultHandler({ isFinal: false, results: [{ transcript: "at" }] });
-    resultHandler({ isFinal: false, results: [{ transcript: "at seven" }] });
+    resultHandler({ isFinal: true, results: [{ transcript: "at seven" }] });
 
     expect(onResult).toHaveBeenLastCalledWith("note: call Amma at seven");
+    expect(onInterim).not.toHaveBeenCalled();
     stopListening();
   });
 

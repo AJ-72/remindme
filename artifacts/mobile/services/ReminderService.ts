@@ -52,6 +52,7 @@ export const REGISTERED_PHONE_KEY = "@registered_phone_v1";
  */
 export const REGISTER_PROMPT_COUNT_KEY = "@register_prompt_count_v1";
 export const MAX_REGISTER_PROMPTS = 2;
+export const MIC_LANGUAGE_LINE_KEY = "@mic_language_line_seen_v1";
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 /**
  * Corrupt reminder payloads are copied here rather than discarded. AsyncStorage
@@ -557,6 +558,33 @@ export async function incrementRegisterPromptCount(): Promise<number> {
     await AsyncStorage.setItem(REGISTER_PROMPT_COUNT_KEY, String(next));
   } catch {}
   return next;
+}
+
+/**
+ * Whether to say, on this mic session, which languages the mic takes.
+ *
+ * The app recognises Malayalam as well as English, and nothing on screen has
+ * ever said so - the setting is in Settings, which is the one place a user
+ * with a reminder to dictate is not looking. The first open microphone is
+ * where that sentence costs nothing and answers a question the user is
+ * already holding, so it is said exactly once per install.
+ */
+export async function shouldShowMicLanguageLine(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(MIC_LANGUAGE_LINE_KEY)) === null;
+  } catch {
+    // Unreadable storage must not cost the user their dictation. Staying
+    // silent repeats nothing; showing it again would.
+    return false;
+  }
+}
+
+export async function markMicLanguageLineSeen(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(MIC_LANGUAGE_LINE_KEY, "1");
+  } catch {
+    // Worst case the line appears on one more mic tap.
+  }
 }
 
 /**
