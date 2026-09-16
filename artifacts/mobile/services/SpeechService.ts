@@ -103,6 +103,31 @@ export function stopListening(): void {
   clearActiveSession();
 }
 
+/**
+ * Throw the session away instead of ending it.
+ *
+ * stopListening() asks the recognizer to finish, so a last partial phrase can
+ * still arrive and land in the input. Cancel means the user wants nothing of
+ * what was said, so the listeners are removed BEFORE the native call - a late
+ * result then has nowhere to go. Falls back to stop() on an older module
+ * build that has no abort().
+ */
+export function abortListening(): void {
+  if (activeMode === null) return;
+  clearActiveSession();
+  try {
+    const mod = ExpoSpeechRecognitionModule as unknown as {
+      abort?: () => void;
+      stop: () => void;
+    };
+    if (typeof mod.abort === "function") mod.abort();
+    else mod.stop();
+  } catch {
+    // The session is already forgotten on this side; a native failure here
+    // must not leave the caller believing the mic is still live.
+  }
+}
+
 export function isFileTranscriptionSupported(): boolean {
   if (Platform.OS === "ios") return true;
   if (Platform.OS !== "android") return false;

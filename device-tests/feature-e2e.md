@@ -593,3 +593,78 @@ are off." The overdue reminder's card carries no **Will not ring** chip.
 **Fails if.** The banner keeps the generic wording, or the overdue card
 shows the chip — granting permission cannot rescue that ring, so the chip
 there would be a label the user can do nothing about.
+
+## D53 — Dictation ends itself after a pause — `PENDING`
+
+**Why hardware only.** Jest has no microphone and no recognizer. The pause
+clock only means something against real speech, real partial results and a
+real device's recognition delay.
+
+**Setup.** Grant the microphone permission. Open the home screen.
+
+**Steps.**
+1. Tap the mic.
+2. Say "buy milk tomorrow at six", then stop speaking and do nothing.
+3. Watch the input field and the listening panel.
+
+**Pass.** The panel appears the moment the mic opens and reads "Listening —
+say your reminder". It changes to "stop speaking when you're done" as soon
+as words appear. About two and a half seconds after the last word, the panel
+disappears by itself, the pulse stops, and the text stays in the field.
+
+**Fails if.** The mic stays open after the pause, or the text disappears
+when the session ends, or the panel never appears.
+
+## D54 — Cancel throws the words away, Done keeps them — `PENDING`
+
+**Why hardware only.** It needs a real recognizer, whose last partial result
+can arrive after the tap.
+
+**Setup.** Continue from D53.
+
+**Steps.**
+1. Type "pay rent" into the field.
+2. Tap the mic and say "and call the bank".
+3. Tap **Cancel**.
+4. Tap the mic again, say "and call the bank", and tap **Done**.
+
+**Pass.** After step 3 the field reads exactly "pay rent" and nothing is
+added a moment later. After step 4 the field holds both phrases. Each tap
+gives a short vibration.
+
+**Fails if.** Cancel leaves the dictated words behind, or a late result
+lands in the field a second after Cancel, or Cancel empties a field that
+already held typed text.
+
+## D55 — An open mic that hears nothing says so — `PENDING`
+
+**Why hardware only.** Silence on a real microphone is not silence in Jest:
+some devices emit empty results, some emit nothing at all.
+
+**Setup.** A quiet room.
+
+**Steps.**
+1. Tap the mic and say nothing for about eight seconds.
+
+**Pass.** After about six seconds the panel disappears and the app says
+"Didn't hear anything — try again or type it in."
+
+**Fails if.** The mic stays open, or it closes with no message at all.
+
+## D56 — Leaving the app stops dictation — `PENDING`
+
+**Why hardware only.** Android gives the microphone to whatever comes to the
+front. Only a real device shows what the app is left holding.
+
+**Setup.** Grant the microphone permission.
+
+**Steps.**
+1. Tap the mic and say "book the tickets".
+2. Press Home, or take an incoming call.
+3. Return to the app.
+
+**Pass.** The panel is gone, the pulse has stopped, and "book the tickets"
+is still in the field. The app says the voice input stopped when you left.
+
+**Fails if.** The pulse is still running on return, or the mic is still
+held, or the words are lost.

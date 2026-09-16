@@ -1,5 +1,5 @@
 import React from "react";
-import { render, waitFor, fireEvent } from "@testing-library/react-native";
+import { render, waitFor, fireEvent, act } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import QuickAddInput from "@/components/QuickAddInput";
@@ -7,7 +7,7 @@ import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider, useSharedText } from "@/contexts/SharedTextContext";
 import { DEFAULT_ALARM_KEY, STORAGE_KEY } from "@/services/ReminderService";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
-import { Linking, Platform, StyleSheet } from "react-native";
+import { AppState, Linking, Platform, StyleSheet } from "react-native";
 import * as SpeechService from "@/services/SpeechService";
 import * as ContactsService from "@/services/ContactsService";
 import * as InvitationService from "@/services/InvitationService";
@@ -839,5 +839,131 @@ describe("QuickAddInput — vague task hint", () => {
       expect(stored).toHaveLength(1);
       expect(stored[0].title).toContain("Sort out the insurance");
     });
+  });
+});
+
+describe("QuickAddInput — the listening surface", () => {
+  // The pause/no-speech clocks themselves are covered in
+  // utils/dictationTimer.test.ts, against a plain fake clock. These tests
+  // cover what the component does around them: the surface, the two ways out
+  // of a session, and an interruption.
+  function fireResult(transcript: string) {
+    const call = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (c) => c[0] === "result"
+    );
+    act(() => {
+      call[1]({ isFinal: false, results: [{ transcript }] });
+    });
+  }
+
+  beforeEach(() => {
+    SpeechService.stopListening();
+    jest.replaceProperty(Platform, "OS", "android");
+    (ExpoSpeechRecognitionModule.getPermissionsAsync as jest.Mock).mockResolvedValue({
+      granted: true,
+      canAskAgain: true,
+      status: "granted",
+    });
+    (ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload as jest.Mock).mockResolvedValue({
+      status: "download_success",
+      message: "ok",
+    });
+  });
+
+  async function startMic() {
+    const utils = renderComponent();
+    const micButton = await utils.findByTestId("quick-add-mic");
+    fireEvent.press(micButton);
+    await waitFor(() => expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalled());
+    return utils;
+  }
+
+  it("shows the surface, with both ways out, while the live mic is open", async () => {
+    const { findByTestId } = await startMic();
+    expect(await findByTestId("listening-surface")).toBeTruthy();
+    expect(await findByTestId("listening-done")).toBeTruthy();
+    expect(await findByTestId("listening-cancel")).toBeTruthy();
+  });
+
+  it("shows no surface for a shared audio transcription, which has nothing to stop", async () => {
+    (useSharedText as jest.Mock).mockReturnValue({
+      sharedText: "",
+      clearSharedText: jest.fn(),
+      sharedAudioTranscribing: true,
+      sharedAudioNotice: null,
+    });
+    const { queryByTestId } = renderComponent();
+    await waitFor(() => expect(queryByTestId("listening-surface")).toBeNull());
+  });
+
+  it("says whether anything has been heard yet", async () => {
+    const { findByText } = await startMic();
+    expect(await findByText(/say your reminder/i)).toBeTruthy();
+
+    fireResult("buy milk");
+    expect(await findByText(/stop speaking when you/i)).toBeTruthy();
+  });
+
+  it("keeps the words when Done is pressed", async () => {
+    const stopSpy = jest.spyOn(SpeechService, "stopListening");
+    const { findByTestId, queryByTestId } = await startMic();
+    fireResult("water the plants");
+
+    fireEvent.press(await findByTestId("listening-done"));
+
+    await waitFor(() => expect(queryByTestId("listening-surface")).toBeNull());
+    expect(stopSpy).toHaveBeenCalled();
+    const titleInput = await findByTestId("quick-add-input");
+    expect(titleInput.props.value).toBe("water the plants");
+  });
+
+  it("throws the words away when Cancel is pressed", async () => {
+    const { findByTestId, queryByTestId } = await startMic();
+    const titleInput = await findByTestId("quick-add-input");
+    fireResult("something the user did not mean");
+    expect(titleInput.props.value).toBe("something the user did not mean");
+
+    fireEvent.press(await findByTestId("listening-cancel"));
+
+    await waitFor(() => expect(queryByTestId("listening-surface")).toBeNull());
+    expect(titleInput.props.value).toBe("");
+    expect(ExpoSpeechRecognitionModule.abort).toHaveBeenCalled();
+  });
+
+  it("cancels back to what was already typed, not to an empty field", async () => {
+    const { findByTestId } = await startMic();
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.press(await findByTestId("listening-cancel"));
+
+    fireEvent.changeText(titleInput, "pay rent");
+    fireEvent.press(await findByTestId("quick-add-mic"));
+    await waitFor(() => expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledTimes(2));
+
+    fireResult("pay rent and something wrong");
+    fireEvent.press(await findByTestId("listening-cancel"));
+
+    await waitFor(() => expect(titleInput.props.value).toBe("pay rent"));
+  });
+
+  it("stops dictation when the app leaves the foreground, and keeps what was heard", async () => {
+    const handlers: ((s: string) => void)[] = [];
+    jest
+      .spyOn(AppState, "addEventListener")
+      .mockImplementation((_event: string, handler: any) => {
+        handlers.push(handler);
+        return { remove: jest.fn() } as any;
+      });
+
+    const { findByTestId, queryByTestId, findByText } = await startMic();
+    fireResult("book the tickets");
+
+    act(() => {
+      handlers.forEach((h) => h("background"));
+    });
+
+    await waitFor(() => expect(queryByTestId("listening-surface")).toBeNull());
+    const titleInput = await findByTestId("quick-add-input");
+    expect(titleInput.props.value).toBe("book the tickets");
+    expect(await findByText(/stopped when you left the app/i)).toBeTruthy();
   });
 });

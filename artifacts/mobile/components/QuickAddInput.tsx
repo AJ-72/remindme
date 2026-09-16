@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   Linking,
   Modal,
   Platform,
@@ -20,6 +21,7 @@ import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
 import {
+  abortListening,
   ensureOfflineModelReady,
   getMicPermissionStatus,
   requestMicPermission,
@@ -34,6 +36,7 @@ import { formatTime12h } from "@/utils/formatDatetime";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import type { ParsedAmbiguity } from "@/utils/malayalamDateParser";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
+import { createDictationTimer, type DictationTimer } from "@/utils/dictationTimer";
 import { detectVagueOpener } from "@/utils/vagueTask";
 import { getFontFamily } from "@/utils/getFontFamily";
 
@@ -44,6 +47,7 @@ const DateTimePicker: React.ComponentType<any> | null =
     : null;
 
 type PickerMode = "date" | "time" | null;
+
 
 function roundToNextHour(d: Date): Date {
   const result = new Date(d);
@@ -143,6 +147,17 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const micPulse = useRef(new Animated.Value(1)).current;
   const micSourceRef = useRef<"live" | "shared" | null>(null);
+  // Only a LIVE mic session gets the listening surface. A shared audio file
+  // transcribing in the background also sets `listening`, but it has no
+  // silence to time and no session the user can stop or cancel.
+  const [liveListening, setLiveListening] = useState(false);
+  const [heardSpeech, setHeardSpeech] = useState(false);
+  // The same fact as `heardSpeech`, readable from inside the timer callback,
+  // which closes over the state value as it was when the timer was armed.
+  const heardSpeechRef = useRef(false);
+  // What the input held before dictation started. Cancel puts it back.
+  const dictationBaselineRef = useRef("");
+  const dictationTimerRef = useRef<DictationTimer | null>(null);
 
   const [showNoTimeSheet, setShowNoTimeSheet] = useState(false);
   const [suggestedTime, setSuggestedTime] = useState<Date>(roundToNextHour(new Date()));
@@ -395,11 +410,65 @@ export default function QuickAddInput({ onSaved }: Props) {
     micPulse.setValue(1);
   };
 
+  const clearDictationTimer = () => {
+    dictationTimerRef.current?.clear();
+    dictationTimerRef.current = null;
+  };
+
+  /** Put the UI back to "not listening". Safe to call more than once. */
+  const settleAfterListening = () => {
+    clearDictationTimer();
+    micSourceRef.current = null;
+    setListening(false);
+    setLiveListening(false);
+    setHeardSpeech(false);
+    heardSpeechRef.current = false;
+    stopMicPulse();
+  };
+
+  /**
+   * End the session and KEEP what was heard.
+   *
+   * `reason` only decides the notice. "silence" is the ordinary end of a
+   * dictation, so it says nothing at all; the other two name something the
+   * user did not choose, so they say what happened.
+   */
+  const stopSpeakMode = (reason: "user" | "silence" | "interrupted" = "user") => {
+    if (micSourceRef.current === "shared") {
+      // A shared audio file is transcribing right now — stopping here would
+      // kill its native listeners and permanently wedge the concurrency
+      // guard (see Finding 2b). Surface a notice instead of stopping it.
+      setMicNotice("Still transcribing the shared audio…");
+      return;
+    }
+    stopListening();
+    settleAfterListening();
+    if (reason === "interrupted") {
+      setMicNotice("Voice input stopped when you left the app. Your words were kept.");
+    } else if (reason === "user") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  };
+
+  /** End the session and THROW AWAY what was heard. */
+  const cancelSpeakMode = () => {
+    if (micSourceRef.current === "shared") {
+      setMicNotice("Still transcribing the shared audio…");
+      return;
+    }
+    abortListening();
+    setInput(dictationBaselineRef.current);
+    settleAfterListening();
+    setMicNotice(null);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+  };
+
   const startSpeakMode = async () => {
     setMicNotice(null);
     const { granted, canAskAgain } = await getMicPermissionStatus();
     if (!granted) {
       if (!canAskAgain) {
+        setMicNotice("Microphone access is off. Turn it on in Settings to dictate.");
         Linking.openSettings();
         return;
       }
@@ -414,19 +483,43 @@ export default function QuickAddInput({ onSaved }: Props) {
       return;
     }
 
+    const baseline = input;
+    dictationBaselineRef.current = baseline;
+
+    // Built per session, so each one closes over the baseline it started from.
+    const timer = createDictationTimer({
+      onSilence: () => {
+        stopSpeakMode("silence");
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      },
+      onNoSpeech: () => {
+        // Nothing was heard, so there is nothing to keep. Cancel rather than
+        // stop, and say why - a mic that closes in silence with no message
+        // reads as a broken button.
+        abortListening();
+        setInput(baseline);
+        settleAfterListening();
+        setMicNotice("Didn't hear anything — try again or type it in.");
+      },
+    });
+    dictationTimerRef.current = timer;
+
     const { busy } = startListening(
-      input,
+      baseline,
       locale,
-      (fullText) => setInput(fullText),
-      () => {
-        micSourceRef.current = null;
-        setListening(false);
-        stopMicPulse();
+      (fullText) => {
+        setInput(fullText);
+        if (!heardSpeechRef.current) {
+          heardSpeechRef.current = true;
+          setHeardSpeech(true);
+        }
+        timer.heard();
       },
       () => {
-        micSourceRef.current = null;
-        setListening(false);
-        stopMicPulse();
+        settleAfterListening();
+      },
+      () => {
+        settleAfterListening();
         setMicNotice("Couldn't hear that — try again or type it in.");
       },
       modelStatus !== "unavailable"
@@ -436,23 +529,35 @@ export default function QuickAddInput({ onSaved }: Props) {
       return;
     }
     micSourceRef.current = "live";
+    heardSpeechRef.current = false;
+    setHeardSpeech(false);
     setListening(true);
+    setLiveListening(true);
     startMicPulse();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    timer.begin();
   };
 
-  const stopSpeakMode = () => {
-    if (micSourceRef.current === "shared") {
-      // A shared audio file is transcribing right now — stopping here would
-      // kill its native listeners and permanently wedge the concurrency
-      // guard (see Finding 2b). Surface a notice instead of stopping it.
-      setMicNotice("Still transcribing the shared audio…");
-      return;
-    }
-    stopListening();
-    micSourceRef.current = null;
-    setListening(false);
-    stopMicPulse();
-  };
+  // Leaving the app stops dictation. Android hands the microphone to whatever
+  // comes to the front anyway, so a session left running here would keep the
+  // pulse and the surface on screen over a recognizer that is already dead.
+  useEffect(() => {
+    if (!liveListening) return;
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") stopSpeakMode("interrupted");
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveListening]);
+
+  // A screen change while the mic is open must not leave the native session
+  // running with nothing left to receive its results.
+  useEffect(() => {
+    return () => {
+      clearDictationTimer();
+      abortListening();
+    };
+  }, []);
 
   const handleMicPress = () => {
     if (!listening) {
@@ -462,7 +567,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       // notice rather than silently no-op'ing.
       setMicNotice("Still transcribing the shared audio…");
     } else {
-      stopSpeakMode();
+      stopSpeakMode("user");
     }
   };
 
@@ -635,6 +740,40 @@ export default function QuickAddInput({ onSaved }: Props) {
       fontSize: 12,
       color: colors.mutedForeground,
       fontFamily: "Inter_400Regular",
+    },
+    listeningSurface: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      marginTop: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 12,
+      backgroundColor: colors.primary + "14",
+    },
+    listeningDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: colors.destructive,
+    },
+    listeningLabel: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.foreground,
+      fontFamily: "Inter_500Medium",
+    },
+    listeningAction: {
+      fontSize: 13,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
+      paddingHorizontal: 4,
+    },
+    listeningActionMuted: {
+      fontSize: 13,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+      paddingHorizontal: 4,
     },
     micNoticeText: {
       fontSize: 12,
@@ -855,6 +994,33 @@ export default function QuickAddInput({ onSaved }: Props) {
               </Text>
             ) : null}
           </>
+        )}
+
+        {/* Dictation is the one input mode with no visible cursor, so the
+            state has to be said out loud: that the mic is open, whether
+            anything has been heard yet, and the two ways out of it. Without
+            this, "stop" and "throw it away" were the same tap on the mic. */}
+        {liveListening && (
+          <View style={styles.listeningSurface} testID="listening-surface">
+            <Animated.View
+              style={[styles.listeningDot, { transform: [{ scale: micPulse }] }]}
+            />
+            <Text style={styles.listeningLabel}>
+              {heardSpeech
+                ? "Listening — stop speaking when you're done"
+                : "Listening — say your reminder"}
+            </Text>
+            <Pressable onPress={cancelSpeakMode} hitSlop={10} testID="listening-cancel">
+              <Text style={styles.listeningActionMuted}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => stopSpeakMode("user")}
+              hitSlop={10}
+              testID="listening-done"
+            >
+              <Text style={styles.listeningAction}>Done</Text>
+            </Pressable>
+          </View>
         )}
 
         <View style={styles.actionRow}>
