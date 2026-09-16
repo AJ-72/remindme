@@ -10,6 +10,7 @@ import {
   MAX_REGISTER_PROMPTS,
   REGISTERED_PHONE_KEY,
   REGISTER_PROMPT_COUNT_KEY,
+  resetRegisterPromptSession,
   STORAGE_KEY,
 } from "@/services/ReminderService";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
@@ -49,6 +50,9 @@ function renderComponent() {
 beforeEach(async () => {
   jest.clearAllMocks();
   await (AsyncStorage as any).clear();
+  // The "one offer per session" guard is a module-level flag, so without this
+  // the first test to see an offer silences it for every test after it.
+  resetRegisterPromptSession();
   (useSharedText as jest.Mock).mockReturnValue({
     sharedText: "",
     clearSharedText: jest.fn(),
@@ -1085,5 +1089,110 @@ describe("QuickAddInput — the offer to register your own number", () => {
     await waitFor(async () =>
       expect(await AsyncStorage.getItem(REGISTER_PROMPT_COUNT_KEY)).toBe("1")
     );
+  });
+});
+
+// Frame 2 of the first-run study. The old cold open was an empty list behind
+// four permission asks, which said the app was not ready yet. These say the
+// opposite, and one of them says it in Malayalam.
+describe("QuickAddInput — the cold-open examples", () => {
+  it("shows three examples and the line that explains them", async () => {
+    const { findByTestId } = renderComponent();
+    await findByTestId("starter-examples");
+    expect(await findByTestId("starter-example-0")).toBeTruthy();
+    expect(await findByTestId("starter-example-1")).toBeTruthy();
+    expect(await findByTestId("starter-example-2")).toBeTruthy();
+    expect(await findByTestId("starter-helper")).toBeTruthy();
+  });
+
+  it("offers one example in Malayalam, where the script support is visible", async () => {
+    const { findByText } = renderComponent();
+    expect(
+      await findByText(
+        "നാളെ രാവിലെ പാൽ വാങ്ങണം"
+      )
+    ).toBeTruthy();
+  });
+
+  it("puts a tapped example into the composer", async () => {
+    const { findByTestId } = renderComponent();
+    fireEvent.press(await findByTestId("starter-example-0"));
+    await waitFor(async () =>
+      expect((await findByTestId("quick-add-input")).props.value).toBe("Call Amma at 7 pm")
+    );
+  });
+
+  it("gets out of the way as soon as the user types", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    await findByTestId("starter-examples");
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Buy milk");
+    await waitFor(() => expect(queryByTestId("starter-examples")).toBeNull());
+  });
+
+  it("never returns once there is a reminder to look at instead", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: "r1",
+          title: "Buy milk",
+          datetime: new Date(Date.now() + 86400000).toISOString(),
+          completed: false,
+        },
+      ])
+    );
+    const { findByTestId, queryByTestId } = renderComponent();
+    await findByTestId("quick-add-input");
+    await waitFor(() => expect(queryByTestId("starter-examples")).toBeNull());
+  });
+});
+
+// Frame 3. The parser has already read the title, so naming the person in it
+// costs nothing - and a user who just typed a name is the only user on this
+// screen who can be shown what sending to another person is for.
+describe("QuickAddInput — the send-to-a-person chip", () => {
+  it("offers the person the title names", async () => {
+    const { findByTestId, findByText } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Call Amma at 7 pm");
+    expect(await findByText("Send to Amma instead?")).toBeTruthy();
+  });
+
+  it("stays away from a task that names nobody", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Take medicine at 9 am");
+    await waitFor(() => expect(queryByTestId("send-to-person-chip")).toBeNull());
+  });
+
+  it("opens the contact picker", async () => {
+    const { findByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Tell Priya about the rent");
+    fireEvent.press(await findByTestId("send-to-person-chip"));
+    expect(await findByTestId("contact-picker-cancel")).toBeTruthy();
+  });
+
+  it("goes quiet once a recipient is attached, the question being answered", async () => {
+    jest.spyOn(ContactsService, "loadPickableContacts").mockResolvedValue({
+      permission: "granted",
+      contacts: [{ name: "Amma", phone: "9876543210", contactId: "c1" }],
+    });
+    const { findByTestId, findByText, queryByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Call Amma at 7 pm");
+    fireEvent.press(await findByTestId("send-to-person-chip"));
+    fireEvent.press(await findByText("Amma"));
+    await findByTestId("quick-add-recipient-chip");
+
+    await waitFor(() => expect(queryByTestId("send-to-person-chip")).toBeNull());
+  });
+
+  // A refusal is about this name only. The next reminder may well name
+  // somebody the user does want to send to.
+  it("dismisses for the name it named, not for every name after it", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Call Amma at 7 pm");
+    fireEvent.press(await findByTestId("send-to-person-chip-dismiss"));
+    await waitFor(() => expect(queryByTestId("send-to-person-chip")).toBeNull());
+
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Tell Priya about the rent");
+    expect(await findByTestId("send-to-person-chip")).toBeTruthy();
   });
 });

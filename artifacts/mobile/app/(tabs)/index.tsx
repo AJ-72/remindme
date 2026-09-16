@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -16,7 +16,12 @@ import QuickAddInput from "@/components/QuickAddInput";
 import ReminderCard from "@/components/ReminderCard";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useReminders, type Reminder } from "@/contexts/RemindersContext";
-import { isSendReminder } from "@/services/ReminderService";
+import {
+  incrementRegisterPromptCount,
+  isSendReminder,
+  markRegisterPromptShown,
+  shouldOfferNumberRegistration,
+} from "@/services/ReminderService";
 import { useColors } from "@/hooks/useColors";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
 import { buildGreeting, greetingName, initialsFor } from "@/utils/greeting";
@@ -24,10 +29,19 @@ import { getFontFamily } from "@/utils/getFontFamily";
 import { groupByDate } from "@/utils/groupByDate";
 import NameSheet from "@/components/NameSheet";
 import NotificationNudge from "@/components/NotificationNudge";
+import RegisterNumberNudge from "@/components/RegisterNumberNudge";
 
 // Distinguishes the two confirm sheets that share pendingDelete* state below:
 // deleting one reminder vs. clearing every completed one at once.
 type PendingDelete = { kind: "single"; id: string } | { kind: "clear-completed" };
+
+/**
+ * How many reminders a user saves before the app offers to take their number.
+ * The offer is about being reachable by other people, which is worth nothing
+ * to someone who has not yet decided the app is worth keeping. Three saved
+ * reminders is the cheapest available evidence that they have.
+ */
+export const REMINDERS_BEFORE_NUMBER_OFFER = 3;
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -239,6 +253,9 @@ export default function HomeScreen() {
     // deliberately smaller and unstyled-as-a-badge compared to sectionHeaderLabel,
     // since these are sub-groups of one section rather than section headers
     // themselves.
+    numberOfferWrap: {
+      marginTop: 16,
+    },
     dateGroupLabel: {
       fontSize: 12,
       fontFamily: "Inter_600SemiBold",
@@ -247,6 +264,31 @@ export default function HomeScreen() {
       marginTop: 10,
     },
   });
+
+  // The offer to register the user's own number, once they have a habit.
+  // Null means nothing on screen; the flag is not persisted, because
+  // shouldOfferNumberRegistration() already owns the across-install decision
+  // and a second store of it could disagree with the first.
+  const [numberOffer, setNumberOffer] = useState(false);
+  // The offer is counted when it is SHOWN, so this guards against the effect
+  // spending a second one on a re-render.
+  const offerCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (loading || offerCheckedRef.current) return;
+    if (reminders.length < REMINDERS_BEFORE_NUMBER_OFFER) return;
+    offerCheckedRef.current = true;
+    let live = true;
+    (async () => {
+      if (!(await shouldOfferNumberRegistration())) return;
+      markRegisterPromptShown();
+      await incrementRegisterPromptCount();
+      if (live) setNumberOffer(true);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [loading, reminders.length]);
 
   // Dismissal lasts for this mount only. The banner is not an advert: it
   // describes a live fault, so it comes back on the next launch while the
@@ -465,6 +507,18 @@ export default function HomeScreen() {
               </>
             )}
           </>
+        )}
+
+        {/* Under the list, not over it: the reminders are what the user came
+            for, and an offer above them would be read as the app interrupting
+            its own answer. */}
+        {numberOffer && (
+          <View style={styles.numberOfferWrap}>
+            <RegisterNumberNudge
+              reason="milestone"
+              onDismiss={() => setNumberOffer(false)}
+            />
+          </View>
         )}
       </KeyboardAwareScrollViewCompat>
 

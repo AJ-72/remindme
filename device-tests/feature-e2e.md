@@ -866,3 +866,70 @@ bolt badge.
 
 **Fails if.** No offer appears, or the badge never returns after registering.
 This is the reported defect.
+
+## D67 — The cold open shows examples, not an empty list — `PENDING`
+
+**Why hardware only.** Jest has no viewport. The three chips wrap onto a
+second row on a narrow phone, and the Malayalam chip needs the bundled Noto
+font to render at all — a missing glyph shows as boxes, which the suite
+cannot see.
+
+**Setup.** A fresh install, or Settings → Apps → Reminders → Clear storage.
+
+**Steps.**
+1. Open the app and save the name sheet, or skip it.
+2. Read the three example chips and the line below them.
+3. Tap the Malayalam chip.
+4. Save the reminder, then look at the composer again.
+
+**Pass.** Three chips are on screen, none clipped. The Malayalam chip shows
+Malayalam letters, not boxes. A tap fills the composer and the date pills
+appear. The block is gone once the first reminder is saved.
+
+**Fails if.** A chip is cut off, the Malayalam renders as boxes, or the block
+stays on screen over a saved reminder.
+
+## D68 — The send-to-a-person chip reads the name — `PENDING`
+
+**Why hardware only.** The chip depends on the live parser and on the
+keyboard: it appears under the composer, which is where the soft keyboard
+opens.
+
+**Setup.** Any install. No recipient chosen.
+
+**Steps.**
+1. Type `Call Amma at 7 pm` and read below the date pills.
+2. Type `Take medicine at 9 am` instead.
+3. Type a Malayalam line naming a person, for example
+   `പ്രിയയോട് പറയണം`.
+4. Tap the chip, then choose a contact.
+5. Type `Call Amma at 7 pm` again and dismiss the chip with the ×.
+
+**Pass.** The chip says *Send to Amma instead?* and stays above the keyboard.
+It stays away from the medicine line. It names the Malayalam person in
+Malayalam letters. Tapping it opens the contact picker. The chip goes after a
+recipient is attached, and after a dismissal it does not come back for that
+name.
+
+**Fails if.** The chip names a thing rather than a person, hides behind the
+keyboard, or returns after it is dismissed.
+
+## D69 — The number offer arrives on the third reminder — `PENDING`
+
+**Why hardware only.** The offer is capped across installs, so only real
+storage across real app restarts proves the cap holds.
+
+**Setup.** A fresh install with no registered number.
+
+**Steps.**
+1. Save two reminders and read the bottom of the list.
+2. Save a third and read the bottom of the list again.
+3. Tap **No thanks**, then close and reopen the app.
+4. Repeat until the offer has been shown twice, then save more reminders.
+
+**Pass.** Nothing appears after two reminders. After the third, the offer
+appears under the list, reading *Remind someone else?*. **Add my number**
+opens the registration screen. After two refusals the offer never returns.
+
+**Fails if.** The offer appears early, appears twice in one run of the app,
+or keeps returning after the second refusal.

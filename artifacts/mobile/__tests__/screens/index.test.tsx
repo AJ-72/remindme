@@ -5,7 +5,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import HomeScreen from "@/app/(tabs)/index";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
-import { STORAGE_KEY, USER_NAME_KEY, type Reminder } from "@/services/ReminderService";
+import {
+  MAX_REGISTER_PROMPTS,
+  REGISTERED_PHONE_KEY,
+  REGISTER_PROMPT_COUNT_KEY,
+  resetRegisterPromptSession,
+  STORAGE_KEY,
+  USER_NAME_KEY,
+  type Reminder,
+} from "@/services/ReminderService";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
 
 jest.mock("expo-haptics");
@@ -48,6 +56,9 @@ function renderScreen() {
 beforeEach(async () => {
   jest.clearAllMocks();
   await (AsyncStorage as any).clear();
+  // The "one offer per session" guard is a module-level flag, so without this
+  // the first test to see an offer silences it for every test after it.
+  resetRegisterPromptSession();
 });
 
 describe("HomeScreen", () => {
@@ -477,5 +488,86 @@ describe("the insights button in the header", () => {
     const { findByTestId } = renderScreen();
     fireEvent.press(await findByTestId("header-insights-button"));
     expect(router.push).toHaveBeenCalledWith("/insights");
+  });
+});
+
+
+// Frame 13 of the first-run study. The number ask left first run entirely,
+// where it was seen by everybody and meant nothing to anybody. It comes back
+// here, to a user who has saved three reminders and therefore has a habit the
+// offer can argue about.
+describe("HomeScreen — the number offer, once the app has earned it", () => {
+  async function seed(count: number) {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(
+        Array.from({ length: count }, (_, i) =>
+          makeReminder({ id: `r${i}`, title: `Task ${i}`, notificationId: `n${i}` })
+        )
+      )
+    );
+  }
+
+  it("offers once the third reminder is there", async () => {
+    await seed(3);
+    const { findByTestId } = renderScreen();
+    expect(await findByTestId("register-number-nudge")).toBeTruthy();
+  });
+
+  it("says what the number buys, without a person to name", async () => {
+    await seed(3);
+    const { findByText } = renderScreen();
+    expect(await findByText("Remind someone else?")).toBeTruthy();
+  });
+
+  it("stays away before the third", async () => {
+    await seed(2);
+    const { findByTestId, queryByTestId } = renderScreen();
+    await findByTestId("header-greeting");
+    await waitFor(() => expect(queryByTestId("register-number-nudge")).toBeNull());
+  });
+
+  it("stays away once a number is already registered", async () => {
+    await seed(3);
+    await AsyncStorage.setItem(REGISTERED_PHONE_KEY, "+919876543210");
+    const { findByTestId, queryByTestId } = renderScreen();
+    await findByTestId("header-greeting");
+    await waitFor(() => expect(queryByTestId("register-number-nudge")).toBeNull());
+  });
+
+  it("stays away once the cap is spent, two refusals being an answer", async () => {
+    await seed(3);
+    await AsyncStorage.setItem(REGISTER_PROMPT_COUNT_KEY, String(MAX_REGISTER_PROMPTS));
+    const { findByTestId, queryByTestId } = renderScreen();
+    await findByTestId("header-greeting");
+    await waitFor(() => expect(queryByTestId("register-number-nudge")).toBeNull());
+  });
+
+  it("counts the offer when it is shown, since a refusal is still an answer", async () => {
+    await seed(3);
+    const { findByTestId } = renderScreen();
+    await findByTestId("register-number-nudge");
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(REGISTER_PROMPT_COUNT_KEY)).toBe("1")
+    );
+  });
+
+  it("goes away for good on No thanks", async () => {
+    await seed(3);
+    const { findByTestId, queryByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("register-number-nudge-later"));
+    await waitFor(() => expect(queryByTestId("register-number-nudge")).toBeNull());
+  });
+
+  // Two asks in one sitting read as nagging however well each is placed.
+  it("spends only one offer per run of the app", async () => {
+    await seed(3);
+    const first = renderScreen();
+    await first.findByTestId("register-number-nudge");
+    first.unmount();
+
+    const second = renderScreen();
+    await second.findByTestId("header-greeting");
+    await waitFor(() => expect(second.queryByTestId("register-number-nudge")).toBeNull());
   });
 });

@@ -7,6 +7,13 @@ import { useColors } from "@/hooks/useColors";
 interface Props {
   /** Who the user has just sent to. Used only to make the offer concrete. */
   recipientName?: string;
+  /**
+   * Which of the two earned moments this is. "sent" follows a reminder aimed
+   * at somebody else, so it can name that person. "milestone" follows the
+   * third saved reminder, where there is no person to name and the offer has
+   * to argue for the capability itself.
+   */
+  reason?: "sent" | "milestone";
   onDismiss: () => void;
 }
 
@@ -23,7 +30,11 @@ interface Props {
  * shouldOfferNumberRegistration() in ReminderService, which counts the offers
  * and stops at MAX_REGISTER_PROMPTS.
  */
-export default function RegisterNumberNudge({ recipientName, onDismiss }: Props) {
+export default function RegisterNumberNudge({
+  recipientName,
+  reason = "sent",
+  onDismiss,
+}: Props) {
   const colors = useColors();
 
   const handleAdd = useCallback(() => {
@@ -51,18 +62,22 @@ export default function RegisterNumberNudge({ recipientName, onDismiss }: Props)
     <View style={styles.wrap} testID="register-number-nudge">
       <Feather name="smartphone" size={20} color={colors.primary} />
       <View style={styles.body}>
-        <Text style={styles.title}>Can they remind you back?</Text>
+        <Text style={styles.title}>
+          {reason === "milestone" ? "Remind someone else?" : "Can they remind you back?"}
+        </Text>
         <Text style={styles.text}>
-          {recipientName
-            ? `Add your number and ${recipientName} can send you a reminder in the app, not just a message.`
-            : "Add your number and the people you remind can send you one back, in the app."}
+          {reason === "milestone"
+            ? "Add your number and a friend can send a reminder straight into this app — and you can send them one. Your own reminders work either way."
+            : recipientName
+              ? `Add your number and ${recipientName} can send you a reminder in the app, not just a message.`
+              : "Add your number and the people you remind can send you one back, in the app."}
         </Text>
         <View style={styles.actions}>
           <Pressable onPress={handleAdd} hitSlop={8} testID="register-number-nudge-add">
             <Text style={styles.add}>Add my number</Text>
           </Pressable>
           <Pressable onPress={onDismiss} hitSlop={8} testID="register-number-nudge-later">
-            <Text style={styles.later}>Not now</Text>
+            <Text style={styles.later}>{reason === "milestone" ? "No thanks" : "Not now"}</Text>
           </Pressable>
         </View>
       </View>

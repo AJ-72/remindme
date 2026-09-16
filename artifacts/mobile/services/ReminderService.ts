@@ -567,8 +567,28 @@ export async function incrementRegisterPromptCount(): Promise<number> {
  * which is an answer.
  */
 export async function shouldOfferNumberRegistration(): Promise<boolean> {
+  if (registerPromptShownThisSession) return false;
   if (await getRegisteredPhone()) return false;
   return (await getRegisterPromptCount()) < MAX_REGISTER_PROMPTS;
+}
+
+/**
+ * Two surfaces can reach the same offer in one run of the app - a reminder
+ * aimed at somebody else, and the third reminder saved - and two asks in one
+ * sitting read as nagging however well each one is placed on its own. This
+ * flag is deliberately in memory rather than in AsyncStorage: "this session"
+ * ends when the process does, and a persisted flag would silence the offer
+ * for good the first time it was set.
+ */
+let registerPromptShownThisSession = false;
+
+export function markRegisterPromptShown(): void {
+  registerPromptShownThisSession = true;
+}
+
+/** Test seam. The app itself never needs to un-show an offer. */
+export function resetRegisterPromptSession(): void {
+  registerPromptShownThisSession = false;
 }
 
 /**

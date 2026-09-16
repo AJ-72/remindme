@@ -33,6 +33,7 @@ import { sendInvitation } from "@/services/InvitationService";
 import type { PickableContact } from "@/services/ContactsService";
 import {
   incrementRegisterPromptCount,
+  markRegisterPromptShown,
   shouldOfferNumberRegistration,
   type ReminderRecipient,
 } from "@/services/ReminderService";
@@ -43,6 +44,8 @@ import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
 import { createDictationTimer, type DictationTimer } from "@/utils/dictationTimer";
 import ListeningSurface from "@/components/ListeningSurface";
 import RegisterNumberNudge from "@/components/RegisterNumberNudge";
+import StarterExamples from "@/components/StarterExamples";
+import { detectPersonInTitle } from "@/utils/personInTitle";
 import { detectVagueOpener } from "@/utils/vagueTask";
 import { getFontFamily } from "@/utils/getFontFamily";
 
@@ -115,7 +118,14 @@ interface Props {
 
 export default function QuickAddInput({ onSaved }: Props) {
   const colors = useColors();
-  const { addReminder, attachInvitationId, defaultAlarmEnabled, dictationLanguage, quietHours } =
+  const {
+    addReminder,
+    attachInvitationId,
+    defaultAlarmEnabled,
+    dictationLanguage,
+    quietHours,
+    reminders,
+  } =
     useReminders();
   const {
     sharedText,
@@ -154,6 +164,9 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [ambiguity, setAmbiguity] = useState<ParsedAmbiguity | null>(null);
   const [ambiguityPrompt, setAmbiguityPrompt] = useState<ParsedAmbiguity | null>(null);
   const [dismissedVagueText, setDismissedVagueText] = useState<string | null>(null);
+  // Keyed by the name, not by a boolean: refusing to send "Call Amma" to Amma
+  // says nothing about whether the next reminder should go to Priya.
+  const [dismissedPerson, setDismissedPerson] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [listening, setListening] = useState(false);
   const [micNotice, setMicNotice] = useState<string | null>(null);
@@ -318,6 +331,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       // Counted when the offer is SHOWN, not when it is refused: an offer the
       // user scrolled past is still an offer they did not take.
       if (recipient && (await shouldOfferNumberRegistration())) {
+        markRegisterPromptShown();
         await incrementRegisterPromptCount();
         setOfferRegistration(recipient.name);
       }
@@ -597,6 +611,17 @@ export default function QuickAddInput({ onSaved }: Props) {
   const vagueCandidate = (parsedTitle || input).trim();
   const showVagueHint =
     !!detectVagueOpener(vagueCandidate) && vagueCandidate !== dismissedVagueText;
+
+  // The parser has already read the title, so naming the person in it costs
+  // nothing more. Suppressed once a recipient is attached: the offer has been
+  // taken, and the chip would then be asking a question already answered.
+  const personInTitle = recipient ? null : detectPersonInTitle(parsedTitle || input);
+  const showPersonChip = personInTitle !== null && personInTitle !== dismissedPerson;
+
+  // Only on a genuinely cold open: no reminder saved yet AND nothing typed.
+  // The block is help, and help that stays on screen over a user who is
+  // already typing is clutter.
+  const showStarters = reminders.length === 0 && input.trim() === "" && !listening;
 
   const canSave = !saving && !!(parsedTitle || input.trim());
 
@@ -921,6 +946,27 @@ export default function QuickAddInput({ onSaved }: Props) {
       color: colors.primary,
       alignSelf: "flex-start",
     },
+    personChipRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      marginTop: 8,
+    },
+    personChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.secondary,
+      borderRadius: 999,
+      paddingHorizontal: 11,
+      paddingVertical: 6,
+    },
+    personChipText: {
+      fontSize: 12.5,
+      color: colors.secondaryForeground,
+    },
     remindSomeoneBtn: {
       flexDirection: "row",
       alignItems: "center",
@@ -1087,6 +1133,8 @@ export default function QuickAddInput({ onSaved }: Props) {
         </View>
       </View>
 
+      {showStarters && <StarterExamples onPick={setInput} />}
+
       {/* A permanent way to aim a reminder at somebody else. It is on screen
           from install day and is never dismissed, which is what replaced the
           first-run "Add your number" modal: that was seen once, this is seen
@@ -1246,6 +1294,40 @@ export default function QuickAddInput({ onSaved }: Props) {
           </>
         )}
       </Animated.View>
+
+      {/* Discovery at the moment of intent. A user who has just typed "Call
+          Amma" is the one user on the home screen who can be shown what
+          sending a reminder to another person is FOR, and the sentence needs
+          no explaining because they wrote the name themselves. */}
+      {showPersonChip && (
+        <View style={styles.personChipRow}>
+          <Pressable
+            style={styles.personChip}
+            onPress={() => setContactPickerVisible(true)}
+            accessibilityRole="button"
+            testID="send-to-person-chip"
+          >
+            <Feather name="send" size={11} color={colors.primary} />
+            <Text
+              style={[
+                styles.personChipText,
+                { fontFamily: getFontFamily(personInTitle, "600SemiBold") },
+              ]}
+            >
+              Send to {personInTitle} instead?
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setDismissedPerson(personInTitle)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss"
+            testID="send-to-person-chip-dismiss"
+          >
+            <Feather name="x" size={13} color={colors.mutedForeground} />
+          </Pressable>
+        </View>
+      )}
 
       <Modal
         visible={ambiguityPrompt !== null}
