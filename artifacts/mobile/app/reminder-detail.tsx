@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -42,6 +42,7 @@ export default function ReminderDetailScreen() {
     snoozePreset,
     setSnoozePreset,
     editReminder,
+    markOpened,
   } = useReminders();
   const { id, openSnooze } = useLocalSearchParams<{
     id: string;
@@ -53,6 +54,15 @@ export default function ReminderDetailScreen() {
   const [snoozeSheetVisible, setSnoozeSheetVisible] = useState(openSnooze === "1");
 
   const reminder = reminders.find((r) => r.id === id);
+
+  // Keyed on `id` alone, not on `reminder` or `reminders`: this must fire
+  // once when the screen is opened for this id, not again on every state
+  // update the screen's own actions cause (marking done, editing the alarm
+  // toggle) while the user is still looking at it.
+  useEffect(() => {
+    if (id) markOpened(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   /**
    * A reminder past the postponement threshold is not mis-timed, it is being
