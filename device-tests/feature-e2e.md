@@ -496,21 +496,18 @@ so a plain reinstall over existing data proves nothing).
 
 **Steps.**
 1. Launch the app for the first time.
-2. Answer the notification permission dialog, either way.
-3. Watch what happens next, without touching anything.
+2. Watch what happens, without touching anything.
 
-**Pass.** The notification dialog appears, and after it is answered the app
-stays in the foreground: the name sheet opens, and behind it sits the home
-screen. The exact-alarm settings screen never opens by itself, and the
-`register-number` modal never appears. `ExactAlarmBanner` is visible at the
-top of the home screen if the permission is missing, and its button still
-reaches the settings screen when tapped.
+**Pass.** The name sheet opens, with the home screen behind it. No system
+dialog of any kind appears: no notification permission dialog, and no
+exact-alarm settings screen. The `register-number` modal never appears.
+`ExactAlarmBanner` is visible at the top of the home screen if the permission
+is missing, and its button still reaches the settings screen when tapped.
 
 **Fails if.** The device leaves the app for a system settings screen at any
-point without a tap, or the "Add your number" modal appears on top of the
-name sheet, or the name sheet never opens at all (the permission dialog's
-dismissing tap eating it is the specific regression to watch for, since the
-name sheet is now the only first-run ask left).
+point without a tap, or a notification permission dialog appears before the
+first save (that ask now belongs to D50), or the "Add your number" modal
+appears on top of the name sheet, or the name sheet never opens at all.
 
 ## D49 — A skipped name is still skipped after a relaunch — `PENDING`
 
@@ -529,3 +526,70 @@ dialog, no number modal. The header keeps its tap-to-add-name affordance.
 
 **Fails if.** Any first-run surface reappears — that would mean the flag did
 not persist, and every cold start would nag a user who already declined.
+
+## D50 — The notification ask arrives on the first save — `PENDING`
+
+**Why hardware only.** Jest cannot show an Android permission dialog, so it
+cannot prove where in the flow the dialog lands, nor that the reminder saved
+in the same action still rings.
+
+**Setup.** A fresh install (`adb shell pm clear com.curios.remindme`).
+
+**Steps.**
+1. Launch the app and answer or skip the name sheet.
+2. Type a reminder for two minutes from now and save it.
+3. Grant the notification permission when the dialog appears.
+4. Lock the device and wait for the reminder time.
+
+**Pass.** The permission dialog appears at step 2, not before. The reminder
+saves and appears in the list. It rings at the set time.
+
+**Fails if.** No dialog appears at the first save, or the dialog appears but
+the reminder is missing from the list afterwards, or the reminder is listed
+but never rings — the last one means the save raced the grant and scheduled
+nothing.
+
+## D51 — A refused permission shows a live repair path — `PENDING`
+
+**Why hardware only.** `canAskAgain` is set by the real Android package
+manager after real refusals; the mock cannot reach the state where the OS
+silently drops a request.
+
+**Setup.** A fresh install.
+
+**Steps.**
+1. Save a reminder and refuse the notification dialog.
+2. Look at the home screen and at the saved reminder's card.
+3. Tap **Turn on** in the banner and refuse again.
+4. Repeat until Android stops showing the dialog (two refusals on most
+   builds), then tap **Turn on** once more.
+5. Grant the permission in the settings screen and return to the app.
+
+**Pass.** The banner reads "Notifications are off. Your reminders will not
+ring." and the future reminder's card carries a **Will not ring** chip. At
+step 4 the app opens its own page in system settings instead of doing
+nothing. On return the banner and the chip both disappear without a
+relaunch.
+
+**Fails if.** Tapping **Turn on** produces no visible change at any point —
+that is the exact dead-button failure this ladder exists to remove — or the
+banner stays after permission is granted.
+
+## D52 — The nudge names a ring the user already lost — `PENDING`
+
+**Why hardware only.** It needs a reminder whose time truly passes on a real
+clock, with the permission truly off.
+
+**Setup.** Continue from D51 with the permission still refused.
+
+**Steps.**
+1. Save a reminder for one minute from now.
+2. Wait two minutes with the app closed.
+3. Open the app.
+
+**Pass.** The banner reads "A reminder passed without ringing. Notifications
+are off." The overdue reminder's card carries no **Will not ring** chip.
+
+**Fails if.** The banner keeps the generic wording, or the overdue card
+shows the chip — granting permission cannot rescue that ring, so the chip
+there would be a label the user can do nothing about.

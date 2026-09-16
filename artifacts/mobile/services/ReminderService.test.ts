@@ -4,7 +4,8 @@ import { getLocales } from "expo-localization";
 import {
   DEFAULT_ALARM_KEY,
   DICTATION_LANGUAGE_KEY,
-  PERMISSION_ONBOARDING_KEY,
+  NOTIF_PROMPT_COUNT_KEY,
+  MAX_NOTIF_PROMPTS,
   SNOOZE_CATEGORY_ID,
   SNOOZE_ACTION_ID,
   MARK_DONE_ACTION_ID,
@@ -30,14 +31,16 @@ import {
   getDictationLanguage,
   getSnoozePreset,
   setSnoozePreset,
-  hasCompletedPermissionOnboarding,
+  getNotifPromptCount,
+  incrementNotifPromptCount,
+  ensureNotificationPermission,
+  getNotificationPermissionState,
   loadReminders,
   saveReminders,
   markDoneById,
   markNotifiedById,
   markOpenedById,
   MAX_SNOOZE_HISTORY_ENTRIES,
-  markPermissionOnboardingComplete,
   requestNotificationPermissions,
   rescheduleAllFutureReminders,
   setAlarmForPendingReminders,
@@ -71,6 +74,7 @@ import {
   cancelScheduledNotificationAsync,
   dismissNotificationAsync,
   requestPermissionsAsync,
+  getPermissionsAsync,
   setNotificationCategoryAsync,
   getAllScheduledNotificationsAsync,
 } from "expo-notifications";
@@ -880,24 +884,78 @@ describe("dictation language setting", () => {
   });
 });
 
-describe("permission onboarding", () => {
-  it("hasCompletedPermissionOnboarding is false when unset", async () => {
-    const result = await hasCompletedPermissionOnboarding();
-    expect(result).toBe(false);
+describe("notification permission ladder", () => {
+  it("getNotifPromptCount is 0 when unset", async () => {
+    expect(await getNotifPromptCount()).toBe(0);
   });
 
-  it("markPermissionOnboardingComplete persists completion under PERMISSION_ONBOARDING_KEY", async () => {
-    await markPermissionOnboardingComplete();
-    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-      PERMISSION_ONBOARDING_KEY,
-      "true"
-    );
+  it("incrementNotifPromptCount persists the next count", async () => {
+    expect(await incrementNotifPromptCount()).toBe(1);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(NOTIF_PROMPT_COUNT_KEY, "1");
+    expect(await incrementNotifPromptCount()).toBe(2);
+    expect(await getNotifPromptCount()).toBe(2);
   });
 
-  it("hasCompletedPermissionOnboarding reflects a completed onboarding", async () => {
-    await markPermissionOnboardingComplete();
-    const result = await hasCompletedPermissionOnboarding();
-    expect(result).toBe(true);
+  it("getNotificationPermissionState reports granted and canAskAgain", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: false,
+    });
+    expect(await getNotificationPermissionState()).toEqual({
+      granted: false,
+      canAskAgain: false,
+    });
+  });
+
+  it("getNotificationPermissionState treats a missing canAskAgain as askable", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({ status: "denied" });
+    expect(await getNotificationPermissionState()).toEqual({
+      granted: false,
+      canAskAgain: true,
+    });
+  });
+
+  it("ensureNotificationPermission asks nothing when already granted", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "granted",
+      canAskAgain: true,
+    });
+    expect(await ensureNotificationPermission()).toBe(true);
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(0);
+  });
+
+  it("ensureNotificationPermission asks and counts the ask when it may", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: true,
+    });
+    (requestPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "granted",
+    });
+    expect(await ensureNotificationPermission()).toBe(true);
+    expect(requestPermissionsAsync).toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(1);
+  });
+
+  it("ensureNotificationPermission never asks after a permanent refusal", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: false,
+    });
+    expect(await ensureNotificationPermission()).toBe(false);
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(0);
+  });
+
+  it("ensureNotificationPermission stops asking once the cap is spent", async () => {
+    for (let i = 0; i < MAX_NOTIF_PROMPTS; i++) await incrementNotifPromptCount();
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: true,
+    });
+    expect(await ensureNotificationPermission()).toBe(false);
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
   });
 
   it("requestNotificationPermissions returns true when the OS grants the request", async () => {

@@ -23,6 +23,7 @@ import { buildGreeting, greetingName, initialsFor } from "@/utils/greeting";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { groupByDate } from "@/utils/groupByDate";
 import NameSheet from "@/components/NameSheet";
+import NotificationNudge from "@/components/NotificationNudge";
 
 // Distinguishes the two confirm sheets that share pendingDelete* state below:
 // deleting one reminder vs. clearing every completed one at once.
@@ -247,6 +248,18 @@ export default function HomeScreen() {
     },
   });
 
+  // Dismissal lasts for this mount only. The banner is not an advert: it
+  // describes a live fault, so it comes back on the next launch while the
+  // fault does, and disappears for good the moment permission is granted.
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
+  const hasMissedRing = useMemo(
+    () =>
+      reminders.some(
+        (r) => !r.completed && new Date(r.datetime).getTime() < Date.now()
+      ),
+    [reminders]
+  );
+
   if (loading) {
     return (
       <View style={[styles.container, styles.loadingWrap]}>
@@ -363,6 +376,13 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {!nudgeDismissed && (
+          <NotificationNudge
+            hasMissedRing={hasMissedRing}
+            onDismiss={() => setNudgeDismissed(true)}
+          />
+        )}
+
         {!hasAny ? (
           <View style={styles.emptyWrap}>
             <View style={styles.emptyIcon}>

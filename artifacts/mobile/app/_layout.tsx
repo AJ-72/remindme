@@ -30,9 +30,6 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
 import {
   checkExactAlarmPermission,
-  hasCompletedPermissionOnboarding,
-  markPermissionOnboardingComplete,
-  requestNotificationPermissions,
 } from "@/services/ReminderService";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
 import { registerNotificationResponseTask } from "@/tasks/notificationResponseTask";
@@ -92,7 +89,6 @@ export default function RootLayout() {
   });
 
   const [showAlarmBanner, setShowAlarmBanner] = useState(false);
-  const [readyForNamePrompt, setReadyForNamePrompt] = useState(false);
   const alarmChecked = useRef(false);
 
   useEffect(() => {
@@ -120,29 +116,13 @@ export default function RootLayout() {
     });
   }, []);
 
-  // First-launch onboarding: request the notification permission once per
-  // install, tracked in AsyncStorage.
+  // There is deliberately no notification permission request here any more.
+  // A cold-launch dialog asks for something the user cannot yet judge: they
+  // have no reminder, so "Allow notifications" buys them nothing visible and
+  // a refusal costs them nothing they can see. The ask now happens on the
+  // first save, where the answer decides whether that reminder rings - see
+  // ensureNotificationPermission() in ReminderService.
   //
-  // This no longer sends the user out to Android's exact-alarm settings
-  // screen. Leaving the app for a system screen they never asked for, before
-  // they have made a single reminder, was the harshest moment in the first
-  // run - and ExactAlarmBanner already surfaces the same permission from
-  // inside the app, where the user can act on it when it means something.
-  useEffect(() => {
-    hasCompletedPermissionOnboarding().then(async (completed) => {
-      if (completed) {
-        setReadyForNamePrompt(true);
-        return;
-      }
-      await requestNotificationPermissions();
-      await markPermissionOnboardingComplete();
-      // Only now may the name sheet open. Asking while a system permission
-      // dialog is up would put it behind that dialog, and the tap dismissing
-      // the dialog would skip the name prompt for good.
-      setReadyForNamePrompt(true);
-    });
-  }, []);
-
   // Re-check when user returns from Settings so banner clears automatically
   // once the permission is granted, without requiring an app restart.
   useEffect(() => {
@@ -176,7 +156,7 @@ export default function RootLayout() {
               <KeyboardProvider>
                 <RemindersProvider>
                   <NotificationResponseHandler />
-                  <NameOnboarding enabled={readyForNamePrompt} />
+                  <NameOnboarding enabled />
                   <SharedTextProvider>
                     <View style={{ flex: 1 }}>
                       {showAlarmBanner && (
