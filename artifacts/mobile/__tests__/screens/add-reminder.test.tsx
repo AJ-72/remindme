@@ -342,3 +342,115 @@ describe("AddReminderScreen — dictation", () => {
     expect(startListening).not.toHaveBeenCalled();
   });
 });
+
+describe("the better-time suggestion", () => {
+  /** Local-time ISO offset from now, for the hour-bucket history. */
+  function at(daysFromNow: number, hour: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() + daysFromNow);
+    d.setHours(hour, 0, 0, 0);
+    return d.toISOString();
+  }
+
+  /** 8 AM always finished, 10 PM never: a clear, well-sampled split. */
+  function morningVsNight(): Reminder[] {
+    return [
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeReminder({
+          id: `h${i}`,
+          completed: true,
+          datetime: at(-2, 8),
+          completedAt: at(-2, 8),
+        })
+      ),
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeReminder({ id: `m${i}`, datetime: at(-2, 22) })
+      ),
+    ];
+  }
+
+  /** The reminder being edited, sitting at the user's weakest hour. */
+  function editedAtNight(): Reminder {
+    return makeReminder({ id: "r1", datetime: at(2, 22) });
+  }
+
+  it("stays silent when there is no history to argue from", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([editedAtNight()]));
+    const { queryByTestId, findByTestId } = renderScreen();
+    await findByTestId("save-button");
+    expect(queryByTestId("time-suggestion")).toBeNull();
+  });
+
+  it("offers the strong hour when the chosen one is measurably worse", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([...morningVsNight(), editedAtNight()])
+    );
+    const { findByTestId } = renderScreen();
+    const text = (await findByTestId("time-suggestion-text")).props.children;
+    expect(text).toContain("8 AM");
+    expect(text).toContain("10 PM");
+  });
+
+  it("stays silent when the reminder is already at the strong hour", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        ...morningVsNight(),
+        makeReminder({ id: "r1", datetime: at(2, 8) }),
+      ])
+    );
+    const { queryByTestId, findByTestId } = renderScreen();
+    await findByTestId("save-button");
+    expect(queryByTestId("time-suggestion")).toBeNull();
+  });
+
+  it("stays silent about an hour it has no evidence against", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        ...morningVsNight(),
+        // 3 PM is unmeasured. No data is not the same as bad data.
+        makeReminder({ id: "r1", datetime: at(2, 15) }),
+      ])
+    );
+    const { queryByTestId, findByTestId } = renderScreen();
+    await findByTestId("save-button");
+    expect(queryByTestId("time-suggestion")).toBeNull();
+  });
+
+  it("moves the time to the strong hour on accept, and then goes away", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([...morningVsNight(), editedAtNight()])
+    );
+    const { findByTestId, queryByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("time-suggestion-accept"));
+    await waitFor(() => expect(queryByTestId("time-suggestion")).toBeNull());
+
+    // The reminder itself must not change until the user saves.
+    fireEvent.press(await findByTestId("save-button"));
+    await waitFor(async () => {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const saved = JSON.parse(raw as string).find((r: Reminder) => r.id === "r1");
+      expect(new Date(saved.datetime).getHours()).toBe(8);
+    });
+  });
+
+  it("leaves the time alone when the user keeps their own", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([...morningVsNight(), editedAtNight()])
+    );
+    const { findByTestId, queryByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("time-suggestion-dismiss"));
+    await waitFor(() => expect(queryByTestId("time-suggestion")).toBeNull());
+
+    fireEvent.press(await findByTestId("save-button"));
+    await waitFor(async () => {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const saved = JSON.parse(raw as string).find((r: Reminder) => r.id === "r1");
+      expect(new Date(saved.datetime).getHours()).toBe(22);
+    });
+  });
+});

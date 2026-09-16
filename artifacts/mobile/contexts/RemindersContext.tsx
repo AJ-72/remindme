@@ -40,6 +40,7 @@ import {
   setVibrationEnabled as serviceSetVibrationEnabled,
   setupSnoozeCategory,
   snoozeReminder as serviceSnooze,
+  markOpenedById as serviceMarkOpened,
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
 import { syncDisplayName } from "@/services/InvitationService";
@@ -68,6 +69,7 @@ interface RemindersContextType {
   deleteReminder: (id: string) => Promise<void>;
   deleteReminders: (ids: string[]) => Promise<void>;
   toggleComplete: (id: string) => Promise<void>;
+  markOpened: (id: string) => Promise<void>;
   snoozeReminder: (id: string, preset?: SnoozePreset) => Promise<void>;
   snoozePreset: SnoozePreset;
   setSnoozePreset: (preset: SnoozePreset) => Promise<void>;
@@ -322,6 +324,26 @@ export function RemindersProvider({
     [reminders]
   );
 
+  /**
+   * Stamps that the user looked at this reminder's detail screen - adherence
+   * instrumentation, not a user-visible action, so no haptic and no toast.
+   * Local-only: mirrors state into `reminders` so a later read (e.g. this
+   * same session's insights screen) sees it without a reload, but never
+   * throws if `id` no longer exists - a race with a delete in another tab of
+   * the UI must not crash the screen that is simply being closed.
+   */
+  const markOpened = useCallback(
+    async (id: string) => {
+      await serviceMarkOpened(id);
+      setReminders((prev) =>
+        prev.map((r) =>
+          r.id === id ? { ...r, openedAt: new Date().toISOString() } : r
+        )
+      );
+    },
+    []
+  );
+
   const snoozeReminder = useCallback(
     async (id: string, preset?: SnoozePreset) => {
       const updated = await serviceSnooze(reminders, id, preset ?? snoozePreset);
@@ -349,6 +371,7 @@ export function RemindersProvider({
         deleteReminder,
         deleteReminders,
         toggleComplete,
+        markOpened,
         snoozeReminder,
         snoozePreset,
         setSnoozePreset,

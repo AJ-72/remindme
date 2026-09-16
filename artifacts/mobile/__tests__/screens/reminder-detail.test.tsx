@@ -79,6 +79,17 @@ describe("ReminderDetailScreen", () => {
     expect(await findByText("Some details")).toBeTruthy();
   });
 
+  it("stamps openedAt for the reminder as soon as the screen resolves it", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByText } = renderScreen();
+    await findByText("Test reminder");
+    await waitFor(async () => {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const saved = JSON.parse(raw as string).find((r: Reminder) => r.id === "r1");
+      expect(saved.openedAt).toBeTruthy();
+    });
+  });
+
   // The per-reminder override of the global "Do not use Android Alarm
   // feature" default. The switch is negated relative to the stored
   // `exactTiming` field (switch ON means the alarm feature is disabled), so a
@@ -274,5 +285,115 @@ describe("ReminderDetailScreen", () => {
     expect(mockBack).not.toHaveBeenCalled();
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored.find((r: Reminder) => r.id === "r1")).toBeDefined();
+  });
+});
+
+describe("the panel for a task that keeps moving", () => {
+  /** Local-time ISO offset from now, for the hour-bucket history. */
+  function at(daysFromNow: number, hour: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() + daysFromNow);
+    d.setHours(hour, 0, 0, 0);
+    return d.toISOString();
+  }
+
+  /** Enough history for 8 AM to be the user's named strongest hour. */
+  function morningHistory(): Reminder[] {
+    return [
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeReminder({
+          id: `h${i}`,
+          completed: true,
+          datetime: at(-2, 8),
+          completedAt: at(-2, 8),
+        })
+      ),
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeReminder({ id: `m${i}`, datetime: at(-2, 22) })
+      ),
+    ];
+  }
+
+  it("stays hidden for a reminder postponed fewer than three times", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ snoozeCount: 2 })])
+    );
+    const { queryByTestId, findByTestId } = renderScreen();
+    await findByTestId("mark-done-button");
+    expect(queryByTestId("stuck-panel")).toBeNull();
+  });
+
+  it("appears at the third postponement and names the count", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ snoozeCount: 3 })])
+    );
+    const { findByTestId } = renderScreen();
+    expect(await findByTestId("stuck-panel")).toBeTruthy();
+    expect((await findByTestId("stuck-panel-count")).props.children.join("")).toContain(
+      "3"
+    );
+  });
+
+  it("offers the smaller-step route, which opens the edit screen", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ snoozeCount: 4 })])
+    );
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("stuck-shrink-button"));
+    expect(mockPush).toHaveBeenCalledWith("/add-reminder?id=r1");
+  });
+
+  it("offers no alternative hour when history cannot name one", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ snoozeCount: 4 })])
+    );
+    const { findByTestId, queryByTestId } = renderScreen();
+    await findByTestId("stuck-panel");
+    expect(queryByTestId("stuck-move-button")).toBeNull();
+  });
+
+  it("offers the user's own strongest hour once history supports it", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([...morningHistory(), makeReminder({ snoozeCount: 4 })])
+    );
+    const { findByTestId } = renderScreen();
+    const button = await findByTestId("stuck-move-button");
+    expect(button).toBeTruthy();
+  });
+
+  it("moves the reminder to that hour and keeps it open", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([...morningHistory(), makeReminder({ snoozeCount: 4 })])
+    );
+    const { findByTestId } = renderScreen();
+    // Resolve the button BEFORE entering act(): findBy* polls with its own
+    // act, and nesting the two stops the provider's initial load from
+    // flushing, so the panel is not on screen yet when the query runs.
+    const button = await findByTestId("stuck-move-button");
+    await act(async () => {
+      fireEvent.press(button);
+    });
+    await waitFor(async () => {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const saved = JSON.parse(raw as string).find((r: Reminder) => r.id === "r1");
+      expect(new Date(saved.datetime).getHours()).toBe(8);
+      // The intervention must not tick the task off on the user's behalf.
+      expect(saved.completed).toBe(false);
+    });
+  });
+
+  it("never shows for a completed reminder", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ snoozeCount: 9, completed: true })])
+    );
+    const { queryByTestId } = renderScreen();
+    await waitFor(() => expect(queryByTestId("stuck-panel")).toBeNull());
   });
 });

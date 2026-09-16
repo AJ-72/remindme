@@ -8,10 +8,19 @@ import {
   getLastNotificationResponseAsync,
 } from "expo-notifications";
 import { MARK_DONE_ACTION_ID } from "@/services/ReminderService";
+import * as ReminderService from "@/services/ReminderService";
 import * as InvitationService from "@/services/InvitationService";
 
 jest.mock("@/services/InvitationService", () => ({
   checkForInvitations: jest.fn().mockResolvedValue([]),
+}));
+
+// Only markNotifiedById is mocked; everything else stays real so the
+// existing tap-handling tests (which exercise the real notificationResponseHandler
+// deps) are unaffected.
+jest.mock("@/services/ReminderService", () => ({
+  ...jest.requireActual("@/services/ReminderService"),
+  markNotifiedById: jest.fn(),
 }));
 
 beforeEach(() => {
@@ -74,11 +83,19 @@ describe("NotificationResponseHandler", () => {
     expect(InvitationService.checkForInvitations).toHaveBeenCalledTimes(1);
   });
 
-  it("ignores a received notification that is not an invitation push", () => {
+  it("stamps notifiedAt for a reminder's own notification, without touching invitation logic", async () => {
     render(<NotificationResponseHandler />);
     const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
-    onReceived({ request: { content: { data: { reminderId: "r1" } } } });
+    await onReceived({ request: { content: { data: { reminderId: "r1" } } } });
+    expect(ReminderService.markNotifiedById).toHaveBeenCalledWith("r1");
     expect(InvitationService.checkForInvitations).not.toHaveBeenCalled();
+  });
+
+  it("does not stamp anything for a received notification carrying no reminderId", async () => {
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    await onReceived({ request: { content: { data: { type: "invitation" } } } });
+    expect(ReminderService.markNotifiedById).not.toHaveBeenCalled();
   });
 
   it("removes the received-listener subscription on unmount", () => {

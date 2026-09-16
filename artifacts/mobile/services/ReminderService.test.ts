@@ -34,6 +34,9 @@ import {
   loadReminders,
   saveReminders,
   markDoneById,
+  markNotifiedById,
+  markOpenedById,
+  MAX_SNOOZE_HISTORY_ENTRIES,
   markPermissionOnboardingComplete,
   requestNotificationPermissions,
   rescheduleAllFutureReminders,
@@ -1106,6 +1109,120 @@ describe("updateSnoozeById", () => {
     await expect(
       updateSnoozeById("unknown", new Date().toISOString(), "x")
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("snoozeReminder snoozeHistory", () => {
+  it("records how far this snooze actually pushed it, not just that it happened", async () => {
+    const r = makeReminder({ id: "r1", notificationId: "old-notif" });
+    const before = Date.now();
+
+    const result = await snoozeReminder([r], "r1", { kind: "minutes", minutes: 15 });
+
+    const updated = result.find((x) => x.id === "r1")!;
+    expect(updated.snoozeHistory).toHaveLength(1);
+    const entry = updated.snoozeHistory![0];
+    expect(entry.minutes).toBe(15);
+    expect(new Date(entry.at).getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("appends rather than replacing across repeated snoozes", async () => {
+    let reminders = [makeReminder({ id: "r1" })];
+    reminders = await snoozeReminder(reminders, "r1", { kind: "minutes", minutes: 5 });
+    reminders = await snoozeReminder(reminders, "r1", { kind: "minutes", minutes: 60 });
+
+    const updated = reminders.find((x) => x.id === "r1")!;
+    expect(updated.snoozeHistory).toHaveLength(2);
+    expect(updated.snoozeHistory!.map((e) => e.minutes)).toEqual([5, 60]);
+  });
+
+  it("caps history at MAX_SNOOZE_HISTORY_ENTRIES, dropping the oldest first", async () => {
+    let reminders = [makeReminder({ id: "r1" })];
+    for (let i = 0; i < MAX_SNOOZE_HISTORY_ENTRIES + 3; i += 1) {
+      reminders = await snoozeReminder(reminders, "r1", { kind: "minutes", minutes: 5 });
+    }
+    const updated = reminders.find((x) => x.id === "r1")!;
+    expect(updated.snoozeHistory).toHaveLength(MAX_SNOOZE_HISTORY_ENTRIES);
+  });
+
+  it("records a large positive delay for the tomorrow preset, not zero", async () => {
+    const r = makeReminder({
+      id: "r1",
+      datetime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    const result = await snoozeReminder([r], "r1", { kind: "tomorrow" });
+    const entry = result.find((x) => x.id === "r1")!.snoozeHistory![0];
+    // Roughly 25 hours: 1 hour until the original time, plus the +24h push.
+    expect(entry.minutes).toBeGreaterThan(24 * 60);
+  });
+});
+
+describe("markNotifiedById", () => {
+  it("stamps notifiedAt on the target reminder", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    const before = Date.now();
+
+    await markNotifiedById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(new Date(stored[0].notifiedAt).getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("no-ops safely for an id with no matching reminder", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder({ id: "r1" })]));
+    await expect(markNotifiedById("unknown")).resolves.toBeUndefined();
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].notifiedAt).toBeUndefined();
+  });
+});
+
+describe("markOpenedById", () => {
+  it("stamps openedAt on the target reminder", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    const before = Date.now();
+
+    await markOpenedById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(new Date(stored[0].openedAt).getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("no-ops safely for an id with no matching reminder", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder({ id: "r1" })]));
+    await expect(markOpenedById("unknown")).resolves.toBeUndefined();
+  });
+});
+
+describe("concurrent writes do not clobber each other", () => {
+  // Regression for a real race: rescheduleAllFutureReminders (mount-time)
+  // and markOpenedById (a screen mounting at the same moment - e.g. a
+  // killed app cold-started straight into reminder-detail via a
+  // notification tap) each used to do their own independent load-then-save,
+  // with no ordering guarantee between them. Whichever saved last won,
+  // silently discarding the other's write.
+  it("survives markOpenedById racing rescheduleAllFutureReminders", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    // Both started together, as they are at a real cold start into the
+    // detail screen: the provider's mount-time reschedule sweep, and the
+    // screen's own open-stamp.
+    await Promise.all([rescheduleAllFutureReminders(), markOpenedById("r1")]);
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].openedAt).toBeTruthy();
+  });
+
+  it("survives markNotifiedById racing rescheduleAllFutureReminders", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await Promise.all([rescheduleAllFutureReminders(), markNotifiedById("r1")]);
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].notifiedAt).toBeTruthy();
   });
 });
 

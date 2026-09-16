@@ -7,6 +7,7 @@ import {
   getSnoozePreset,
   loadReminderById,
   markDoneById,
+  markNotifiedById,
   scheduleSnoozeNotification,
   updateSnoozeById,
 } from "@/services/ReminderService";
@@ -109,6 +110,17 @@ export default function NotificationResponseHandler() {
       receivedSubscription = Notifications.addNotificationReceivedListener(
         async (notification: any) => {
           const data = notification?.request?.content?.data;
+
+          // A reminder's own scheduled notification carries reminderId, not
+          // an invitation's `type`. Stamped here rather than in the tap
+          // listener above: "delivered" and "the user acted on it" are
+          // different facts, and this only needs the first - see
+          // Reminder.notifiedAt for the real limitation (this listener only
+          // runs while the app process is alive).
+          if (data?.reminderId) {
+            await markNotifiedById(data.reminderId);
+          }
+
           if (data?.type !== "invitation") return;
 
           const claimed = await checkForInvitations(
