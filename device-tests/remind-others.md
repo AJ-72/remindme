@@ -364,3 +364,35 @@ step 4's curl response first: `{"status":"error",...,"details":{"error":
 "InvalidCredentials","fault":"developer"}}` means the FCM service-account
 credential is missing from Expo's dashboard (a separate step from
 `google-services.json` - see CLAUDE.md Gotchas), not a device or app bug.
+
+<a id="d44"></a>
+## D44 — Receiver's own quiet hours gate the accepted reminder, not the sender's · `BLOCKED` — needs two devices with different quiet-hours settings
+Jest can drive this (see `invitation-preview.test.tsx`'s "recipient's own
+quiet hours" cases), but it cannot prove the sender's own quiet-hours prompt
+in `QuickAddInput` is truly independent of this one — that needs two real
+devices with two different quiet-hours settings, confirming the sender's
+prompt never influences what the receiver sees.
+
+**Setup.** Two devices, sender and receiver already bound. Set the
+receiver's quiet hours (Settings → Smart Alerts) to a window that will
+cover the test time; set the sender's quiet hours to something that does
+NOT cover it (or turn the sender's off) — the two devices must disagree.
+
+**Steps.**
+1. On the sender's device, create a reminder for the receiver at a time
+   inside the receiver's quiet window (and outside the sender's). Confirm
+   the sender sees no quiet-hours prompt of their own for a time that, on
+   their device, isn't quiet.
+2. On the receiver's device, open the invitation and tap Accept.
+3. Confirm the receiver's own quiet-hours sheet appears ("inside your quiet
+   hours"), referencing the receiver's window, not the sender's.
+4. Tap "Move to <time>" and confirm the locally scheduled reminder lands at
+   the receiver's quiet-hours end, not the sender's.
+
+**Pass.** The quiet-hours prompt the receiver sees is driven entirely by
+the receiver's own device settings; the sender's settings have no bearing
+on it at any step.
+
+**Fails if.** The receiver's accepted reminder schedules silently inside
+their own quiet hours (no prompt at all), or the "Move to" time it offers
+matches the sender's quiet-hours window instead of the receiver's.

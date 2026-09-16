@@ -4,12 +4,14 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import QuietHoursSheet from "@/components/QuietHoursSheet";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 import { respondToInvitation } from "@/services/InvitationService";
 import { getSupabaseClient, getCurrentSession } from "@/services/SessionService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
+import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
 
 /**
  * Shown to the recipient for a newly-claimed invitation (Task 9's output),
@@ -50,11 +52,16 @@ export default function InvitationPreviewScreen() {
     senderId: string;
   }>();
 
-  const { addReminder } = useReminders();
+  const { addReminder, quietHours } = useReminders();
   const [senderName, setSenderName] = useState<string | null>(null);
   const [blocking, setBlocking] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [responding, setResponding] = useState(false);
+  // Set once the invitation is accepted server-side but its reminder time
+  // falls inside the RECIPIENT's own quiet hours - never the sender's, which
+  // is a different bug (QuickAddInput's own check must not decide this
+  // reminder's time on the receiving device).
+  const [quietPrompt, setQuietPrompt] = useState<Date | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,36 +104,77 @@ export default function InvitationPreviewScreen() {
     }
   };
 
+  // Scheduling content MUST come from the local params captured at claim
+  // time, never from respondToInvitation's own response - Task 12's
+  // respond_to_invitation() nulls title/description on a successful accept
+  // as part of its own transaction (T5.2), so the RPC response for a
+  // just-accepted invitation has null content by design. alarm/exactTiming
+  // are deliberately omitted so the recipient's own defaults apply
+  // (RemindersContext), never anything sender-controlled.
+  const scheduleAccepted = async (dateToUse: Date) => {
+    await addReminder({
+      title: title ?? "",
+      description: description ?? "",
+      datetime: dateToUse.toISOString(),
+      // B13: preserved so the home screen can badge this as "from
+      // someone else" - displaySenderName already falls back to
+      // "Someone" above (senderName state is null until the RPC
+      // resolves, or the sender has no display_name set).
+      senderName: displaySenderName,
+      senderId,
+    });
+    goBack();
+  };
+
   const handleAccept = async () => {
     if (!id || responding) return;
     setResponding(true);
     try {
       const result = await respondToInvitation(id, "accepted");
       if (result.ok) {
-        // Scheduling content MUST come from the local params captured at
-        // claim time, never from respondToInvitation's own response -
-        // Task 12's respond_to_invitation() nulls title/description on a
-        // successful accept as part of its own transaction (T5.2), so the
-        // RPC response for a just-accepted invitation has null content by
-        // design. alarm/exactTiming are deliberately omitted so the
-        // recipient's own defaults apply (RemindersContext), never
-        // anything sender-controlled.
-        await addReminder({
-          title: title ?? "",
-          description: description ?? "",
-          datetime,
-          // B13: preserved so the home screen can badge this as "from
-          // someone else" - displaySenderName already falls back to
-          // "Someone" above (senderName state is null until the RPC
-          // resolves, or the sender has no display_name set).
-          senderName: displaySenderName,
-          senderId,
-        });
-        goBack();
+        const target = new Date(datetime);
+        // Ask, never block - and ask about THIS device's own quiet hours,
+        // since the receiving device is the one that will actually alert.
+        // The sender's quiet hours (checked separately in QuickAddInput)
+        // have no bearing on when the recipient wants to be notified.
+        if (isQuietAt(target, quietHours)) {
+          setQuietPrompt(target);
+          return;
+        }
+        await scheduleAccepted(target);
       }
     } finally {
       setResponding(false);
     }
+  };
+
+  const handleQuietKeep = async () => {
+    const target = quietPrompt;
+    setQuietPrompt(null);
+    setResponding(true);
+    try {
+      if (target) await scheduleAccepted(target);
+    } finally {
+      setResponding(false);
+    }
+  };
+
+  const handleQuietMove = async () => {
+    const target = quietPrompt;
+    setQuietPrompt(null);
+    setResponding(true);
+    try {
+      if (target) await scheduleAccepted(quietHoursEndAfter(target, quietHours));
+    } finally {
+      setResponding(false);
+    }
+  };
+
+  const handleQuietCancel = () => {
+    // The invitation is already accepted server-side at this point; closing
+    // the prompt without a choice must not lose the reminder, so treat
+    // cancel the same as "keep" rather than stranding it unscheduled.
+    void handleQuietKeep();
   };
 
   const handleDecline = async () => {
@@ -321,6 +369,15 @@ export default function InvitationPreviewScreen() {
           )}
         </View>
       </View>
+
+      <QuietHoursSheet
+        visible={!!quietPrompt}
+        datetime={quietPrompt ?? new Date()}
+        quietEnd={quietPrompt ? quietHoursEndAfter(quietPrompt, quietHours) : new Date()}
+        onKeep={handleQuietKeep}
+        onMove={handleQuietMove}
+        onCancel={handleQuietCancel}
+      />
     </View>
   );
 }

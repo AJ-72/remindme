@@ -15,6 +15,8 @@ jest.mock("@/services/InvitationService");
 
 const mockBack = jest.fn();
 const mockPush = jest.fn();
+const mockReplace = jest.fn();
+const mockCanGoBack = jest.fn(() => true);
 
 let mockSearchParams: Record<string, string> = {};
 
@@ -22,7 +24,8 @@ jest.mock("expo-router", () => ({
   router: {
     back: (...args: any[]) => mockBack(...args),
     push: (...args: any[]) => mockPush(...args),
-    canGoBack: () => true,
+    replace: (...args: any[]) => mockReplace(...args),
+    canGoBack: (...args: any[]) => mockCanGoBack(...args),
   },
   useLocalSearchParams: () => mockSearchParams,
 }));
@@ -59,6 +62,33 @@ describe("RegisterNumberScreen", () => {
     fireEvent.changeText(getByTestId("register-number-input"), "4155552671");
 
     expect(getByTestId("register-number-submit").props.accessibilityState?.disabled).toBe(false);
+  });
+
+  describe("country code picker", () => {
+    it("defaults to the device region's calling code", () => {
+      const { getByTestId, getByText } = renderScreen();
+      // Mocked region is US (see __mocks__/expo-localization.ts).
+      expect(getByText("+1")).toBeTruthy();
+      expect(getByTestId("register-number-country-btn")).toBeTruthy();
+    });
+
+    it("lets the user pick a different country and normalizes against it explicitly", async () => {
+      (InvitationService.selfRegister as jest.Mock).mockResolvedValue({
+        ok: true,
+        appUserId: "user-1",
+      });
+
+      const { getByTestId, findByTestId, findByText } = renderScreen();
+      fireEvent.press(getByTestId("register-number-country-btn"));
+      fireEvent.press(await findByTestId("register-number-country-IN"));
+
+      fireEvent.changeText(getByTestId("register-number-input"), "9876543210");
+      fireEvent.press(getByTestId("register-number-submit"));
+
+      await findByText(/you're registered/i);
+      // +91, not the device region's +1 - the explicit pick overrides it.
+      expect(InvitationService.selfRegister).toHaveBeenCalledWith("+919876543210");
+    });
   });
 
   it("stays disabled for input that doesn't resolve to a phone number at all", () => {
@@ -306,6 +336,17 @@ describe("RegisterNumberScreen", () => {
       fireEvent.press(getByTestId("register-number-skip"));
 
       await waitFor(() => expect(mockBack).toHaveBeenCalled());
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(await AsyncStorage.getItem("@registration_onboarding_v1")).toBe("true");
+    });
+
+    it("falls back to replacing with the home tab when there is nothing to go back to", async () => {
+      mockCanGoBack.mockReturnValue(false);
+      const { getByTestId } = renderScreen();
+      fireEvent.press(getByTestId("register-number-skip"));
+
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/(tabs)"));
+      expect(mockBack).not.toHaveBeenCalled();
       expect(await AsyncStorage.getItem("@registration_onboarding_v1")).toBe("true");
     });
 
