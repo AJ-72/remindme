@@ -256,7 +256,15 @@ export async function bindViaInviteToken(token: string): Promise<BindResult> {
  */
 export async function respondToInvitation(
   invitationId: string,
-  response: "accepted" | "declined"
+  response: "accepted" | "declined",
+  /**
+   * The time the recipient actually chose, after their own quiet-hours
+   * prompt (invitation-preview.tsx) - only meaningful on "accepted".
+   * respond-invitation compares this to the invitation's original time and
+   * pushes the sender when it differs, so the sender knows their reminder's
+   * time was moved on this device, not just accepted.
+   */
+  acceptedDatetime?: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const session = await getCurrentSession();
   if (!session) return { ok: false, error: "not_authenticated" };
@@ -269,7 +277,7 @@ export async function respondToInvitation(
         Authorization: `Bearer ${session.access_token}`,
         apikey: SUPABASE_ANON_KEY,
       },
-      body: JSON.stringify({ invitationId, response }),
+      body: JSON.stringify({ invitationId, response, acceptedDatetime }),
     });
     const json = await res.json();
     if (!res.ok) return { ok: false, error: json?.error?.code ?? "respond_failed" };

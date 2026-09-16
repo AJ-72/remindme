@@ -29,6 +29,7 @@ import { Platform } from "react-native";
 import * as TaskManager from "expo-task-manager";
 
 import {
+  applyRecipientTimeChangeByInvitationId,
   cancelNotification,
   cancelScheduledForReminder,
   getSnoozePreset,
@@ -111,6 +112,18 @@ export function buildBackgroundResponseDeps(): NotificationResponseHandlerDeps {
     onInvitationPush: async () => {
       await setPushPending(true);
     },
+    // Applying the change itself does NOT need a navigator - only routing
+    // to it afterward does, and navigateToDetail above is already the
+    // inert no-op for that. Still worth doing headlessly: the local
+    // reminder's time/notification should be corrected even if the app
+    // never gets foregrounded from this tap.
+    applyRecipientTimeChange: (data) =>
+      applyRecipientTimeChangeByInvitationId(
+        data.invitationId,
+        data.toDatetime,
+        data.fromDatetime,
+        data.recipientName
+      ),
   };
 }
 

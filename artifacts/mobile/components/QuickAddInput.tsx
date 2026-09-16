@@ -105,7 +105,7 @@ interface Props {
 
 export default function QuickAddInput({ onSaved }: Props) {
   const colors = useColors();
-  const { addReminder, defaultAlarmEnabled, dictationLanguage, quietHours } =
+  const { addReminder, attachInvitationId, defaultAlarmEnabled, dictationLanguage, quietHours } =
     useReminders();
   const {
     sharedText,
@@ -255,7 +255,7 @@ export default function QuickAddInput({ onSaved }: Props) {
     try {
       const trimmedDescription = description.trim();
       const datetimeIso = dateToUse.toISOString();
-      await addReminder({
+      const added = await addReminder({
         title: title.trim(),
         description: trimmedDescription,
         datetime: datetimeIso,
@@ -278,6 +278,11 @@ export default function QuickAddInput({ onSaved }: Props) {
         );
         if (!result.ok) {
           setInvitationError("Couldn't send in-app — you can still message via WhatsApp.");
+        } else {
+          // Lets a later invitation_time_changed push find this exact local
+          // reminder (see Reminder.invitationId's header) - only reachable
+          // here, since this is the one moment both ids are known at once.
+          await attachInvitationId(added.id, result.invitationId);
         }
       }
 

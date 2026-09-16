@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { getLocales } from "expo-localization";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -18,6 +18,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
+import { applySuggestedHour, suggestBetterHour } from "@/utils/adherenceCopy";
+import { computeAdherenceStats } from "@/utils/adherenceStats";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import { useDictation } from "@/hooks/useDictation";
 import type { PickableContact } from "@/services/ContactsService";
@@ -55,8 +57,14 @@ type PickerMode = "date" | "time" | null;
 export default function AddReminderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { reminders, loading, addReminder, editReminder, defaultAlarmEnabled } =
-    useReminders();
+  const {
+    reminders,
+    loading,
+    addReminder,
+    attachInvitationId,
+    editReminder,
+    defaultAlarmEnabled,
+  } = useReminders();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const isEditing = !!id;
 
@@ -88,6 +96,13 @@ export default function AddReminderScreen() {
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [alarm, setAlarm] = useState<boolean>(defaultAlarmEnabled);
   const [saving, setSaving] = useState(false);
+  /**
+   * Dismissal is per-visit, not persisted. A suggestion the user waved off
+   * for THIS reminder must not come back while they are still editing it,
+   * but a standing "never again" would silently kill the feature after one
+   * impatient tap.
+   */
+  const [suggestionDismissed, setSuggestionDismissed] = useState(false);
   const inputRef = useRef<TextInput>(null);
   // Auto-grow height for the description box, driven by onContentSizeChange
   // rather than a fixed minHeight — a fixed height either wastes space for a
@@ -165,6 +180,30 @@ export default function AddReminderScreen() {
     }
   };
 
+  // Walks the whole reminder list, so it is memoised against the list rather
+  // than recomputed on every keystroke in the title field.
+  const adherence = useMemo(() => computeAdherenceStats(reminders), [reminders]);
+
+  /**
+   * A better hour for this reminder, or null -- which is the common case by
+   * design (see suggestBetterHour). Recomputed as the user moves the time, so
+   * picking the strong hour by hand makes the banner go away on its own.
+   */
+  const timeSuggestion = useMemo(
+    () =>
+      suggestionDismissed ? null : suggestBetterHour(adherence, parsedDate.getHours()),
+    [adherence, parsedDate, suggestionDismissed]
+  );
+
+  const acceptTimeSuggestion = () => {
+    if (!timeSuggestion) return;
+    setParsedDate(applySuggestedHour(parsedDate, timeSuggestion.hour));
+    // The date no longer came from the typed text, so the "auto" badge would
+    // now be claiming something untrue.
+    setDateWasParsed(false);
+    setSuggestionDismissed(true);
+  };
+
   const handleSave = async () => {
     const title = isEditing ? editTitle : parsedTitle || input.trim();
     if (!title.trim()) {
@@ -185,10 +224,12 @@ export default function AddReminderScreen() {
         // entirely - `'recipient' in obj` is true even when it holds undefined.
         ...(recipient ? { recipient } : {}),
       };
+      let localId = id;
       if (isEditing && id) {
         await editReminder(id, payload);
       } else {
-        await addReminder(payload);
+        const added = await addReminder(payload);
+        localId = added.id;
       }
 
       // Additive Tier 2 send - never blocks the Tier 1 save above, which has
@@ -203,6 +244,12 @@ export default function AddReminderScreen() {
         );
         if (!result.ok) {
           setInvitationError("Couldn't send in-app — you can still message via WhatsApp.");
+        } else if (localId) {
+          // Lets a later invitation_time_changed push find this exact local
+          // reminder (see Reminder.invitationId's header) - same wiring as
+          // QuickAddInput.tsx#performSave, duplicated here because this
+          // screen has its own independent save path.
+          await attachInvitationId(localId, result.invitationId);
         }
       }
 
@@ -375,6 +422,40 @@ export default function AddReminderScreen() {
       letterSpacing: 0.8,
       marginBottom: 10,
       paddingHorizontal: 4,
+    },
+    suggestCard: {
+      flexDirection: "row",
+      gap: 12,
+      backgroundColor: colors.warningSurface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 14,
+      marginTop: 12,
+    },
+    suggestText: {
+      fontSize: 13,
+      fontFamily: "Inter_400Regular",
+      color: colors.warningSurfaceForeground,
+      lineHeight: 19,
+    },
+    suggestActions: { flexDirection: "row", gap: 10, marginTop: 10 },
+    suggestBtn: {
+      paddingVertical: 7,
+      paddingHorizontal: 14,
+      borderRadius: colors.radiusCapsule,
+      backgroundColor: colors.primary,
+    },
+    suggestBtnText: {
+      fontSize: 13,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primaryForeground,
+    },
+    suggestDismiss: { paddingVertical: 7, paddingHorizontal: 8 },
+    suggestDismissText: {
+      fontSize: 13,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.warningSurfaceForeground,
     },
     previewCard: {
       backgroundColor: colors.card,
@@ -783,6 +864,37 @@ export default function AddReminderScreen() {
               )}
             </View>
           </View>
+
+          {/* Timing nudge. Sits under the time the user just chose, states the
+              evidence for the swap, and never applies anything on its own --
+              an app that quietly moves a reminder is one the user stops
+              trusting with the times they care about. */}
+          {timeSuggestion && (
+            <View style={styles.suggestCard} testID="time-suggestion">
+              <Feather name="clock" size={18} color={colors.warningSurfaceForeground} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.suggestText} testID="time-suggestion-text">
+                  {timeSuggestion.text}
+                </Text>
+                <View style={styles.suggestActions}>
+                  <Pressable
+                    style={styles.suggestBtn}
+                    onPress={acceptTimeSuggestion}
+                    testID="time-suggestion-accept"
+                  >
+                    <Text style={styles.suggestBtnText}>Move it</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.suggestDismiss}
+                    onPress={() => setSuggestionDismissed(true)}
+                    testID="time-suggestion-dismiss"
+                  >
+                    <Text style={styles.suggestDismissText}>Keep mine</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          )}
           {/* Alarm toggle — label/sublabel text kept identical to the Settings
               screen's "Alarm sound" row (same setting, same wording, so it
               doesn't read as a different control here). */}

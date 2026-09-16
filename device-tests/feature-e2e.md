@@ -10,6 +10,10 @@
 | [D6](#d6) | Malayalam dictation end to end | `PENDING` | — | MANUAL |
 | [D11](#d11) | Quiet hours incl. midnight wrap | `PARTIAL` | 2026-09-04 | AUTO (partial) |
 | [D13](#d13) | "Why tasks slip" explainer | `PENDING` | — | SEMI |
+| [D40](#d40) | "How you're doing" adherence screen | `PENDING` | — | SEMI |
+| [D41](#d41) | Better-time suggestion on save | `PENDING` | — | SEMI |
+| [D42](#d42) | Postponed-task intervention panel | `PENDING` | — | SEMI |
+| [D43](#d43) | notifiedAt / openedAt stamping survives a cold-start race | `PENDING` | — | SEMI |
 
 ---
 
@@ -280,3 +284,198 @@ background in both themes and at the largest font size.
 whole page then scrolls sideways), the article cannot be scrolled to its
 end, or body text drops to near-invisible contrast in one theme — the usual
 cause is a hardcoded colour that only suits the other.
+
+---
+
+<a id="d40"></a>
+## D40 — "How you're doing" adherence screen · `PENDING`
+
+*Added 2026-09-15.* Every number on this screen is derived from the reminder
+records themselves, so Jest proves the arithmetic. What Jest cannot see is a
+screen of stacked cards on a real viewport, the weekday bar row at a narrow
+width, and Malayalam reminder titles in the stuck list — Inter carries no
+Malayalam glyphs, so a missed `getFontFamily` call renders as boxes and only
+shows up on a device.
+
+**Setup.** A device with a real history: at least 10 reminders that have come
+due, a mix of finished and missed, spread over more than one hour of the day.
+Include at least one reminder with a Malayalam title, postponed 3+ times.
+
+**Steps.**
+1. From the home screen header, tap the bar-chart icon (`header-insights-button`), left of the name avatar. Also confirm Settings → **How you're doing** still opens the same screen.
+2. Read every card top to bottom. Scroll to the end.
+3. Rotate to landscape, then back.
+4. Switch the theme (light → dark → system) with the screen open.
+5. Tap a task in the "keeps moving" list.
+6. Tap **Why tasks slip** at the bottom.
+7. Clear all reminders, then reopen the screen.
+
+**Pass.**
+- Step 2: no clipped text, no card overlapping the tab bar or the notch, and
+  the weekday bars sit on one row with all seven labels legible.
+- Step 2: the Malayalam title in the stuck list renders as script, not boxes.
+- Step 4: every card is readable in both themes — the warning-surface panels
+  are the ones to watch, they are the least-used colour pair in the app.
+- Step 5 opens that reminder's detail screen.
+- Step 7 shows the "Nothing has come due yet" state, with no percentage and
+  no bar chart, rather than a row of zeroes.
+
+**Fails if.** Any percentage appears that the user cannot reconcile with
+their own list, the bars wrap to a second row, or Malayalam renders as boxes.
+
+---
+
+<a id="d41"></a>
+## D41 — Better-time suggestion on save · `PENDING`
+
+*Added 2026-09-15.* Deliberately a rare banner: it needs the chosen hour to be
+measurably worse than a well-sampled strong hour. The device risk is not the
+logic (Jest covers that) but placement — it appears between the parsed
+preview and the alarm toggle, on a screen that already scrolls, with the
+keyboard possibly up.
+
+**Setup.** A device whose history gives a clear strong hour (e.g. several
+finished 8 AM reminders) and a clear weak one (several missed 10 PM ones).
+
+**Steps.**
+1. Add a reminder for 10 PM. Watch for the banner as the time resolves.
+2. With the keyboard open, scroll the screen. Check the banner is reachable.
+3. Press **Move it**. Read the Time row.
+4. Press **Save**, then reopen the reminder.
+5. Add another 10 PM reminder. Press **Keep mine**, then **Save**.
+6. Add a reminder at an hour with no history at all.
+
+**Pass.**
+- Step 1: the banner names both hours and both percentages.
+- Step 2: the banner is not stuck under the keyboard or off-screen.
+- Step 3: the Time row changes to the suggested hour and the "auto" badge
+  is gone.
+- Step 4: the saved reminder is at the suggested hour, and the notification
+  is re-armed for the NEW time — check the tray at that time, not just the UI.
+- Step 5: the reminder saves at 10 PM, unchanged.
+- Step 6: no banner. Silence on an unmeasured hour is the intended behaviour.
+
+**Fails if.** The time changes without the user pressing **Move it**, or the
+old notification still fires after an accepted move.
+
+---
+
+<a id="d42"></a>
+## D42 — Postponed-task intervention panel · `PENDING`
+
+*Added 2026-09-15.* Appears on the detail screen at the third postponement.
+Replaces a line of Settings copy that used to promise alerts go quiet on their
+own — nothing implemented that, and this check exists partly to confirm the
+promise and the behaviour now agree.
+
+**Setup.** One reminder. A history that names a strong hour (see D41).
+
+**Steps.**
+1. Snooze the reminder twice from the tray. Open its detail screen.
+2. Snooze a third time. Reopen the detail screen.
+3. Press **Make it smaller**.
+4. Back on the detail screen, press **Try 8 AM–9 AM**.
+5. Wait for the new time and watch the tray.
+6. Settings → Smart Alerts. Read the closing paragraph.
+
+**Pass.**
+- Step 1: no panel at two postponements.
+- Step 2: the panel appears and says "You have moved this 3 times".
+- Step 3 opens the edit screen with the title editable.
+- Step 4: the reminder moves to the strong hour and stays open — it must not
+  be marked done.
+- Step 5: the alert actually fires at the new time. The panel changes the
+  schedule, so a stale notification here is a real bug.
+- Step 6: the paragraph describes the panel above and does **not** claim
+  alerts stop by themselves.
+
+**Fails if.** The panel ticks the task off, the moved reminder never fires, or
+Settings still promises behaviour the app does not have.
+
+<a id="d47"></a>
+## D47 — Registration "Skip for now" actually dismisses the screen · `PENDING`
+Jest's `expo-router` mock hardcodes `canGoBack()` to `true`, so the real
+router's behavior on first launch (no back stack under the pushed
+`register-number` screen) can only be proven on a device.
+
+**Setup.** Fresh install, or `@registration_onboarding_v1` cleared from
+AsyncStorage so first-run onboarding fires again.
+
+**Steps.**
+1. Launch the app, let permission onboarding settle, and wait for the
+   "Add your number" screen to appear.
+2. Tap **Skip for now**.
+3. Repeat from a fresh install, this time tapping the **X** close button
+   instead.
+
+**Pass.** Both dismiss the screen back to the home tab immediately, and
+relaunching the app does not show the registration screen again.
+
+**Fails if.** Either button leaves the same screen on-screen (the bug this
+fixed — a bare `router.back()` no-ops when there's nothing under this
+screen in the stack).
+
+<a id="d45"></a>
+## D45 — Country-code picker on registration · `PENDING`
+Malayalam-supporting app, real NRI user base — the device-region guess in
+`normalizeForIdentity` is wrong whenever a phone's system region doesn't
+match its SIM/carrier country (see `system_learnings.md`'s 2026-09-11
+entry). The picker's whole purpose is letting a real device with a
+mismatched region still register correctly, so it needs a device with an
+actually mismatched region to prove, not just Jest's mocked one.
+
+**Setup.** A device whose system locale region differs from its SIM/carrier
+country (or Settings → change system region temporarily).
+
+**Steps.**
+1. Open registration. Confirm the calling code shown matches the device's
+   guessed region.
+2. Tap the calling-code button, pick a different country from the list.
+3. Enter a national number for that country and register.
+
+**Pass.** The calling code button updates immediately on picking a country.
+The number sent to `selfRegister` uses the explicitly picked country's
+calling code, not the device's guessed one — confirm via the account this
+creates actually being reachable by lookup from a sender who expects that
+country's number.
+
+**Fails if.** The picker's selection doesn't change what gets submitted, or
+the device's guessed region silently wins anyway.
+
+---
+
+<a id="d43"></a>
+## D43 — notifiedAt / openedAt stamping survives a cold-start race · `PENDING`
+
+*Added 2026-09-16.* Jest proved the fix with two mocked functions racing each
+other (`services/ReminderService.test.ts`, "concurrent writes do not clobber
+each other"). What it cannot prove is the real trigger: a genuinely killed
+app, a real tap, real `AsyncStorage` I/O timing on a real device. The mocked
+version passing does not mean the real one does — this is exactly the class
+of bug (two async storage writers overlapping) that a real device's slower,
+less deterministic I/O could still expose in a shape the mock can't.
+
+**Setup.** One reminder due a few minutes out, with its notification alarm on.
+Force-stop the app (`adb shell am force-stop com.curios.remindme`), not just
+background it — the bug is specific to a fully killed process.
+
+**Steps.**
+1. Wait for the notification to arrive in the tray with the app killed.
+2. Tap it. This cold-starts the app straight into `reminder-detail` while
+   `RemindersProvider`'s own mount-time reschedule sweep is also running.
+3. Force-stop and repeat steps 1-2 four or five times in a row.
+4. After each run, use `adb shell run-as com.curios.remindme` (or the
+   Settings → backup export, which reads the same storage) to inspect the
+   reminder's raw stored JSON.
+
+**Pass.** Every run leaves `openedAt` set (the screen was opened) — and
+`notifiedAt`, only if the app process was still alive when the tap-triggered
+launch reached the received listener (see `Reminder.notifiedAt`'s own
+real-limitation note — `notifiedAt` can legitimately be absent on a true
+cold-start tap; `openedAt` is the one that must never be lost).
+
+**Fails if.** `openedAt` is missing on some runs but not others — that
+pattern (present sometimes, absent other times, same steps every time) is
+exactly the signature of the lost-update race the write lock was meant to
+close, and would mean the fix doesn't hold on real device I/O timing even
+though it holds against the mock.

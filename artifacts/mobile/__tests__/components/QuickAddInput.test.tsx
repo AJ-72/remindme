@@ -10,6 +10,8 @@ import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { Linking, Platform, StyleSheet } from "react-native";
 import * as SpeechService from "@/services/SpeechService";
 import * as ContactsService from "@/services/ContactsService";
+import * as InvitationService from "@/services/InvitationService";
+import * as RecipientLookupService from "@/services/RecipientLookupService";
 
 jest.mock("expo-haptics");
 
@@ -657,6 +659,60 @@ describe("QuickAddInput — remind someone", () => {
         (await findByTestId("quick-add-recipient")).props.accessibilityLabel
       ).toBe("Remind someone")
     );
+  });
+
+  it("attaches the returned invitation id to the local reminder on a successful send", async () => {
+    jest.spyOn(RecipientLookupService, "checkReachability").mockResolvedValue({
+      appUserId: "user-1",
+      lookedUpAt: new Date().toISOString(),
+    });
+    jest
+      .spyOn(InvitationService, "sendInvitation")
+      .mockResolvedValue({ ok: true, invitationId: "inv-1" });
+
+    const { findByTestId, findByText } = renderComponent();
+    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByText("Priya"));
+    await findByTestId("recipient-in-app-badge");
+
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Call Priya tomorrow at 3pm"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored[0]?.invitationId).toBe("inv-1");
+    });
+  });
+
+  it("does not attach an invitation id when the send fails", async () => {
+    jest.spyOn(RecipientLookupService, "checkReachability").mockResolvedValue({
+      appUserId: "user-1",
+      lookedUpAt: new Date().toISOString(),
+    });
+    jest
+      .spyOn(InvitationService, "sendInvitation")
+      .mockResolvedValue({ ok: false, error: "network_error" });
+
+    const { findByTestId, findByText } = renderComponent();
+    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByText("Priya"));
+    await findByTestId("recipient-in-app-badge");
+
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "Call Priya tomorrow at 3pm"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+    expect(stored[0].invitationId).toBeUndefined();
   });
 });
 

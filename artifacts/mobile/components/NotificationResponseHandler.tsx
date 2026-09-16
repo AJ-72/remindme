@@ -2,11 +2,13 @@ import { router } from "expo-router";
 import React, { useEffect, useRef } from "react";
 
 import {
+  applyRecipientTimeChangeByInvitationId,
   cancelNotification,
   cancelScheduledForReminder,
   getSnoozePreset,
   loadReminderById,
   markDoneById,
+  markNotifiedById,
   scheduleSnoozeNotification,
   updateSnoozeById,
 } from "@/services/ReminderService";
@@ -76,6 +78,18 @@ export default function NotificationResponseHandler() {
         }
         return outcome;
       },
+      applyRecipientTimeChange: (data: {
+        invitationId: string;
+        toDatetime: string;
+        fromDatetime: string;
+        recipientName: string;
+      }) =>
+        applyRecipientTimeChangeByInvitationId(
+          data.invitationId,
+          data.toDatetime,
+          data.fromDatetime,
+          data.recipientName
+        ),
     };
 
     // NOT a queue drain: this keeps resolving with the same response on every
@@ -121,6 +135,31 @@ export default function NotificationResponseHandler() {
       receivedSubscription = Notifications.addNotificationReceivedListener(
         async (notification: any) => {
           const data = notification?.request?.content?.data;
+
+          // Applied immediately, not deferred to a tap: this is the
+          // sender's OWN reminder being corrected to match what the
+          // receiver actually chose - the local alert must not fire at the
+          // stale time just because the sender never tapped the tray.
+          if (data?.type === "invitation_time_changed" && typeof data.invitationId === "string") {
+            await applyRecipientTimeChangeByInvitationId(
+              data.invitationId,
+              data.toDatetime,
+              data.fromDatetime,
+              data.recipientName
+            );
+            return;
+          }
+
+          // A reminder's own scheduled notification carries reminderId, not
+          // an invitation's `type`. Stamped here rather than in the tap
+          // listener above: "delivered" and "the user acted on it" are
+          // different facts, and this only needs the first - see
+          // Reminder.notifiedAt for the real limitation (this listener only
+          // runs while the app process is alive).
+          if (data?.reminderId) {
+            await markNotifiedById(data.reminderId);
+          }
+
           if (data?.type !== "invitation") return;
 
           // Set BEFORE claiming, not after. If this claim fails (offline, an

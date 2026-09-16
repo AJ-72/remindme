@@ -62,6 +62,20 @@ export interface NotificationResponseHandlerDeps {
    * deliberately do not claim.
    */
   onInvitationPush: () => Promise<unknown>;
+  /**
+   * Reacts to a tapped invitation_time_changed push (see
+   * respond-invitation/index.ts). Unlike onInvitationPush above, this
+   * DOES need to navigate on tap - the local reminder to update already
+   * exists on this device (it's the sender's own), there is nothing to
+   * "go check for" first. Returns the updated reminder's local id (or
+   * undefined if it's gone) so the handler can route straight to it.
+   */
+  applyRecipientTimeChange: (data: {
+    invitationId: string;
+    toDatetime: string;
+    fromDatetime: string;
+    recipientName: string;
+  }) => Promise<string | undefined>;
 }
 
 function isNotificationData(value: unknown): value is NotificationData {
@@ -77,6 +91,23 @@ function isInvitationData(value: unknown): value is { type: "invitation" } {
     !!value &&
     typeof value === "object" &&
     (value as { type?: unknown }).type === "invitation"
+  );
+}
+
+interface TimeChangedData {
+  type: "invitation_time_changed";
+  invitationId: string;
+  toDatetime: string;
+  fromDatetime: string;
+  recipientName: string;
+}
+
+function isTimeChangedData(value: unknown): value is TimeChangedData {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { type?: unknown }).type === "invitation_time_changed" &&
+    typeof (value as { invitationId?: unknown }).invitationId === "string"
   );
 }
 
@@ -115,6 +146,19 @@ export async function handleNotificationResponse(
     // whether claiming here would consume the row with nothing able to show
     // it. This module stays free of storage side effects either way.
     await deps.onInvitationPush();
+    return;
+  }
+
+  // Same "no reminderId, must branch before isNotificationData" reasoning
+  // as the invitation branch above - this is the sender's own device
+  // reacting to the receiver's choice, not a locally-scheduled reminder
+  // firing.
+  if (isTimeChangedData(data)) {
+    await deps.markResponseHandled(responseKey);
+    const localId = await deps.applyRecipientTimeChange(data);
+    if (localId) {
+      deps.navigateToDetail(localId, { openSnoozeSheet: false });
+    }
     return;
   }
 
