@@ -209,26 +209,43 @@ describe("ContactPickerModal — typing a number instead", () => {
     expect(await findByTestId("contacts-use-manual")).toBeTruthy();
   });
 
-  it("returns the typed name and number", async () => {
+  it("returns the typed name and the number in E.164, country code included", async () => {
     notYetAsked();
     const { findByTestId, onSelect } = renderPicker();
     fireEvent.press(await findByTestId("contacts-use-manual"));
 
     fireEvent.changeText(await findByTestId("contacts-manual-name"), "Ammu");
-    fireEvent.changeText(await findByTestId("contacts-manual-phone"), "+91 98765 43210");
+    fireEvent.changeText(await findByTestId("contacts-manual-code"), "+91");
+    fireEvent.changeText(await findByTestId("contacts-manual-phone"), "98765 43210");
     fireEvent.press(await findByTestId("contacts-manual-submit"));
 
-    expect(onSelect).toHaveBeenCalledWith({ name: "Ammu", phone: "+91 98765 43210" });
+    expect(onSelect).toHaveBeenCalledWith({ name: "Ammu", phone: "+919876543210" });
   });
 
   it("uses the number as the label when no name is typed", async () => {
     notYetAsked();
     const { findByTestId, onSelect } = renderPicker();
     fireEvent.press(await findByTestId("contacts-use-manual"));
+    fireEvent.changeText(await findByTestId("contacts-manual-code"), "+91");
     fireEvent.changeText(await findByTestId("contacts-manual-phone"), "9123456789");
     fireEvent.press(await findByTestId("contacts-manual-submit"));
 
-    expect(onSelect).toHaveBeenCalledWith({ name: "9123456789", phone: "9123456789" });
+    expect(onSelect).toHaveBeenCalledWith({ name: "+919123456789", phone: "+919123456789" });
+  });
+
+  // The device region is the phone's LOCALE, not its SIM. An en-GB handset on
+  // an Indian SIM used to normalize these same digits to a +44 number, and so
+  // to a phone_hash the recipient does not have. An explicit code cannot.
+  it("refuses to submit with no country code", async () => {
+    notYetAsked();
+    const { findByTestId, onSelect } = renderPicker();
+    fireEvent.press(await findByTestId("contacts-use-manual"));
+    fireEvent.changeText(await findByTestId("contacts-manual-code"), "");
+    fireEvent.changeText(await findByTestId("contacts-manual-phone"), "9123456789");
+
+    expect((await findByTestId("contacts-manual-submit")).props.accessibilityState?.disabled)
+      .toBe(true);
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("refuses a number too short to be one", async () => {

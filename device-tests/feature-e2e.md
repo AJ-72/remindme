@@ -732,3 +732,137 @@ again on the third.
 
 **Fails if.** The offer appears before any send, or keeps appearing after
 two refusals, or appears at all for a user whose number is registered.
+
+## D60 — The name sheet stays above the keyboard — `PENDING`
+
+**Why hardware only.** jsdom has no soft keyboard, so a field it covers
+renders identically to one it does not.
+
+**Setup.** A fresh install, first launch.
+
+**Steps.**
+1. Wait for the name sheet.
+2. Tap the name field.
+3. Type a name, and watch the field while typing.
+
+**Pass.** The field, the Continue button and the Skip link all stay visible
+above the keyboard. Every character typed is readable.
+
+**Fails if.** The keyboard covers the field, the button, or the link.
+
+## D61 — The notification banner's button is never dead — `PENDING`
+
+**Why hardware only.** Only a real OS keeps `canAskAgain`, and only system
+settings can revoke a permission that was already granted.
+
+**Setup.** A reminder saved with notifications granted.
+
+**Steps.**
+1. Turn notifications off for this app in Android settings.
+2. Return to the app and read the banner's button.
+3. Tap it.
+4. Turn the permission back on, and come back to the app.
+
+**Pass.** The button reads **Open settings**, not Turn on. The tap opens this
+app's settings page. The banner and every card clear on return, with no
+relaunch.
+
+**Fails if.** The button reads Turn on, or the tap does nothing at all. This
+is the reported defect.
+
+## D62 — Dictation keeps every sentence across a pause — `PENDING`
+
+**Why hardware only.** Only a real recognizer closes a segment at a pause and
+starts the next one from empty. That is the behaviour that used to erase the
+field.
+
+**Setup.** Any screen with a mic.
+
+**Steps.**
+1. Tap the mic and say "buy milk".
+2. Pause for about one second, and say "and bread".
+3. Stop speaking and let the session close itself.
+
+**Pass.** The field reads "buy milk and bread". Nothing is erased at the
+pause. The session closes about 2.5 seconds after the last word, and keeps
+the text.
+
+**Fails if.** The field clears at the pause, or holds only the last sentence,
+or the text changes after the session closes.
+
+## D63 — The add/edit sheet dictates like the home bar — `PENDING`
+
+**Why hardware only.** Same recognizer behaviour as D62, on the second
+screen that has a mic.
+
+**Setup.** Open **Add reminder**, then open an existing reminder to edit.
+
+**Steps.**
+1. Tap the mic on the new-reminder field and speak two sentences with a pause.
+2. Let it close itself.
+3. Repeat, and press **Cancel** instead.
+4. Repeat on the edit screen's title field.
+
+**Pass.** The listening panel appears on both screens, with Done and Cancel.
+The pause keeps both sentences. Cancel puts back the text as it was.
+
+**Fails if.** Either screen shows no panel, loses a sentence, or leaves the
+mic open with no way to stop it.
+
+## D64 — Remind someone else is always reachable — `PENDING`
+
+**Why hardware only.** A control that is present but off-screen, or behind
+the keyboard, passes in Jest and fails on a phone.
+
+**Setup.** A fresh install.
+
+**Steps.**
+1. Look below the input bar on the home screen.
+2. Tap **Remind someone else**.
+3. Choose a contact, and look at the button again.
+
+**Pass.** The labelled button is visible from install day, opens the picker,
+and stays on screen after a recipient is chosen.
+
+**Fails if.** The button is missing, covered by the keyboard, or disappears
+once a recipient is attached.
+
+## D65 — A typed number carries its country code — `PENDING`
+
+**Why hardware only.** The defect it prevents comes from the device locale
+disagreeing with the SIM, which jsdom cannot have.
+
+**Setup.** A device whose system region differs from its SIM country, if you
+have one.
+
+**Steps.**
+1. Tap **Remind someone else**, then **Type a number instead**.
+2. Read the country-code field before typing.
+3. Clear the country code and try to submit.
+4. Put a code back, type a real number, and send.
+
+**Pass.** The code field is filled from the device region. Submit is refused
+with no code. The message opens with the full international number.
+
+**Fails if.** The code is missing, ignored, or doubled in the sent number.
+
+## D66 — The number offer reaches the people who need it — `PENDING`
+
+**Why hardware only.** The offer is what creates the Supabase session, so
+only a device can show whether the bolt badge comes back afterwards.
+
+**Setup.** A fresh install with no registered number, and a second device
+that has the app with a registered number.
+
+**Steps.**
+1. Choose the second device's contact as a recipient on the add/edit screen.
+2. Read what appears under the recipient row.
+3. Take the offer and register your number.
+4. Choose the same contact again.
+
+**Pass.** The offer appears at the pick, names the person, and appears at
+most twice per install. After registering, the recipient chip carries the
+bolt badge.
+
+**Fails if.** No offer appears, or the badge never returns after registering.
+This is the reported defect.

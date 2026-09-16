@@ -21,9 +21,15 @@ import { useColors } from "@/hooks/useColors";
 import { applySuggestedHour, suggestBetterHour } from "@/utils/adherenceCopy";
 import { computeAdherenceStats } from "@/utils/adherenceStats";
 import ContactPickerModal from "@/components/ContactPickerModal";
+import ListeningSurface from "@/components/ListeningSurface";
+import RegisterNumberNudge from "@/components/RegisterNumberNudge";
 import { useDictation } from "@/hooks/useDictation";
 import type { PickableContact } from "@/services/ContactsService";
-import type { ReminderRecipient } from "@/services/ReminderService";
+import {
+  incrementRegisterPromptCount,
+  shouldOfferNumberRegistration,
+  type ReminderRecipient,
+} from "@/services/ReminderService";
 import { checkReachability, isReachabilityStale } from "@/services/RecipientLookupService";
 import { sendInvitation } from "@/services/InvitationService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
@@ -72,6 +78,11 @@ export default function AddReminderScreen() {
 
   // Who this reminder is about, if anyone. Undefined means an ordinary
   // personal reminder - the key must never be written as undefined.
+  // The offer to register the user's OWN number. Fired on the pick rather
+  // than on the save, because this screen navigates away the moment it saves -
+  // a nudge rendered there would unmount before it could be read. Holds the
+  // recipient's name, or null when no offer is on screen.
+  const [offerRegistration, setOfferRegistration] = useState<string | null>(null);
   const [recipient, setRecipient] = useState<ReminderRecipient | undefined>(
     undefined
   );
@@ -647,6 +658,14 @@ export default function AddReminderScreen() {
                   />
                 </Pressable>
               </View>
+              {editDictation.listening && (
+                <ListeningSurface
+                  heardSpeech={editDictation.heardSpeech}
+                  onDone={editDictation.stop}
+                  onCancel={editDictation.cancel}
+                  testIDPrefix="edit-listening"
+                />
+              )}
               {!!editDictation.notice && (
                 <Text style={styles.micNoticeText}>{editDictation.notice}</Text>
               )}
@@ -692,6 +711,14 @@ export default function AddReminderScreen() {
                   }
                 />
               </Pressable>
+              {newDictation.listening && (
+                <ListeningSurface
+                  heardSpeech={newDictation.heardSpeech}
+                  onDone={newDictation.stop}
+                  onCancel={newDictation.cancel}
+                  testIDPrefix="new-listening"
+                />
+              )}
               {!!newDictation.notice && (
                 <Text style={styles.micNoticeText}>{newDictation.notice}</Text>
               )}
@@ -985,6 +1012,12 @@ export default function AddReminderScreen() {
                 {invitationError}
               </Text>
             ) : null}
+            {offerRegistration !== null && (
+              <RegisterNumberNudge
+                recipientName={offerRegistration}
+                onDismiss={() => setOfferRegistration(null)}
+              />
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -1003,6 +1036,16 @@ export default function AddReminderScreen() {
           setRecipient(picked);
           setPickerVisible(false);
           setInvitationError(null);
+          // Registering the user's own number is what creates the Supabase
+          // session, and without a session checkReachability() below returns
+          // null for every contact - so no recipient can ever earn the in-app
+          // badge until this offer is taken. Counted when SHOWN, not when
+          // refused.
+          shouldOfferNumberRegistration().then(async (offer) => {
+            if (!offer) return;
+            await incrementRegisterPromptCount();
+            setOfferRegistration(picked.name);
+          });
           // Additive Tier 2 check - never blocks or delays showing the picked
           // contact; the existing Tier 1 WhatsApp-link flow keeps working
           // unmodified whether this resolves, fails, or is still in flight.

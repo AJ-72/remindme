@@ -31,12 +31,18 @@ import {
 import { checkReachability, isReachabilityStale } from "@/services/RecipientLookupService";
 import { sendInvitation } from "@/services/InvitationService";
 import type { PickableContact } from "@/services/ContactsService";
-import type { ReminderRecipient } from "@/services/ReminderService";
+import {
+  incrementRegisterPromptCount,
+  shouldOfferNumberRegistration,
+  type ReminderRecipient,
+} from "@/services/ReminderService";
 import { formatTime12h } from "@/utils/formatDatetime";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import type { ParsedAmbiguity } from "@/utils/malayalamDateParser";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
 import { createDictationTimer, type DictationTimer } from "@/utils/dictationTimer";
+import ListeningSurface from "@/components/ListeningSurface";
+import RegisterNumberNudge from "@/components/RegisterNumberNudge";
 import { detectVagueOpener } from "@/utils/vagueTask";
 import { getFontFamily } from "@/utils/getFontFamily";
 
@@ -129,6 +135,14 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [notesVisible, setNotesVisible] = useState(false);
   const [recipient, setRecipient] = useState<ReminderRecipient | undefined>(undefined);
+  // The offer to register the user's OWN number, shown after they have sent a
+  // reminder to somebody else - the first moment being reachable back means
+  // anything. Until a number is registered there is no Supabase session, so
+  // checkReachability() returns null for every contact and no recipient can
+  // ever earn the in-app badge: this offer is the only route to that state.
+  // Holds the recipient's name while the offer is up, so the copy can say who
+  // it was that the user just reminded. Null means no offer on screen.
+  const [offerRegistration, setOfferRegistration] = useState<string | null>(null);
   const [invitationError, setInvitationError] = useState<string | null>(null);
   const [contactPickerVisible, setContactPickerVisible] = useState(false);
   const [quietPrompt, setQuietPrompt] = useState<Date | null>(null);
@@ -299,6 +313,13 @@ export default function QuickAddInput({ onSaved }: Props) {
           // here, since this is the one moment both ids are known at once.
           await attachInvitationId(added.id, result.invitationId);
         }
+      }
+
+      // Counted when the offer is SHOWN, not when it is refused: an offer the
+      // user scrolled past is still an offer they did not take.
+      if (recipient && (await shouldOfferNumberRegistration())) {
+        await incrementRegisterPromptCount();
+        setOfferRegistration(recipient.name);
       }
 
       setInput("");
@@ -741,40 +762,6 @@ export default function QuickAddInput({ onSaved }: Props) {
       color: colors.mutedForeground,
       fontFamily: "Inter_400Regular",
     },
-    listeningSurface: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      marginTop: 8,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      borderRadius: 12,
-      backgroundColor: colors.primary + "14",
-    },
-    listeningDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      backgroundColor: colors.destructive,
-    },
-    listeningLabel: {
-      flex: 1,
-      fontSize: 13,
-      color: colors.foreground,
-      fontFamily: "Inter_500Medium",
-    },
-    listeningAction: {
-      fontSize: 13,
-      fontFamily: "Inter_600SemiBold",
-      color: colors.primary,
-      paddingHorizontal: 4,
-    },
-    listeningActionMuted: {
-      fontSize: 13,
-      fontFamily: "Inter_500Medium",
-      color: colors.mutedForeground,
-      paddingHorizontal: 4,
-    },
     micNoticeText: {
       fontSize: 12,
       color: colors.mutedForeground,
@@ -934,6 +921,22 @@ export default function QuickAddInput({ onSaved }: Props) {
       color: colors.primary,
       alignSelf: "flex-start",
     },
+    remindSomeoneBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      marginTop: 10,
+      paddingVertical: 11,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    remindSomeoneText: {
+      fontSize: 13,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.mutedForeground,
+    },
     webPickerWrap: {
       marginBottom: 16,
     },
@@ -1001,26 +1004,11 @@ export default function QuickAddInput({ onSaved }: Props) {
             anything has been heard yet, and the two ways out of it. Without
             this, "stop" and "throw it away" were the same tap on the mic. */}
         {liveListening && (
-          <View style={styles.listeningSurface} testID="listening-surface">
-            <Animated.View
-              style={[styles.listeningDot, { transform: [{ scale: micPulse }] }]}
-            />
-            <Text style={styles.listeningLabel}>
-              {heardSpeech
-                ? "Listening — stop speaking when you're done"
-                : "Listening — say your reminder"}
-            </Text>
-            <Pressable onPress={cancelSpeakMode} hitSlop={10} testID="listening-cancel">
-              <Text style={styles.listeningActionMuted}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => stopSpeakMode("user")}
-              hitSlop={10}
-              testID="listening-done"
-            >
-              <Text style={styles.listeningAction}>Done</Text>
-            </Pressable>
-          </View>
+          <ListeningSurface
+            heardSpeech={heardSpeech}
+            onDone={() => stopSpeakMode("user")}
+            onCancel={cancelSpeakMode}
+          />
         )}
 
         <View style={styles.actionRow}>
@@ -1099,6 +1087,28 @@ export default function QuickAddInput({ onSaved }: Props) {
         </View>
       </View>
 
+      {/* A permanent way to aim a reminder at somebody else. It is on screen
+          from install day and is never dismissed, which is what replaced the
+          first-run "Add your number" modal: that was seen once, this is seen
+          every session. The action-row icon stays as the shortcut for a user
+          who already knows where it is. */}
+      <Pressable
+        style={styles.remindSomeoneBtn}
+        onPress={() => setContactPickerVisible(true)}
+        accessibilityRole="button"
+        testID="quick-add-remind-someone"
+      >
+        <Feather name="user-plus" size={14} color={colors.mutedForeground} />
+        <Text style={styles.remindSomeoneText}>Remind someone else</Text>
+      </Pressable>
+
+      {offerRegistration !== null && (
+        <RegisterNumberNudge
+          recipientName={offerRegistration}
+          onDismiss={() => setOfferRegistration(null)}
+        />
+      )}
+
       {/* Shown only when the reminder being composed will actually be silent
           AND that came from the Settings default rather than a deliberate tap.
           Keyed off `alarm` (state) rather than alarmTouchedRef, since a ref
@@ -1165,17 +1175,16 @@ export default function QuickAddInput({ onSaved }: Props) {
           // contact; the existing Tier 1 WhatsApp-link flow keeps working
           // unmodified whether this resolves, fails, or is still in flight.
           const deviceRegion = getLocales()[0]?.regionCode ?? null;
-          console.log("[TEMP-DIAG2] calling checkReachability, phone=", picked.phone, "region=", deviceRegion);
           checkReachability(picked, deviceRegion).then((result) => {
-            console.log("[TEMP-DIAG2] checkReachability resolved:", JSON.stringify(result));
             if (!result) return;
             setRecipient((current) =>
               current && current.phone === picked.phone
                 ? { ...current, appUserId: result.appUserId, lookedUpAt: result.lookedUpAt }
                 : current
             );
-          }).catch((err) => {
-            console.log("[TEMP-DIAG2] checkReachability threw:", String(err));
+          }).catch(() => {
+            // Reachability is additive. A failed lookup leaves the recipient
+            // without the in-app badge and the WhatsApp route still works.
           });
         }}
       />

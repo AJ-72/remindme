@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { useColors } from "@/hooks/useColors";
@@ -11,6 +11,7 @@ import {
   MAX_NOTIF_PROMPTS,
   ensureNotificationPermission,
   getNotifPromptCount,
+  getNotificationPermissionState,
   openAppSettings,
 } from "@/services/ReminderService";
 
@@ -36,24 +37,56 @@ export default function NotificationNudge({ hasMissedRing, onDismiss }: Props) {
   const colors = useColors();
   const { granted } = useNotificationPermission();
   const [busy, setBusy] = useState(false);
+  // True once a tap can no longer produce a system dialog: the OS has stopped
+  // asking, or this install has spent MAX_NOTIF_PROMPTS. The label has to say
+  // so, because the tap stops meaning "ask" and starts meaning "leave the app".
+  const [settingsOnly, setSettingsOnly] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const [state, count] = await Promise.all([
+        getNotificationPermissionState(),
+        getNotifPromptCount(),
+      ]);
+      if (live) setSettingsOnly(!state.canAskAgain || count >= MAX_NOTIF_PROMPTS);
+    })();
+    return () => {
+      live = false;
+    };
+    // Re-read whenever the shared permission snapshot changes, which the
+    // provider refreshes on every foreground resume - a user who revoked the
+    // permission in system settings comes back to the right label.
+  }, [granted]);
 
   const handleFix = useCallback(async () => {
     if (busy) return;
     setBusy(true);
     try {
-      const count = await getNotifPromptCount();
-      if (count >= MAX_NOTIF_PROMPTS) {
+      // canAskAgain, not the prompt count alone. Revoking the permission from
+      // system settings leaves the count at zero while the OS refuses to show
+      // the dialog ever again, so a count-only check sent that user into
+      // ensureNotificationPermission(), which returned false without a single
+      // pixel changing on screen. That is the dead button.
+      const [state, count] = await Promise.all([
+        getNotificationPermissionState(),
+        getNotifPromptCount(),
+      ]);
+      if (!state.canAskAgain || count >= MAX_NOTIF_PROMPTS) {
+        setSettingsOnly(true);
         openAppSettings();
-      } else {
-        const ok = await ensureNotificationPermission();
-        // ensure* returns false both for a refusal just now and for a
-        // permanent one it declined to re-ask. Either way settings is the
-        // only remaining route, but do not yank the user out of the app on
-        // the same tap that showed them a dialog.
-        if (!ok) await refreshNotificationPermission();
+        return;
       }
-      await refreshNotificationPermission();
+      const ok = await ensureNotificationPermission();
+      // A refusal just now can be the LAST one the OS allows. Re-reading the
+      // state here is what turns the button into "Open settings" before the
+      // user taps it a second time and finds nothing happens.
+      if (!ok) {
+        const after = await getNotificationPermissionState();
+        setSettingsOnly(!after.canAskAgain);
+      }
     } finally {
+      await refreshNotificationPermission();
       setBusy(false);
     }
   }, [busy]);
@@ -76,7 +109,9 @@ export default function NotificationNudge({ hasMissedRing, onDismiss }: Props) {
             : "Notifications are off. Your reminders will not ring."}
         </Text>
         <Pressable onPress={handleFix} disabled={busy} hitSlop={8} testID="notification-nudge-fix">
-          <Text style={[styles.link, { color: colors.warning }]}>Turn on</Text>
+          <Text style={[styles.link, { color: colors.warning }]}>
+            {settingsOnly ? "Open settings" : "Turn on"}
+          </Text>
         </Pressable>
       </View>
       <Pressable

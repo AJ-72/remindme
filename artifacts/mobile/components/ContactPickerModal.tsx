@@ -13,7 +13,9 @@ import {
 import { Feather } from "@expo/vector-icons";
 import { Linking } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { getLocales } from "expo-localization";
 import { useColors } from "@/hooks/useColors";
+import { callingCodeForRegion } from "@/utils/phoneNumber";
 import { getFontFamily } from "@/utils/getFontFamily";
 import {
   getContactsPermissionState,
@@ -32,6 +34,16 @@ interface Props {
 /** Enough digits to be a phone number anywhere, without guessing a format. */
 const MIN_MANUAL_DIGITS = 6;
 
+/**
+ * The country code is asked for, never guessed. `normalizeForIdentity()` falls
+ * back to the DEVICE REGION when a number carries no `+`, and the device region
+ * is the phone's locale, not its SIM - an en-GB handset on an Indian SIM
+ * normalizes the same digits to a different E.164 number, and therefore to a
+ * different phone_hash, than the sender expects. A typed number that already
+ * carries its own `+` never reaches that branch.
+ */
+const DEFAULT_CALLING_CODE = "+91";
+
 export default function ContactPickerModal({ visible, onSelect, onClose }: Props) {
   const colors = useColors();
   const [contacts, setContacts] = useState<PickableContact[]>([]);
@@ -46,6 +58,9 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
   const [manual, setManual] = useState(false);
   const [manualName, setManualName] = useState("");
   const [manualPhone, setManualPhone] = useState("");
+  const [manualCode, setManualCode] = useState(
+    () => callingCodeForRegion(getLocales()[0]?.regionCode) ?? DEFAULT_CALLING_CODE
+  );
 
   // Only touch the address book once the sheet is actually open - asking for
   // contacts permission on a screen the user never opened is exactly the kind
@@ -92,11 +107,16 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
   }
 
   const manualDigits = manualPhone.replace(/\D/g, "");
-  const manualUsable = manualDigits.length >= MIN_MANUAL_DIGITS;
+  const manualCodeDigits = manualCode.replace(/\D/g, "");
+  const manualUsable =
+    manualDigits.length >= MIN_MANUAL_DIGITS && manualCodeDigits.length > 0;
 
   function submitManual() {
     if (!manualUsable) return;
-    const phone = manualPhone.trim();
+    // Joined into one E.164 string here, so everything downstream - the
+    // reachability lookup, the invitation, the WhatsApp link - sees the same
+    // explicit number the user typed.
+    const phone = `+${manualCodeDigits}${manualDigits}`;
     onSelect({ name: manualName.trim() || phone, phone });
   }
 
@@ -196,13 +216,17 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
       color: colors.foreground,
     },
     manualHint: { fontSize: 12, color: colors.mutedForeground },
+    manualPhoneRow: { flexDirection: "row", gap: 8 },
+    manualCodeField: { width: 78, textAlign: "center" },
+    manualNumberField: { flex: 1 },
   });
 
   function renderManual() {
     return (
       <View style={styles.manualWrap} testID="contacts-manual">
         <Text style={styles.manualHint}>
-          Type the name and number yourself. Nothing is read from your phone.
+          Type the name and number yourself, with the country code. Nothing is
+          read from your phone.
         </Text>
         <TextInput
           testID="contacts-manual-name"
@@ -212,16 +236,30 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
           value={manualName}
           onChangeText={setManualName}
         />
-        <TextInput
-          testID="contacts-manual-phone"
-          style={styles.manualField}
-          placeholder="Phone number"
-          placeholderTextColor={colors.mutedForeground}
-          value={manualPhone}
-          onChangeText={setManualPhone}
-          keyboardType="phone-pad"
-          autoCorrect={false}
-        />
+        <View style={styles.manualPhoneRow}>
+          <TextInput
+            testID="contacts-manual-code"
+            style={[styles.manualField, styles.manualCodeField]}
+            placeholder="+91"
+            placeholderTextColor={colors.mutedForeground}
+            value={manualCode}
+            onChangeText={setManualCode}
+            keyboardType="phone-pad"
+            autoCorrect={false}
+            accessibilityLabel="Country code"
+          />
+          <TextInput
+            testID="contacts-manual-phone"
+            style={[styles.manualField, styles.manualNumberField]}
+            placeholder="Phone number"
+            placeholderTextColor={colors.mutedForeground}
+            value={manualPhone}
+            onChangeText={setManualPhone}
+            keyboardType="phone-pad"
+            autoCorrect={false}
+            accessibilityLabel="Phone number"
+          />
+        </View>
         <Pressable
           testID="contacts-manual-submit"
           disabled={!manualUsable}

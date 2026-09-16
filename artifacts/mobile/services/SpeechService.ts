@@ -67,10 +67,23 @@ export function startListening(
   if (activeMode !== null) return { busy: true };
   activeMode = "live";
 
+  // With `continuous: true` the recognizer does not hand back one growing
+  // transcript. It closes a segment at each pause, emits it with
+  // isFinal: true, and starts the NEXT segment from empty - so a handler that
+  // rebuilds the field as `baseline + transcript` every time wipes out every
+  // earlier sentence the moment the user pauses and speaks again. Finished
+  // segments are kept here instead, and only the segment still in progress is
+  // replaced on each interim event.
+  let committed = "";
+  const join = (...parts: string[]) => parts.filter((p) => p !== "").join(" ").trim();
   const resultSub = ExpoSpeechRecognitionModule.addListener("result", (event: any) => {
     const transcript = event.results?.[0]?.transcript ?? "";
-    const combined = `${baseline} ${transcript}`.trim();
-    onResult(combined);
+    if (event.isFinal) {
+      committed = join(committed, transcript);
+      onResult(join(baseline, committed));
+      return;
+    }
+    onResult(join(baseline, committed, transcript));
   });
   const endSub = ExpoSpeechRecognitionModule.addListener("end", () => {
     clearActiveSession();

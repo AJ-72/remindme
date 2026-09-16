@@ -168,6 +168,43 @@ describe("startListening", () => {
     stopListening();
   });
 
+  // With `continuous: true` the recognizer closes a segment at every pause and
+  // restarts the next one from empty. Rebuilding the field as
+  // `baseline + transcript` on every event therefore DELETED each finished
+  // sentence as soon as the user paused and carried on - the field looked like
+  // it was clearing itself at random.
+  it("keeps every finished segment as the recognizer starts new ones", () => {
+    const onResult = jest.fn();
+    startListening("", "en-US", onResult, jest.fn(), jest.fn());
+    const resultHandler = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (call) => call[0] === "result"
+    )[1];
+
+    resultHandler({ isFinal: false, results: [{ transcript: "buy milk" }] });
+    resultHandler({ isFinal: true, results: [{ transcript: "buy milk" }] });
+    // A new segment. Its transcript does NOT carry the first one.
+    resultHandler({ isFinal: false, results: [{ transcript: "and bread" }] });
+    resultHandler({ isFinal: true, results: [{ transcript: "and bread" }] });
+
+    expect(onResult).toHaveBeenLastCalledWith("buy milk and bread");
+    stopListening();
+  });
+
+  it("replaces only the segment in progress, never the finished ones", () => {
+    const onResult = jest.fn();
+    startListening("note:", "en-US", onResult, jest.fn(), jest.fn());
+    const resultHandler = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (call) => call[0] === "result"
+    )[1];
+
+    resultHandler({ isFinal: true, results: [{ transcript: "call Amma" }] });
+    resultHandler({ isFinal: false, results: [{ transcript: "at" }] });
+    resultHandler({ isFinal: false, results: [{ transcript: "at seven" }] });
+
+    expect(onResult).toHaveBeenLastCalledWith("note: call Amma at seven");
+    stopListening();
+  });
+
   it("returns busy: true and does not call start again when already listening", () => {
     startListening("", "en-US", jest.fn(), jest.fn(), jest.fn());
     (ExpoSpeechRecognitionModule.start as jest.Mock).mockClear();

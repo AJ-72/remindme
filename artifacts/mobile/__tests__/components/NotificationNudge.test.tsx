@@ -102,3 +102,56 @@ describe("NotificationNudge", () => {
     expect(onDismiss).toHaveBeenCalled();
   });
 });
+
+// The bug this covers: the button read the prompt COUNT alone. Revoking the
+// permission from system settings leaves that count at zero while the OS
+// refuses to show its dialog again, so the tap ran a request that resolved
+// denied with nothing on screen - a button that does nothing at all.
+describe("NotificationNudge — a permission revoked in system settings", () => {
+  it("opens settings rather than a dialog the OS will never show", async () => {
+    denied(false);
+    const openSettings = jest
+      .spyOn(Linking, "openSettings")
+      .mockResolvedValue(undefined);
+
+    const { findByTestId } = render(
+      <NotificationNudge hasMissedRing={false} onDismiss={() => {}} />
+    );
+    fireEvent.press(await findByTestId("notification-nudge-fix"));
+
+    await waitFor(() => expect(openSettings).toHaveBeenCalled());
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it("says Open settings, so the tap does not promise a dialog", async () => {
+    denied(false);
+    const { findByText } = render(
+      <NotificationNudge hasMissedRing={false} onDismiss={() => {}} />
+    );
+    expect(await findByText("Open settings")).toBeTruthy();
+  });
+
+  it("still says Turn on while the OS will ask", async () => {
+    denied(true);
+    const { findByText } = render(
+      <NotificationNudge hasMissedRing={false} onDismiss={() => {}} />
+    );
+    expect(await findByText("Turn on")).toBeTruthy();
+  });
+
+  it("switches to Open settings after a refusal that spends the last ask", async () => {
+    denied(true);
+    (requestPermissionsAsync as jest.Mock).mockImplementation(async () => {
+      // The refusal the user just gave was the final one the OS allows.
+      denied(false);
+      return { status: "denied", canAskAgain: false };
+    });
+
+    const { findByTestId, findByText } = render(
+      <NotificationNudge hasMissedRing={false} onDismiss={() => {}} />
+    );
+    fireEvent.press(await findByTestId("notification-nudge-fix"));
+
+    expect(await findByText("Open settings")).toBeTruthy();
+  });
+});

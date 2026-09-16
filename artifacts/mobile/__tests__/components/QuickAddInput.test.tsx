@@ -5,7 +5,13 @@ import { Feather } from "@expo/vector-icons";
 import QuickAddInput from "@/components/QuickAddInput";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider, useSharedText } from "@/contexts/SharedTextContext";
-import { DEFAULT_ALARM_KEY, STORAGE_KEY } from "@/services/ReminderService";
+import {
+  DEFAULT_ALARM_KEY,
+  MAX_REGISTER_PROMPTS,
+  REGISTERED_PHONE_KEY,
+  REGISTER_PROMPT_COUNT_KEY,
+  STORAGE_KEY,
+} from "@/services/ReminderService";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { AppState, Linking, Platform, StyleSheet } from "react-native";
 import * as SpeechService from "@/services/SpeechService";
@@ -965,5 +971,119 @@ describe("QuickAddInput — the listening surface", () => {
     const titleInput = await findByTestId("quick-add-input");
     expect(titleInput.props.value).toBe("book the tickets");
     expect(await findByText(/stopped when you left the app/i)).toBeTruthy();
+  });
+});
+
+// The first-run "Add your number" modal was removed, and the action-row icon
+// that replaced it names nobody and reads as decoration. This is the permanent,
+// labelled way in that the redesign promised.
+describe("QuickAddInput — the permanent way to remind someone else", () => {
+  beforeEach(() => {
+    jest.spyOn(ContactsService, "loadPickableContacts").mockResolvedValue({
+      permission: "granted",
+      contacts: [{ name: "Priya", phone: "9876543210", contactId: "c1" }],
+    });
+  });
+
+  it("is on screen with no recipient chosen", async () => {
+    const { findByTestId, findByText } = renderComponent();
+    expect(await findByTestId("quick-add-remind-someone")).toBeTruthy();
+    expect(await findByText("Remind someone else")).toBeTruthy();
+  });
+
+  it("opens the contact picker", async () => {
+    const { findByTestId, findByText } = renderComponent();
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
+    expect(await findByText("Priya")).toBeTruthy();
+  });
+
+  it("stays on screen after a recipient is chosen", async () => {
+    const { findByTestId, findByText } = renderComponent();
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
+    fireEvent.press(await findByText("Priya"));
+    await findByTestId("quick-add-recipient-chip");
+    expect(await findByTestId("quick-add-remind-someone")).toBeTruthy();
+  });
+});
+
+// Without a registered number there is no Supabase session, so
+// checkReachability() returns null for every contact and no recipient can ever
+// earn the in-app badge. The offer used to live only on the WhatsApp share
+// screen, which this path never visits - so on a device it never appeared.
+describe("QuickAddInput — the offer to register your own number", () => {
+  beforeEach(() => {
+    jest.spyOn(ContactsService, "loadPickableContacts").mockResolvedValue({
+      permission: "granted",
+      contacts: [{ name: "Priya", phone: "9876543210", contactId: "c1" }],
+    });
+  });
+
+  async function saveWithRecipient(getBy: any) {
+    fireEvent.press(await getBy.findByTestId("quick-add-remind-someone"));
+    fireEvent.press(await getBy.findByText("Priya"));
+    fireEvent.changeText(
+      await getBy.findByTestId("quick-add-input"),
+      "Call Priya tomorrow at 3pm"
+    );
+    fireEvent.press(await getBy.findByTestId("quick-add-save"));
+  }
+
+  it("offers after a reminder is sent to someone else", async () => {
+    const view = renderComponent();
+    await saveWithRecipient(view);
+    expect(await view.findByTestId("register-number-nudge")).toBeTruthy();
+  });
+
+  it("names the person who was reminded", async () => {
+    const view = renderComponent();
+    await saveWithRecipient(view);
+    await view.findByTestId("register-number-nudge");
+    expect(view.getByText(/Priya/)).toBeTruthy();
+  });
+
+  it("stays away from a reminder with no recipient", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Buy milk tomorrow at 3pm");
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+    });
+    expect(queryByTestId("register-number-nudge")).toBeNull();
+  });
+
+  it("stays away once a number is already registered", async () => {
+    await AsyncStorage.setItem(REGISTERED_PHONE_KEY, "+919876543210");
+    const view = renderComponent();
+    await saveWithRecipient(view);
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+    });
+    expect(view.queryByTestId("register-number-nudge")).toBeNull();
+  });
+
+  it("stays away once the cap is spent", async () => {
+    await AsyncStorage.setItem(REGISTER_PROMPT_COUNT_KEY, String(MAX_REGISTER_PROMPTS));
+    const view = renderComponent();
+    await saveWithRecipient(view);
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+    });
+    expect(view.queryByTestId("register-number-nudge")).toBeNull();
+  });
+
+  it("counts the offer when it is shown, not when it is taken", async () => {
+    const view = renderComponent();
+    await saveWithRecipient(view);
+    await view.findByTestId("register-number-nudge");
+
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(REGISTER_PROMPT_COUNT_KEY)).toBe("1")
+    );
   });
 });
