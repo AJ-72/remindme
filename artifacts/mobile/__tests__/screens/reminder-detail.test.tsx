@@ -79,6 +79,35 @@ describe("ReminderDetailScreen", () => {
     expect(await findByText("Some details")).toBeTruthy();
   });
 
+  it("explains a recipient-moved time on a send reminder", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          recipient: { name: "Priya", phone: "9876543210" },
+          recipientTimeChange: {
+            from: "2026-09-09T23:00:00.000Z",
+            to: "2026-09-10T08:00:00.000Z",
+            by: "Priya",
+          },
+        }),
+      ])
+    );
+    const { findByTestId } = renderScreen();
+    const note = await findByTestId("recipient-time-change-text");
+    expect(note.props.children.join("")).toContain("Priya moved this from");
+  });
+
+  it("shows no time-change note when the recipient never moved it", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recipient: { name: "Priya", phone: "9876543210" } })])
+    );
+    const { queryByTestId, findByText } = renderScreen();
+    await findByText("Test reminder");
+    expect(queryByTestId("recipient-time-change-text")).toBeNull();
+  });
+
   // The per-reminder override of the global "Do not use Android Alarm
   // feature" default. The switch is negated relative to the stored
   // `exactTiming` field (switch ON means the alarm feature is disabled), so a

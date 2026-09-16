@@ -13,6 +13,7 @@ import {
   type NotificationData,
   type DictationLanguage,
   addReminder as serviceAdd,
+  attachInvitationId as serviceAttachInvitationId,
   deleteReminder as serviceDelete,
   deleteReminders as serviceDeleteMany,
   editReminder as serviceEdit,
@@ -60,7 +61,14 @@ interface RemindersContextType {
   reminders: Reminder[];
   addReminder: (
     data: Omit<Reminder, "id" | "completed" | "notificationId">
-  ) => Promise<void>;
+  ) => Promise<Reminder>;
+  /**
+   * Tags a just-added send-reminder with the server invitation id it maps
+   * to, once send-invitation confirms it - see Reminder.invitationId's
+   * header. A no-op call this context makes only from QuickAddInput.tsx,
+   * after addReminder's own local save has already completed.
+   */
+  attachInvitationId: (id: string, invitationId: string) => Promise<void>;
   editReminder: (
     id: string,
     data: Omit<Reminder, "id" | "completed" | "notificationId">
@@ -271,16 +279,24 @@ export function RemindersProvider({
       // so the only per-reminder choice is the detail-screen override, which
       // sets the field explicitly and is preserved by the `!== undefined`
       // check below.
-      const { reminders: updated } = await serviceAdd(reminders, {
+      const { reminders: updated, added } = await serviceAdd(reminders, {
         ...data,
         exactTiming:
           data.exactTiming !== undefined ? data.exactTiming : defaultExactTimingEnabled,
       });
       setReminders(updated);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      return added;
     },
     [reminders, defaultExactTimingEnabled]
   );
+
+  const attachInvitationId = useCallback(async (id: string, invitationId: string) => {
+    await serviceAttachInvitationId(id, invitationId);
+    setReminders((current) =>
+      current.map((r) => (r.id === id ? { ...r, invitationId } : r))
+    );
+  }, []);
 
   const editReminder = useCallback(
     async (
@@ -345,6 +361,7 @@ export function RemindersProvider({
       value={{
         reminders,
         addReminder,
+        attachInvitationId,
         editReminder,
         deleteReminder,
         deleteReminders,

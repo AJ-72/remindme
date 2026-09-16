@@ -11,10 +11,21 @@
 -- "Never overload decline with never again" (T5.3) - this function has no
 -- opinion about future sends from this sender; blocking is a separate
 -- action on a separate table (blocks), left entirely alone here.
+--
+-- p_accepted_datetime (added for the "notify sender the receiver moved the
+-- time" feature): the ONLY thing an accept may change about `datetime`, and
+-- only on accept - a decline leaves it untouched. `original_datetime` is
+-- deliberately never touched here either: it already exists to answer "what
+-- did the sender originally ask for", which is exactly what the caller
+-- needs to diff against the new `datetime` to detect a change and decide
+-- whether to push the sender at all. Reusing that column instead of adding
+-- a new one keeps this a function-only change, no new schema migration.
+drop function if exists public.respond_to_invitation(uuid, text);
 
 create or replace function public.respond_to_invitation(
   p_invitation_id uuid,
-  p_response text
+  p_response text,
+  p_accepted_datetime timestamptz default null
 )
 returns setof public.invitations
 language plpgsql
@@ -38,7 +49,12 @@ begin
          title = null,
          description = null,
          terminal_at = now(),
-         updated_at = now()
+         updated_at = now(),
+         datetime = case
+           when p_response = 'accepted' and p_accepted_datetime is not null
+             then p_accepted_datetime
+           else i.datetime
+         end
    where i.id = p_invitation_id
      and i.recipient_id = caller
      and i.status = 'invited'
@@ -57,5 +73,5 @@ $$;
 -- narrowly. `from public` alone is NOT enough on Supabase - see
 -- claimInvitations.sql's header for the confirmed 2026-09-07 finding; name
 -- every role explicitly instead.
-revoke all on function public.respond_to_invitation(uuid, text) from public, anon, authenticated;
-grant execute on function public.respond_to_invitation(uuid, text) to authenticated;
+revoke all on function public.respond_to_invitation(uuid, text, timestamptz) from public, anon, authenticated;
+grant execute on function public.respond_to_invitation(uuid, text, timestamptz) to authenticated;

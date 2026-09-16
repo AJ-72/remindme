@@ -72,6 +72,15 @@ const staticStyles = StyleSheet.create({
     fontSize: 11,
     flexShrink: 1,
   },
+  timeChangeNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+  },
+  timeChangeNoteText: {
+    fontSize: 11,
+  },
   description: {
     fontSize: 13,
     marginTop: 2,
@@ -227,6 +236,18 @@ function ReminderCard({ reminder, onDelete }: Props) {
                 numberOfLines={1}
               >
                 {reminder.recipient.name}
+              </Text>
+            </View>
+          )}
+
+          {isSendReminder(reminder) && reminder.recipientTimeChange && (
+            <View style={staticStyles.timeChangeNote} testID="recipient-time-change-note">
+              <Feather name="clock" size={11} color={colors.mutedForeground} />
+              <Text
+                style={[staticStyles.timeChangeNoteText, { color: colors.mutedForeground }]}
+                numberOfLines={1}
+              >
+                Moved by {reminder.recipientTimeChange.by}
               </Text>
             </View>
           )}

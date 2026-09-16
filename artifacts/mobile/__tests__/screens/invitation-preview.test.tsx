@@ -141,10 +141,15 @@ describe("InvitationPreviewScreen", () => {
     await waitFor(() =>
       expect(InvitationService.respondToInvitation).toHaveBeenCalledWith(
         expect.any(String),
-        "accepted"
+        "accepted",
+        "2026-09-09T08:00:00.000Z"
       )
     );
-    expect(InvitationService.respondToInvitation).toHaveBeenCalledWith("inv-1", "accepted");
+    expect(InvitationService.respondToInvitation).toHaveBeenCalledWith(
+      "inv-1",
+      "accepted",
+      "2026-09-09T08:00:00.000Z"
+    );
     await waitFor(() => expect(addReminderSpy).toHaveBeenCalled());
     const [, data] = addReminderSpy.mock.calls[0];
     // The screen itself must never pass `alarm`/`exactTiming` - no property
@@ -199,30 +204,34 @@ describe("InvitationPreviewScreen", () => {
       };
     });
 
-    it("prompts with this device's own quiet hours before scheduling, after the server accept", async () => {
+    it("prompts with this device's own quiet hours BEFORE the server accept call", async () => {
       const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
       (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
       const addReminderSpy = jest.spyOn(ReminderService, "addReminder");
-      jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+      const respondSpy = jest
+        .spyOn(InvitationService, "respondToInvitation")
+        .mockResolvedValue({ ok: true });
 
       const { getByTestId, findByText } = renderScreen();
       await findByText("From Amma");
 
       fireEvent.press(getByTestId("accept-button"));
 
-      await waitFor(() =>
-        expect(InvitationService.respondToInvitation).toHaveBeenCalledWith("inv-1", "accepted")
-      );
-      // Accepted server-side already, but not yet scheduled locally.
-      expect(addReminderSpy).not.toHaveBeenCalled();
+      // The server accept needs the FINAL chosen time up front (so
+      // respond-invitation can diff it against what the sender sent) - it
+      // must not fire until the quiet-hours prompt resolves.
       expect(await findByText(/inside your quiet hours/i)).toBeTruthy();
+      expect(respondSpy).not.toHaveBeenCalled();
+      expect(addReminderSpy).not.toHaveBeenCalled();
     });
 
     it("keeps the original time when the recipient chooses Keep it", async () => {
       const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
       (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
       const addReminderSpy = jest.spyOn(ReminderService, "addReminder");
-      jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+      const respondSpy = jest
+        .spyOn(InvitationService, "respondToInvitation")
+        .mockResolvedValue({ ok: true });
 
       const { getByTestId, findByText } = renderScreen();
       await findByText("From Amma");
@@ -232,6 +241,7 @@ describe("InvitationPreviewScreen", () => {
       fireEvent.press(getByTestId("quiet-hours-sheet-keep"));
 
       await waitFor(() => expect(addReminderSpy).toHaveBeenCalled());
+      expect(respondSpy).toHaveBeenCalledWith("inv-1", "accepted", "2026-09-09T23:00:00.000Z");
       const [, data] = addReminderSpy.mock.calls[0];
       expect(data.datetime).toBe("2026-09-09T23:00:00.000Z");
     });
@@ -240,7 +250,9 @@ describe("InvitationPreviewScreen", () => {
       const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
       (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
       const addReminderSpy = jest.spyOn(ReminderService, "addReminder");
-      jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+      const respondSpy = jest
+        .spyOn(InvitationService, "respondToInvitation")
+        .mockResolvedValue({ ok: true });
 
       const { getByTestId, findByText } = renderScreen();
       await findByText("From Amma");
@@ -250,10 +262,11 @@ describe("InvitationPreviewScreen", () => {
       fireEvent.press(getByTestId("quiet-hours-sheet-move"));
 
       await waitFor(() => expect(addReminderSpy).toHaveBeenCalled());
-      const [, data] = addReminderSpy.mock.calls[0];
       // Default quiet hours end at 08:00 local, the day after the chosen
       // 23:00 - moved forward one calendar day, same as QuickAddInput's own
       // quietHoursEndAfter behavior.
+      expect(respondSpy).toHaveBeenCalledWith("inv-1", "accepted", "2026-09-10T08:00:00.000Z");
+      const [, data] = addReminderSpy.mock.calls[0];
       expect(data.datetime).toBe("2026-09-10T08:00:00.000Z");
     });
   });

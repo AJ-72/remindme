@@ -102,6 +102,43 @@ describe("ReminderCard — send reminders", () => {
       ])
     );
   });
+
+  it("shows a 'Moved by' note when the recipient changed the time", () => {
+    const { getByTestId, getByText } = renderCard(
+      makeReminder({
+        recipient: { name: "Priya", phone: "9876543210" },
+        recipientTimeChange: {
+          from: "2026-09-09T23:00:00.000Z",
+          to: "2026-09-10T08:00:00.000Z",
+          by: "Priya",
+        },
+      })
+    );
+    expect(getByTestId("recipient-time-change-note")).toBeTruthy();
+    expect(getByText("Moved by Priya")).toBeTruthy();
+  });
+
+  it("shows no time-change note when the recipient never moved it", () => {
+    const { queryByTestId } = renderCard(
+      makeReminder({ recipient: { name: "Priya", phone: "9876543210" } })
+    );
+    expect(queryByTestId("recipient-time-change-note")).toBeNull();
+  });
+
+  it("never shows the time-change note on an ordinary (non-send) reminder", () => {
+    // isSendReminder gates this the same as the recipient chip - a plain
+    // reminder has no recipient to have moved anything.
+    const { queryByTestId } = renderCard(
+      makeReminder({
+        recipientTimeChange: {
+          from: "2026-09-09T23:00:00.000Z",
+          to: "2026-09-10T08:00:00.000Z",
+          by: "Priya",
+        },
+      })
+    );
+    expect(queryByTestId("recipient-time-change-note")).toBeNull();
+  });
 });
 
 describe("ReminderCard — received reminders (B13)", () => {

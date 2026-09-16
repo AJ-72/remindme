@@ -48,6 +48,8 @@ import {
   snoozeReminder,
   toggleComplete,
   updateSnoozeById,
+  attachInvitationId,
+  applyRecipientTimeChangeByInvitationId,
   isSendReminder,
   INVITE_NUDGE_COUNT_KEY,
   INVITE_NUDGE_ENABLED_KEY,
@@ -1106,6 +1108,63 @@ describe("updateSnoozeById", () => {
     await expect(
       updateSnoozeById("unknown", new Date().toISOString(), "x")
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("attachInvitationId", () => {
+  it("tags the target reminder with the given invitation id", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await attachInvitationId("r1", "inv-1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].invitationId).toBe("inv-1");
+  });
+
+  it("no-ops safely when the id does not exist", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await expect(attachInvitationId("unknown", "inv-1")).resolves.toBeUndefined();
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].invitationId).toBeUndefined();
+  });
+});
+
+describe("applyRecipientTimeChangeByInvitationId", () => {
+  it("moves the matching reminder's datetime, reschedules its notification, and records who moved it", async () => {
+    const r = makeReminder({ id: "r1", notificationId: "old-notif", invitationId: "inv-1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    const from = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const to = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+
+    const returnedId = await applyRecipientTimeChangeByInvitationId("inv-1", to, from, "Amma");
+
+    expect(returnedId).toBe("r1");
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("old-notif");
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].datetime).toBe(to);
+    expect(stored[0].notificationId).toBe("mock-notif-id");
+    expect(stored[0].recipientTimeChange).toEqual({ from, to, by: "Amma" });
+  });
+
+  it("no-ops and returns undefined when no local reminder carries that invitation id", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    const returnedId = await applyRecipientTimeChangeByInvitationId(
+      "inv-does-not-exist",
+      new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      "Amma"
+    );
+
+    expect(returnedId).toBeUndefined();
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].recipientTimeChange).toBeUndefined();
   });
 });
 

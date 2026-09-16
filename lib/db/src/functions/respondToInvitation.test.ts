@@ -115,4 +115,43 @@ describe("respond_to_invitation", () => {
     ).rejects.toThrow();
     await db.close();
   });
+
+  describe("p_accepted_datetime", () => {
+    it("moves datetime on accept when given, leaving original_datetime untouched", async () => {
+      const { db, invitationId } = await withInvitation();
+      const result = await db.asUser(
+        AMMA,
+        `select datetime, original_datetime from respond_to_invitation(
+           '${invitationId}', 'accepted', now() + interval '10 hours'
+         )`
+      );
+      const row = result[0] as { datetime: Date; original_datetime: Date };
+      expect(row.datetime.getTime()).not.toEqual(row.original_datetime.getTime());
+      await db.close();
+    });
+
+    it("leaves datetime unchanged when not given", async () => {
+      const { db, invitationId } = await withInvitation();
+      const result = await db.asUser(
+        AMMA,
+        `select datetime, original_datetime from respond_to_invitation('${invitationId}', 'accepted')`
+      );
+      const row = result[0] as { datetime: Date; original_datetime: Date };
+      expect(row.datetime.getTime()).toEqual(row.original_datetime.getTime());
+      await db.close();
+    });
+
+    it("ignores p_accepted_datetime on a decline", async () => {
+      const { db, invitationId } = await withInvitation();
+      const result = await db.asUser(
+        AMMA,
+        `select datetime, original_datetime from respond_to_invitation(
+           '${invitationId}', 'declined', now() + interval '10 hours'
+         )`
+      );
+      const row = result[0] as { datetime: Date; original_datetime: Date };
+      expect(row.datetime.getTime()).toEqual(row.original_datetime.getTime());
+      await db.close();
+    });
+  });
 });

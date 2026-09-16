@@ -129,6 +129,26 @@ export interface Reminder {
   /** The sender's app user id, paired with senderName. Local-only context;
    * never sent anywhere - see invitation-preview.tsx for where it's read. */
   senderId?: string;
+  /**
+   * Set only on the SENDER's own local copy of a send-reminder (never on the
+   * recipient's accepted copy, which has no reason to reference the row it
+   * came from). Lets an incoming `invitation_time_changed` push find the
+   * right local reminder to update - see
+   * applyRecipientTimeChangeByInvitationId() below and
+   * QuickAddInput.tsx#performSave, which is the only place this gets set.
+   */
+  invitationId?: string;
+  /**
+   * Present only when the recipient moved this reminder's time on accept
+   * (see respond-invitation's push and notificationResponseHandler.ts).
+   * Rendered as a note on the sender's own card/detail screen so the new
+   * time doesn't look unexplained - see ReminderCard.tsx/reminder-detail.tsx.
+   */
+  recipientTimeChange?: {
+    from: string;
+    to: string;
+    by: string;
+  };
 }
 
 /**
@@ -1121,6 +1141,64 @@ export async function updateSnoozeById(
     r.id === id ? { ...r, datetime, notificationId } : r
   );
   await saveReminders(updated);
+}
+
+/**
+ * Tags the sender's just-created local reminder with the server invitation
+ * id it corresponds to, once send-invitation confirms it. Deliberately a
+ * separate call from addReminder rather than a field passed at creation
+ * time - the local Tier 1 save (QuickAddInput.tsx#performSave) must
+ * complete and be visible regardless of whether the Tier 2 send even
+ * happens, and the invitation id doesn't exist until it does.
+ */
+export async function attachInvitationId(id: string, invitationId: string): Promise<void> {
+  const reminders = await loadReminders();
+  const target = reminders.find((r) => r.id === id);
+  if (!target) return;
+  const updated = reminders.map((r) => (r.id === id ? { ...r, invitationId } : r));
+  await saveReminders(updated);
+}
+
+/**
+ * Applies an `invitation_time_changed` push to the SENDER's own local copy
+ * of the send-reminder (see Reminder.invitationId's header). Reschedules
+ * the local notification at the new time - the sender's own alert must
+ * fire when the receiver actually expects it, not the stale time originally
+ * sent - and records the change so ReminderCard/reminder-detail can explain
+ * it rather than showing a silently different time. No-ops if the local
+ * reminder is gone (deleted, or this device never had one), which is a
+ * legitimate outcome, not an error - a push replaying after local cleanup
+ * must not resurrect anything.
+ */
+export async function applyRecipientTimeChangeByInvitationId(
+  invitationId: string,
+  toDatetime: string,
+  fromDatetime: string,
+  recipientName: string
+): Promise<string | undefined> {
+  const reminders = await loadReminders();
+  const target = reminders.find((r) => r.invitationId === invitationId);
+  if (!target) return undefined;
+
+  await cancelNotification(target.notificationId);
+  const updatedData = { ...target, datetime: toDatetime };
+  const notificationId = await scheduleNotification(updatedData, target.id);
+
+  const updated = reminders.map((r) =>
+    r.id === target.id
+      ? {
+          ...r,
+          datetime: toDatetime,
+          notificationId,
+          recipientTimeChange: { from: fromDatetime, to: toDatetime, by: recipientName },
+        }
+      : r
+  );
+  await saveReminders(updated);
+  // Returned so a caller (the notification tap handler) can navigate
+  // straight to this reminder's detail screen without a second lookup by
+  // invitation id, which no other reminder-loading function supports.
+  return target.id;
 }
 
 // --- Backup / restore -------------------------------------------------------

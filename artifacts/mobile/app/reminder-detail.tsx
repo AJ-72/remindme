@@ -18,6 +18,7 @@ import { useReminders } from "@/contexts/RemindersContext";
 import { applySuggestedHour, formatHourRange } from "@/utils/adherenceCopy";
 import { computeAdherenceStats, STUCK_SNOOZE_THRESHOLD } from "@/utils/adherenceStats";
 import { useColors } from "@/hooks/useColors";
+import { isSendReminder } from "@/services/ReminderService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
 import type { SnoozePreset } from "@/utils/snoozePresets";
@@ -238,6 +239,12 @@ export default function ReminderDetailScreen() {
       fontFamily: "Inter_500Medium",
       color: colors.mutedForeground,
     },
+    timeChangeText: {
+      fontSize: 13,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginBottom: 20,
+    },
     settingRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -360,6 +367,14 @@ export default function ReminderDetailScreen() {
             <Feather name="clock" size={14} color={colors.mutedForeground} />
             <Text style={styles.timeText}>{formatDatetime(reminder.datetime)}</Text>
           </View>
+
+          {isSendReminder(reminder) && reminder.recipientTimeChange && (
+            <Text style={styles.timeChangeText} testID="recipient-time-change-text">
+              {reminder.recipientTimeChange.by} moved this from{" "}
+              {formatDatetime(reminder.recipientTimeChange.from)} to{" "}
+              {formatDatetime(reminder.recipientTimeChange.to)}.
+            </Text>
+          )}
 
           {isStuck && (
             <View style={styles.stuckCard} testID="stuck-panel">

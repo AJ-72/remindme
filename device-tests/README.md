@@ -21,7 +21,7 @@ ships it.**
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14 |
 | [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete | D17, D18, D21, D23 |
 | [malayalam-parsing.md](malayalam-parsing.md) | On-device Malayalam input/parsing (numerals, ambiguous readings, AM/PM) | D24, + 2 unnumbered checklists |
-| [remind-others.md](remind-others.md) | M4 Tier 2, app-to-app delivery — all `BLOCKED` on a backend that does not exist yet, except D38 (local-only) | D27-D39, D44 |
+| [remind-others.md](remind-others.md) | M4 Tier 2, app-to-app delivery — all `BLOCKED` on a backend that does not exist yet, except D38 (local-only) | D27-D39, D44, D46 |
 
 ## Status legend
 
@@ -96,6 +96,7 @@ discovering.
 | D38 | Tier 2: device key persists across restart, absent on fresh install | `PENDING` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d38) |
 | D43 | Registration "Skip for now" actually dismisses the screen | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d43) |
 | D44 | Tier 2: receiver's own quiet hours gate the accepted reminder, not the sender's | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d44) |
+| D46 | Tier 2: sender is notified when the receiver moves the reminder's time | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d46) |
 | D45 | Country-code picker on registration | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d45) |
 
 **2026-09-04 note:** D4, D11, D16, D17, D18 moved from `PENDING` to

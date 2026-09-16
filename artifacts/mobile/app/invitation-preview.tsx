@@ -126,48 +126,47 @@ export default function InvitationPreviewScreen() {
     goBack();
   };
 
-  const handleAccept = async () => {
+  // The server accept and its chosen time travel together in ONE call -
+  // respond_to_invitation() needs the final time up front (see
+  // respond-invitation's own header: it pushes the sender when this differs
+  // from what they sent, and can't do that after the fact). So the
+  // quiet-hours decision has to resolve BEFORE the network call, not after
+  // it as the local-only version of this flow did.
+  const doAccept = async (target: Date) => {
+    if (!id) return;
+    setResponding(true);
+    try {
+      const result = await respondToInvitation(id, "accepted", target.toISOString());
+      if (result.ok) await scheduleAccepted(target);
+    } finally {
+      setResponding(false);
+    }
+  };
+
+  const handleAccept = () => {
     if (!id || responding) return;
-    setResponding(true);
-    try {
-      const result = await respondToInvitation(id, "accepted");
-      if (result.ok) {
-        const target = new Date(datetime);
-        // Ask, never block - and ask about THIS device's own quiet hours,
-        // since the receiving device is the one that will actually alert.
-        // The sender's quiet hours (checked separately in QuickAddInput)
-        // have no bearing on when the recipient wants to be notified.
-        if (isQuietAt(target, quietHours)) {
-          setQuietPrompt(target);
-          return;
-        }
-        await scheduleAccepted(target);
-      }
-    } finally {
-      setResponding(false);
+    const target = new Date(datetime);
+    // Ask, never block - and ask about THIS device's own quiet hours, since
+    // the receiving device is the one that will actually alert. The
+    // sender's quiet hours (checked separately in QuickAddInput) have no
+    // bearing on when the recipient wants to be notified.
+    if (isQuietAt(target, quietHours)) {
+      setQuietPrompt(target);
+      return;
     }
+    void doAccept(target);
   };
 
-  const handleQuietKeep = async () => {
+  const handleQuietKeep = () => {
     const target = quietPrompt;
     setQuietPrompt(null);
-    setResponding(true);
-    try {
-      if (target) await scheduleAccepted(target);
-    } finally {
-      setResponding(false);
-    }
+    if (target) void doAccept(target);
   };
 
-  const handleQuietMove = async () => {
+  const handleQuietMove = () => {
     const target = quietPrompt;
     setQuietPrompt(null);
-    setResponding(true);
-    try {
-      if (target) await scheduleAccepted(quietHoursEndAfter(target, quietHours));
-    } finally {
-      setResponding(false);
-    }
+    if (target) void doAccept(quietHoursEndAfter(target, quietHours));
   };
 
   const handleQuietCancel = () => {
