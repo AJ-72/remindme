@@ -107,6 +107,9 @@ discovering.
 | D54 | Cancel throws the words away, Done keeps them | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d54) |
 | D55 | An open mic that hears nothing says so | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d55) |
 | D56 | Leaving the app stops dictation | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d56) |
+| D57 | The contacts ask explains itself before the OS asks | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d57) |
+| D58 | A reminder for someone, with no address book | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d58) |
+| D59 | The number offer arrives after a send, and stops | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d59) |
 
 **2026-09-04 note:** D4, D11, D16, D17, D18 moved from `PENDING` to
 `PARTIAL` — new Maestro flows (`Maestro/d4_*`, `d11_*`, `d16_*`, `d17_*`,

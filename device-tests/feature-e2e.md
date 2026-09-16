@@ -668,3 +668,67 @@ is still in the field. The app says the voice input stopped when you left.
 
 **Fails if.** The pulse is still running on return, or the mic is still
 held, or the words are lost.
+
+## D57 — The contacts ask explains itself before the OS asks — `PENDING`
+
+**Why hardware only.** Android gives an app one contacts dialog and then
+stops. Only a real device can show that the dialog was not spent, and that
+the app behaves when it is gone.
+
+**Setup.** A fresh install. Do not grant contacts.
+
+**Steps.**
+1. Tap the person icon beside the mic.
+2. Read what appears, then tap **Type a number instead** and close the sheet.
+3. Open the sheet again and tap **Choose from contacts**. Refuse the system
+   dialog.
+4. Tap **Allow contacts** and refuse again, until Android stops asking.
+5. Open the sheet once more.
+
+**Pass.** At step 2 the system dialog never appears. At step 4 the sheet
+offers **Allow contacts**, not settings. At step 5 the sheet reads
+"Contacts are turned off" and offers **Open settings**, which opens the app's
+own page. Every one of these states also offers **Type a number instead**.
+
+**Fails if.** The system dialog appears before step 3, or **Allow contacts**
+does nothing once Android has stopped asking, or any state leaves the user
+with no way forward.
+
+## D58 — A reminder for someone, with no address book — `PENDING`
+
+**Why hardware only.** It has to prove that a real send works from a number
+that never came from the contacts list.
+
+**Setup.** Contacts refused, from D57.
+
+**Steps.**
+1. Type "call about the invoice tomorrow at 10".
+2. Tap the person icon, then **Type a number instead**.
+3. Type a name and a real number you can message, then **Use this number**.
+4. Save, open the reminder's card, and send by WhatsApp or SMS.
+
+**Pass.** The chip names the person typed in. The message opens with the
+right text and the right number. The reminder behaves like any other.
+
+**Fails if.** The number is rejected, the chip shows the raw digits when a
+name was typed, or the send opens with the wrong number.
+
+## D59 — The number offer arrives after a send, and stops — `PENDING`
+
+**Why hardware only.** The offer follows a real handoff to WhatsApp or SMS,
+which Jest cannot perform.
+
+**Setup.** A fresh install with no registered number.
+
+**Steps.**
+1. Create and send a reminder to somebody.
+2. Return to the app and look below the send buttons.
+3. Tap **Not now**.
+4. Send a second reminder, and a third.
+
+**Pass.** No offer appears before the first send. After it, the offer names
+the person just reminded. It appears once more on the second send, and never
+again on the third.
+
+**Fails if.** The offer appears before any send, or keeps appearing after
+two refusals, or appears at all for a user whose number is registered.

@@ -44,6 +44,14 @@ export const VIBRATION_KEY = "@vibration_v1";
 export const NOTIF_PROMPT_COUNT_KEY = "@notif_prompt_count_v1";
 export const MAX_NOTIF_PROMPTS = 3;
 export const REGISTERED_PHONE_KEY = "@registered_phone_v1";
+/**
+ * How many times this install has offered to register the user's own phone
+ * number. The offer only appears where it is earned - after the user sends a
+ * reminder to somebody else, which is the first moment being reachable back
+ * means anything - and MAX_REGISTER_PROMPTS stops it becoming a fixture.
+ */
+export const REGISTER_PROMPT_COUNT_KEY = "@register_prompt_count_v1";
+export const MAX_REGISTER_PROMPTS = 2;
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 /**
  * Corrupt reminder payloads are copied here rather than discarded. AsyncStorage
@@ -533,6 +541,36 @@ export async function incrementNotifPromptCount(): Promise<number> {
   return next;
 }
 
+export async function getRegisterPromptCount(): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(REGISTER_PROMPT_COUNT_KEY);
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function incrementRegisterPromptCount(): Promise<number> {
+  const next = (await getRegisterPromptCount()) + 1;
+  try {
+    await AsyncStorage.setItem(REGISTER_PROMPT_COUNT_KEY, String(next));
+  } catch {}
+  return next;
+}
+
+/**
+ * Whether to offer registration at all.
+ *
+ * Two reasons not to: the number is already registered, so there is nothing
+ * to ask for; or the offer has been made its full number of times and refused,
+ * which is an answer.
+ */
+export async function shouldOfferNumberRegistration(): Promise<boolean> {
+  if (await getRegisteredPhone()) return false;
+  return (await getRegisterPromptCount()) < MAX_REGISTER_PROMPTS;
+}
+
 /**
  * The phone number this device most recently registered/bound successfully
  * (B10). Persisted locally purely to drive the UI's "already registered,
@@ -772,13 +810,18 @@ export async function scheduleNotification(
 ): Promise<string | undefined> {
   if (!Notifications) return undefined;
   try {
+    // Order matters. A reminder whose time has already passed schedules
+    // nothing, so asking for permission first would spend one of the three
+    // prompts on a reminder that cannot ring either way - the same empty ask
+    // that was removed from cold launch. The banner on the home screen is the
+    // route for that user.
+    const trigger = new Date(reminder.datetime);
+    const now = new Date();
+    if (trigger <= now) return undefined;
     // The ladder, not a raw request: a user who refused permanently must not
     // be handed a dialog the OS will never show.
     const granted = await ensureNotificationPermission();
     if (!granted) return undefined;
-    const trigger = new Date(reminder.datetime);
-    const now = new Date();
-    if (trigger <= now) return undefined;
     const alarmOn = reminder.alarm !== false;
     const exactOn = reminder.exactTiming !== false;
     const channelId = channelIdForAlarm(alarmOn, await getVibrationEnabled());

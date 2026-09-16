@@ -11,10 +11,12 @@ import {
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { Linking } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useColors } from "@/hooks/useColors";
 import { getFontFamily } from "@/utils/getFontFamily";
 import {
+  getContactsPermissionState,
   loadPickableContacts,
   searchContacts,
   type ContactsPermission,
@@ -27,12 +29,23 @@ interface Props {
   onClose: () => void;
 }
 
+/** Enough digits to be a phone number anywhere, without guessing a format. */
+const MIN_MANUAL_DIGITS = 6;
+
 export default function ContactPickerModal({ visible, onSelect, onClose }: Props) {
   const colors = useColors();
   const [contacts, setContacts] = useState<PickableContact[]>([]);
   const [permission, setPermission] = useState<ContactsPermission | null>(null);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
+  // The app's own ask, shown BEFORE the system dialog. The system dialog
+  // gives one chance and no reason; this one carries the reason, and a
+  // refusal here costs nothing, because the OS was never asked.
+  const [askFirst, setAskFirst] = useState(false);
+  // The way through that needs no address book at all.
+  const [manual, setManual] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualPhone, setManualPhone] = useState("");
 
   // Only touch the address book once the sheet is actually open - asking for
   // contacts permission on a screen the user never opened is exactly the kind
@@ -42,16 +55,50 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
     let cancelled = false;
     setLoading(true);
     setQuery("");
-    loadPickableContacts().then((result) => {
+    setManual(false);
+    setManualName("");
+    setManualPhone("");
+    setPermission(null);
+    (async () => {
+      const state = await getContactsPermissionState();
+      if (cancelled) return;
+      if (!state.granted) {
+        // Nothing is asked of the OS yet. Either explain first, or - once the
+        // OS has stopped asking - go straight to the repair path.
+        setAskFirst(state.canAskAgain);
+        setPermission(state.canAskAgain ? null : "blocked");
+        setLoading(false);
+        return;
+      }
+      setAskFirst(false);
+      const result = await loadPickableContacts({ request: false });
       if (cancelled) return;
       setContacts(result.contacts);
       setPermission(result.permission);
       setLoading(false);
-    });
+    })();
     return () => {
       cancelled = true;
     };
   }, [visible]);
+
+  async function requestAndLoad() {
+    setAskFirst(false);
+    setLoading(true);
+    const result = await loadPickableContacts({ request: true });
+    setContacts(result.contacts);
+    setPermission(result.permission);
+    setLoading(false);
+  }
+
+  const manualDigits = manualPhone.replace(/\D/g, "");
+  const manualUsable = manualDigits.length >= MIN_MANUAL_DIGITS;
+
+  function submitManual() {
+    if (!manualUsable) return;
+    const phone = manualPhone.trim();
+    onSelect({ name: manualName.trim() || phone, phone });
+  }
 
   const filtered = useMemo(
     () => searchContacts(contacts, query),
@@ -117,9 +164,95 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
       textAlign: "center",
       lineHeight: 19,
     },
+    primaryBtn: {
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      marginTop: 6,
+      alignSelf: "stretch",
+      alignItems: "center",
+    },
+    primaryBtnDisabled: { backgroundColor: colors.muted },
+    primaryBtnText: {
+      fontSize: 15,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primaryForeground,
+    },
+    primaryBtnTextDisabled: { color: colors.mutedForeground },
+    linkBtnText: {
+      fontSize: 14,
+      fontFamily: "Inter_500Medium",
+      color: colors.primary,
+      paddingVertical: 8,
+    },
+    manualWrap: { paddingHorizontal: 20, paddingBottom: 8, gap: 10 },
+    manualField: {
+      backgroundColor: colors.muted,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 15,
+      color: colors.foreground,
+    },
+    manualHint: { fontSize: 12, color: colors.mutedForeground },
   });
 
+  function renderManual() {
+    return (
+      <View style={styles.manualWrap} testID="contacts-manual">
+        <Text style={styles.manualHint}>
+          Type the name and number yourself. Nothing is read from your phone.
+        </Text>
+        <TextInput
+          testID="contacts-manual-name"
+          style={styles.manualField}
+          placeholder="Name (optional)"
+          placeholderTextColor={colors.mutedForeground}
+          value={manualName}
+          onChangeText={setManualName}
+        />
+        <TextInput
+          testID="contacts-manual-phone"
+          style={styles.manualField}
+          placeholder="Phone number"
+          placeholderTextColor={colors.mutedForeground}
+          value={manualPhone}
+          onChangeText={setManualPhone}
+          keyboardType="phone-pad"
+          autoCorrect={false}
+        />
+        <Pressable
+          testID="contacts-manual-submit"
+          disabled={!manualUsable}
+          onPress={submitManual}
+          style={[styles.primaryBtn, !manualUsable && styles.primaryBtnDisabled]}
+        >
+          <Text
+            style={[
+              styles.primaryBtnText,
+              !manualUsable && styles.primaryBtnTextDisabled,
+            ]}
+          >
+            Use this number
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  /** The escape hatch every refusal state offers. */
+  function manualLink() {
+    return (
+      <Pressable testID="contacts-use-manual" onPress={() => setManual(true)} hitSlop={8}>
+        <Text style={styles.linkBtnText}>Type a number instead</Text>
+      </Pressable>
+    );
+  }
+
   function renderBody() {
+    if (manual) return renderManual();
+
     if (loading) {
       return (
         <View style={styles.stateWrap}>
@@ -128,16 +261,102 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
       );
     }
 
-    if (permission === "denied" || permission === "error") {
+    // The app's own ask, before the system dialog. The OS gives one chance
+    // and no reason, so the reason goes here, where a "no" costs the user
+    // nothing that cannot be undone.
+    if (askFirst) {
+      return (
+        <View style={styles.stateWrap} testID="contacts-pre-prompt">
+          <Feather name="users" size={28} color={colors.primary} />
+          <Text style={styles.stateTitle}>Pick them from your contacts?</Text>
+          <Text style={styles.stateBody}>
+            Reminders fills in the name and number for you. Your contacts stay
+            on your phone. Nothing is uploaded and nothing is stored except the
+            one person you choose.
+          </Text>
+          <Pressable
+            testID="contacts-pre-prompt-continue"
+            onPress={requestAndLoad}
+            style={styles.primaryBtn}
+          >
+            <Text style={styles.primaryBtnText}>Choose from contacts</Text>
+          </Pressable>
+          {manualLink()}
+        </View>
+      );
+    }
+
+    // Refused just now, and the OS will still ask again. Asking twice in a
+    // row is nagging, so the retry is a button the user presses, not a dialog.
+    if (permission === "denied") {
       return (
         <View style={styles.stateWrap} testID="contacts-denied">
           <Feather name="user-x" size={28} color={colors.mutedForeground} />
-          <Text style={styles.stateTitle}>Contacts aren't available</Text>
+          <Text style={styles.stateTitle}>No contact access</Text>
           <Text style={styles.stateBody}>
-            Reminders needs access to your contacts to pick who a reminder is
-            about. Your contacts never leave your phone. You can turn this on in
-            your device settings.
+            That is fine - you can type the number yourself. If you change your
+            mind, you can let Reminders read your contacts instead.
           </Text>
+          <Pressable
+            testID="contacts-denied-retry"
+            onPress={requestAndLoad}
+            style={styles.primaryBtn}
+          >
+            <Text style={styles.primaryBtnText}>Allow contacts</Text>
+          </Pressable>
+          {manualLink()}
+        </View>
+      );
+    }
+
+    // The OS has stopped asking. A retry button here would be the dead button
+    // this whole state exists to remove, so the only route left is settings.
+    if (permission === "blocked") {
+      return (
+        <View style={styles.stateWrap} testID="contacts-blocked">
+          <Feather name="lock" size={28} color={colors.mutedForeground} />
+          <Text style={styles.stateTitle}>Contacts are turned off</Text>
+          <Text style={styles.stateBody}>
+            Your phone will not ask again. You can turn contacts on for
+            Reminders in system settings, or just type the number.
+          </Text>
+          <Pressable
+            testID="contacts-open-settings"
+            onPress={() => {
+              try {
+                Linking.openSettings();
+              } catch {
+                // Nothing left to offer here; the manual route stays below.
+              }
+            }}
+            style={styles.primaryBtn}
+          >
+            <Text style={styles.primaryBtnText}>Open settings</Text>
+          </Pressable>
+          {manualLink()}
+        </View>
+      );
+    }
+
+    // Nobody refused anything - the address book itself failed. Say that,
+    // rather than accusing the user of a refusal they never made.
+    if (permission === "error") {
+      return (
+        <View style={styles.stateWrap} testID="contacts-error">
+          <Feather name="alert-circle" size={28} color={colors.mutedForeground} />
+          <Text style={styles.stateTitle}>Couldn't read your contacts</Text>
+          <Text style={styles.stateBody}>
+            Something went wrong on this phone, not with your permission. Try
+            again, or type the number.
+          </Text>
+          <Pressable
+            testID="contacts-error-retry"
+            onPress={requestAndLoad}
+            style={styles.primaryBtn}
+          >
+            <Text style={styles.primaryBtnText}>Try again</Text>
+          </Pressable>
+          {manualLink()}
         </View>
       );
     }
@@ -150,6 +369,7 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
           <Text style={styles.stateBody}>
             Add someone to your phone's contacts, then come back.
           </Text>
+          {manualLink()}
         </View>
       );
     }
@@ -158,6 +378,7 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
       return (
         <View style={styles.stateWrap} testID="contacts-no-results">
           <Text style={styles.stateBody}>No contacts match "{query}".</Text>
+          {manualLink()}
         </View>
       );
     }
@@ -200,12 +421,15 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.handle} />
           <View style={styles.headerRow}>
-            <Text style={styles.title}>Choose a contact</Text>
+            <Text style={styles.title}>
+              {manual ? "Type a number" : "Choose a contact"}
+            </Text>
             <Pressable onPress={onClose} testID="contact-picker-cancel" hitSlop={8}>
               <Text style={styles.cancel}>Cancel</Text>
             </Pressable>
           </View>
 
+          {permission === "granted" && !manual && contacts.length > 0 && (
           <View style={styles.searchWrap}>
             <Feather name="search" size={16} color={colors.mutedForeground} />
             <TextInput
@@ -218,6 +442,7 @@ export default function ContactPickerModal({ visible, onSelect, onClose }: Props
               autoCorrect={false}
             />
           </View>
+          )}
 
           {renderBody()}
         </Pressable>
