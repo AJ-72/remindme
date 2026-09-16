@@ -27,6 +27,7 @@ import { useDictation } from "@/hooks/useDictation";
 import type { PickableContact } from "@/services/ContactsService";
 import {
   incrementRegisterPromptCount,
+  markRegisterPromptShown,
   shouldOfferNumberRegistration,
   type ReminderRecipient,
 } from "@/services/ReminderService";
@@ -1043,6 +1044,7 @@ export default function AddReminderScreen() {
           // refused.
           shouldOfferNumberRegistration().then(async (offer) => {
             if (!offer) return;
+            markRegisterPromptShown();
             await incrementRegisterPromptCount();
             setOfferRegistration(picked.name);
           });

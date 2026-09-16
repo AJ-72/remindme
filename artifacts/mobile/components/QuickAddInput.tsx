@@ -328,14 +328,6 @@ export default function QuickAddInput({ onSaved }: Props) {
         }
       }
 
-      // Counted when the offer is SHOWN, not when it is refused: an offer the
-      // user scrolled past is still an offer they did not take.
-      if (recipient && (await shouldOfferNumberRegistration())) {
-        markRegisterPromptShown();
-        await incrementRegisterPromptCount();
-        setOfferRegistration(recipient.name);
-      }
-
       setInput("");
       setParsedTitle("");
       setParsedDate(null);
@@ -1219,6 +1211,19 @@ export default function QuickAddInput({ onSaved }: Props) {
           setRecipient(picked);
           setContactPickerVisible(false);
           setInvitationError(null);
+          // Raised here rather than at Save, matching add-reminder.tsx: the
+          // study's trigger is the tap that names a person, and the two
+          // screens disagreeing meant the same act offered at two different
+          // moments. Registering is also what creates the Supabase session,
+          // without which checkReachability() below returns null for every
+          // contact - so no recipient earns the in-app badge until this offer
+          // is taken. Counted when SHOWN, not when it is taken.
+          shouldOfferNumberRegistration().then(async (offer) => {
+            if (!offer) return;
+            markRegisterPromptShown();
+            await incrementRegisterPromptCount();
+            setOfferRegistration(picked.name);
+          });
           // Additive Tier 2 check - never blocks or delays showing the picked
           // contact; the existing Tier 1 WhatsApp-link flow keeps working
           // unmodified whether this resolves, fails, or is still in flight.

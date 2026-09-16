@@ -1022,9 +1022,14 @@ describe("QuickAddInput — the offer to register your own number", () => {
     });
   });
 
-  async function saveWithRecipient(getBy: any) {
+  /** Just the pick. The offer's trigger is naming a person, not saving. */
+  async function pickRecipient(getBy: any) {
     fireEvent.press(await getBy.findByTestId("quick-add-remind-someone"));
     fireEvent.press(await getBy.findByText("Priya"));
+  }
+
+  async function saveWithRecipient(getBy: any) {
+    await pickRecipient(getBy);
     fireEvent.changeText(
       await getBy.findByTestId("quick-add-input"),
       "Call Priya tomorrow at 3pm"
@@ -1036,6 +1041,17 @@ describe("QuickAddInput — the offer to register your own number", () => {
     const view = renderComponent();
     await saveWithRecipient(view);
     expect(await view.findByTestId("register-number-nudge")).toBeTruthy();
+  });
+
+  // add-reminder.tsx has always offered at the pick. The home screen waited
+  // for Save, so the same act asked at two different moments depending on
+  // which screen the user reached the picker from.
+  it("offers at the contact pick, before anything is saved", async () => {
+    const view = renderComponent();
+    await pickRecipient(view);
+
+    expect(await view.findByTestId("register-number-nudge")).toBeTruthy();
+    expect(await AsyncStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
   it("names the person who was reminded", async () => {
