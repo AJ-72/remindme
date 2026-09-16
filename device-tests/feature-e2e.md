@@ -13,6 +13,7 @@
 | [D40](#d40) | "How you're doing" adherence screen | `PENDING` | — | SEMI |
 | [D41](#d41) | Better-time suggestion on save | `PENDING` | — | SEMI |
 | [D42](#d42) | Postponed-task intervention panel | `PENDING` | — | SEMI |
+| [D43](#d43) | notifiedAt / openedAt stamping survives a cold-start race | `PENDING` | — | SEMI |
 
 ---
 
@@ -391,8 +392,8 @@ promise and the behaviour now agree.
 **Fails if.** The panel ticks the task off, the moved reminder never fires, or
 Settings still promises behaviour the app does not have.
 
-<a id="d43"></a>
-## D43 — Registration "Skip for now" actually dismisses the screen · `PENDING`
+<a id="d47"></a>
+## D47 — Registration "Skip for now" actually dismisses the screen · `PENDING`
 Jest's `expo-router` mock hardcodes `canGoBack()` to `true`, so the real
 router's behavior on first launch (no back stack under the pushed
 `register-number` screen) can only be proven on a device.
@@ -440,3 +441,41 @@ country's number.
 
 **Fails if.** The picker's selection doesn't change what gets submitted, or
 the device's guessed region silently wins anyway.
+
+---
+
+<a id="d43"></a>
+## D43 — notifiedAt / openedAt stamping survives a cold-start race · `PENDING`
+
+*Added 2026-09-16.* Jest proved the fix with two mocked functions racing each
+other (`services/ReminderService.test.ts`, "concurrent writes do not clobber
+each other"). What it cannot prove is the real trigger: a genuinely killed
+app, a real tap, real `AsyncStorage` I/O timing on a real device. The mocked
+version passing does not mean the real one does — this is exactly the class
+of bug (two async storage writers overlapping) that a real device's slower,
+less deterministic I/O could still expose in a shape the mock can't.
+
+**Setup.** One reminder due a few minutes out, with its notification alarm on.
+Force-stop the app (`adb shell am force-stop com.curios.remindme`), not just
+background it — the bug is specific to a fully killed process.
+
+**Steps.**
+1. Wait for the notification to arrive in the tray with the app killed.
+2. Tap it. This cold-starts the app straight into `reminder-detail` while
+   `RemindersProvider`'s own mount-time reschedule sweep is also running.
+3. Force-stop and repeat steps 1-2 four or five times in a row.
+4. After each run, use `adb shell run-as com.curios.remindme` (or the
+   Settings → backup export, which reads the same storage) to inspect the
+   reminder's raw stored JSON.
+
+**Pass.** Every run leaves `openedAt` set (the screen was opened) — and
+`notifiedAt`, only if the app process was still alive when the tap-triggered
+launch reached the received listener (see `Reminder.notifiedAt`'s own
+real-limitation note — `notifiedAt` can legitimately be absent on a true
+cold-start tap; `openedAt` is the one that must never be lost).
+
+**Fails if.** `openedAt` is missing on some runs but not others — that
+pattern (present sometimes, absent other times, same steps every time) is
+exactly the signature of the lost-update race the write lock was meant to
+close, and would mean the fix doesn't hold on real device I/O timing even
+though it holds against the mock.

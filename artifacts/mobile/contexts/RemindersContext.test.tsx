@@ -38,6 +38,7 @@ function Probe() {
     editReminder,
     deleteReminder,
     toggleComplete,
+    markOpened,
     snoozeReminder,
     defaultAlarmEnabled,
     setDefaultAlarmEnabled,
@@ -57,9 +58,12 @@ function Probe() {
       </Text>
       {reminders.map((r) => (
         <Text key={r.id} testID={`reminder-${r.id}`}>
-          {r.title}|{String(r.completed)}
+          {r.title}|{String(r.completed)}|{String(!!r.openedAt)}
         </Text>
       ))}
+      <Text testID="mark-opened-r1" onPress={() => markOpened("r1")}>
+        mark opened
+      </Text>
       <Text
         testID="add"
         onPress={() =>
@@ -124,7 +128,7 @@ describe("RemindersProvider", () => {
       expect(getByTestId("loading").props.children).toBe("false");
     });
     expect(getByTestId("count").props.children).toBe(1);
-    expect(getByTestId("reminder-r1").props.children.join("")).toBe("Seeded|false");
+    expect(getByTestId("reminder-r1").props.children.join("")).toBe("Seeded|false|false");
   });
 
   // Android wipes AlarmManager on every app install/update, so a stored
@@ -163,7 +167,7 @@ describe("RemindersProvider", () => {
     });
 
     await waitFor(() => expect(getByTestId("count").props.children).toBe(1));
-    expect(queryAllByText("New|false").length).toBe(1);
+    expect(queryAllByText("New|false|false").length).toBe(1);
   });
 
   it("editReminder updates the correct item in state", async () => {
@@ -185,9 +189,9 @@ describe("RemindersProvider", () => {
     });
 
     await waitFor(() =>
-      expect(getByTestId("reminder-r1").props.children.join("")).toBe("Edited|false")
+      expect(getByTestId("reminder-r1").props.children.join("")).toBe("Edited|false|false")
     );
-    expect(getByTestId("reminder-r2").props.children.join("")).toBe("Other|false");
+    expect(getByTestId("reminder-r2").props.children.join("")).toBe("Other|false|false");
   });
 
   it("deleteReminder removes the correct item from state", async () => {
@@ -225,8 +229,34 @@ describe("RemindersProvider", () => {
     });
 
     await waitFor(() =>
-      expect(getByTestId("reminder-r1").props.children.join("")).toBe("Test reminder|true")
+      expect(getByTestId("reminder-r1").props.children.join("")).toBe(
+        "Test reminder|true|false"
+      )
     );
+  });
+
+  it("markOpened stamps openedAt in both state and storage", async () => {
+    const seeded = [makeReminder({ id: "r1" })];
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+
+    const { getByTestId } = render(
+      <RemindersProvider>
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
+
+    await act(async () => {
+      getByTestId("mark-opened-r1").props.onPress();
+    });
+
+    await waitFor(() =>
+      expect(getByTestId("reminder-r1").props.children.join("")).toBe(
+        "Test reminder|false|true"
+      )
+    );
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].openedAt).toBeTruthy();
   });
 
   it("defaultAlarmEnabled defaults to true when nothing is stored", async () => {
@@ -315,7 +345,7 @@ describe("RemindersProvider", () => {
       </RemindersProvider>
     );
     await waitFor(() => expect(getByTestId("loading").props.children).toBe("false"));
-    expect(getByTestId("reminder-r1").props.children.join("")).toBe("Before|false");
+    expect(getByTestId("reminder-r1").props.children.join("")).toBe("Before|false|false");
 
     // Simulate a headless tray action (Mark Done/Snooze) writing directly to
     // AsyncStorage while the app is backgrounded, bypassing context state.
@@ -328,7 +358,7 @@ describe("RemindersProvider", () => {
     });
 
     await waitFor(() =>
-      expect(getByTestId("reminder-r1").props.children.join("")).toBe("After|false")
+      expect(getByTestId("reminder-r1").props.children.join("")).toBe("After|false|false")
     );
 
     addEventListenerSpy.mockRestore();

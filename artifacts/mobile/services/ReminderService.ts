@@ -149,6 +149,34 @@ export interface Reminder {
     to: string;
     by: string;
   };
+  /**
+   * Each deliberate postponement, in the order it happened: when, and how far
+   * it was pushed. `snoozeCount` alone says a task was avoided three times;
+   * this says whether that was three 5-minute nudges or three full days,
+   * which is a different task. Capped at MAX_SNOOZE_HISTORY_ENTRIES, oldest
+   * dropped first - the recent pattern is what matters, and an uncapped
+   * array on a reminder someone reschedules for months is unbounded growth
+   * for no benefit past a certain point.
+   */
+  snoozeHistory?: { at: string; minutes: number }[];
+  /**
+   * When a scheduled notification for this reminder last actually reached
+   * the device, stamped by NotificationResponseHandler's received listener.
+   * This is NOT the same question as "is it due" (`datetime`) - a delivered
+   * notification the user never acted on is what "missed" actually means,
+   * versus a reminder that simply has not come due yet.
+   *
+   * Real limitation, not a bug: `addNotificationReceivedListener` only fires
+   * while the app process is alive. A notification delivered to a fully
+   * killed app's tray is real but goes unrecorded here - this stamp is
+   * evidence the notification fired, not proof it's the only time it did.
+   */
+  notifiedAt?: string;
+  /** When the user last opened this reminder's own detail screen. Distinct
+   * from acting on it (`completedAt`/a snooze in `snoozeHistory`) - this
+   * alone means "looked at it", which a snooze or completion doesn't need to
+   * have happened for. */
+  openedAt?: string;
 }
 
 /**
@@ -218,6 +246,38 @@ async function quarantineCorruptStore(raw: string): Promise<void> {
 
 export async function saveReminders(reminders: Reminder[]): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(reminders));
+}
+
+/**
+ * Serializes a "load the full array, mutate one reminder, save the full
+ * array" cycle against every other one queued through here.
+ *
+ * Real bug this closes: `rescheduleAllFutureReminders()` (run once at app
+ * mount) and a by-id stamp like `markOpenedById` (run when a screen mounts)
+ * each do their own independent load-then-save. Nothing stopped them
+ * overlapping - both read the same pre-write snapshot, and whichever
+ * finished saving LAST won, silently discarding the other's change. This is
+ * not theoretical: tapping a reminder notification from a fully killed app
+ * cold-starts straight into reminder-detail, mounting alongside the
+ * provider's own mount-time reschedule sweep - exactly this race.
+ *
+ * Not yet applied to every writer in this file (addReminder, editReminder,
+ * deleteReminder(s), toggleComplete, snoozeReminder, updateSnoozeById) -
+ * those predate this queue and share the same class of risk in theory, but
+ * none of them run at the specific moment `rescheduleAllFutureReminders`
+ * does, which is what made this one observable. Widening the queue to cover
+ * all of them is future work, not assumed to already be covered here.
+ */
+let writeQueue: Promise<unknown> = Promise.resolve();
+function withWriteLock<T>(task: () => Promise<T>): Promise<T> {
+  const result = writeQueue.then(task, task);
+  // Swallow so one failed task doesn't permanently wedge the queue for
+  // everything queued after it.
+  writeQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
 }
 
 /**
@@ -379,6 +439,9 @@ export const INVITE_NUDGE_ENABLED_KEY = "@invite_nudge_enabled_v1";
  * than contactId, which changes across devices and contact merges.
  */
 export const INVITE_NUDGE_MAX_ENTRIES = 200;
+
+/** See Reminder.snoozeHistory. */
+export const MAX_SNOOZE_HISTORY_ENTRIES = 20;
 
 async function readNudgeCounts(): Promise<Record<string, number>> {
   try {
@@ -974,7 +1037,8 @@ export async function snoozeReminder(
   await cancelNotification(target.notificationId);
   const alarmOn = target.alarm !== false;
   const body = await resolveNotificationBody(target.description);
-  const snoozeTarget = resolveSnoozeTarget(preset, target.datetime, new Date());
+  const snoozedAt = new Date();
+  const snoozeTarget = resolveSnoozeTarget(preset, target.datetime, snoozedAt);
   const notificationId = await scheduleSnoozeNotification(
     {
       reminderId: id,
@@ -998,6 +1062,19 @@ export async function snoozeReminder(
           // value must survive every later snooze, since it is what makes the
           // distance a task has slid measurable.
           originalDatetime: r.originalDatetime ?? r.datetime,
+          // How far THIS snooze pushed it, measured from the moment of
+          // snoozing rather than from the reminder's own datetime - that is
+          // what "5 minutes" or "tomorrow" actually mean to the user doing
+          // it, and it handles both preset kinds uniformly.
+          snoozeHistory: [
+            ...(r.snoozeHistory ?? []),
+            {
+              at: snoozedAt.toISOString(),
+              minutes: Math.round(
+                (snoozeTarget.getTime() - snoozedAt.getTime()) / 60000
+              ),
+            },
+          ].slice(-MAX_SNOOZE_HISTORY_ENTRIES),
         }
       : r
   );
@@ -1006,35 +1083,41 @@ export async function snoozeReminder(
 }
 
 export async function rescheduleAllFutureReminders(): Promise<void> {
-  const reminders = await loadReminders();
-  const now = new Date();
-  let changed = false;
-  const updated = await Promise.all(
-    reminders.map(async (reminder) => {
-      // A reminder whose datetime has passed has ALREADY been delivered.
-      // Rescheduling it cancels nothing — cancelScheduledNotificationAsync
-      // only stops a pending trigger, it can't un-deliver a notification
-      // sitting in the tray — and shows a second copy, while overwriting
-      // notificationId so the first becomes an orphan nothing can cancel.
-      if (reminder.completed || new Date(reminder.datetime).getTime() <= now.getTime()) {
+  // See withWriteLock: this runs at app mount and can otherwise race a
+  // by-id stamp (markOpenedById/markNotifiedById) landing at the same
+  // moment - e.g. a killed app cold-started straight into reminder-detail
+  // via a notification tap.
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    const now = new Date();
+    let changed = false;
+    const updated = await Promise.all(
+      reminders.map(async (reminder) => {
+        // A reminder whose datetime has passed has ALREADY been delivered.
+        // Rescheduling it cancels nothing — cancelScheduledNotificationAsync
+        // only stops a pending trigger, it can't un-deliver a notification
+        // sitting in the tray — and shows a second copy, while overwriting
+        // notificationId so the first becomes an orphan nothing can cancel.
+        if (reminder.completed || new Date(reminder.datetime).getTime() <= now.getTime()) {
+          return reminder;
+        }
+        // Cancel by payload, not just by the stored id: a reminder that already
+        // picked up a duplicate has an orphan the stored id can't reach, and
+        // this is the path that would otherwise re-arm it every 15 minutes.
+        await cancelScheduledForReminder(reminder.id);
+        await cancelNotification(reminder.notificationId);
+        const notificationId = await scheduleNotification(reminder, reminder.id);
+        if (notificationId !== undefined) {
+          changed = true;
+          return { ...reminder, notificationId };
+        }
         return reminder;
-      }
-      // Cancel by payload, not just by the stored id: a reminder that already
-      // picked up a duplicate has an orphan the stored id can't reach, and
-      // this is the path that would otherwise re-arm it every 15 minutes.
-      await cancelScheduledForReminder(reminder.id);
-      await cancelNotification(reminder.notificationId);
-      const notificationId = await scheduleNotification(reminder, reminder.id);
-      if (notificationId !== undefined) {
-        changed = true;
-        return { ...reminder, notificationId };
-      }
-      return reminder;
-    })
-  );
-  if (changed) {
-    await saveReminders(updated);
-  }
+      })
+    );
+    if (changed) {
+      await saveReminders(updated);
+    }
+  });
 }
 
 /**
@@ -1129,6 +1212,48 @@ export async function markDoneById(id: string): Promise<void> {
   await saveReminders(updated);
 }
 
+/**
+ * Stamps notifiedAt: a scheduled notification for this reminder actually
+ * reached the device just now. Called from the received listener, not the
+ * response listener - "arrived" and "the user acted on it" are different
+ * facts, and this one only needs the first.
+ *
+ * A silent no-op for an unknown id (the notification could theoretically
+ * outlive a since-deleted reminder) rather than an error - there is nothing
+ * useful to do with that case.
+ */
+export async function markNotifiedById(id: string): Promise<void> {
+  // See withWriteLock: this can run at the same moment as the app's
+  // mount-time rescheduleAllFutureReminders() (a notification just arrived
+  // and got tapped) - without the lock, whichever finished saving second
+  // would win and silently drop the other's write.
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    if (!reminders.some((r) => r.id === id)) return;
+    const updated = reminders.map((r) =>
+      r.id === id ? { ...r, notifiedAt: new Date().toISOString() } : r
+    );
+    await saveReminders(updated);
+  });
+}
+
+/** Stamps openedAt: the user just looked at this reminder's own detail
+ * screen. See Reminder.openedAt for why this is tracked separately from
+ * completing or snoozing it. */
+export async function markOpenedById(id: string): Promise<void> {
+  // See withWriteLock and markNotifiedById's comment above - same race, this
+  // time from a notification tap cold-starting straight into the detail
+  // screen while the app's own mount-time reschedule is still in flight.
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    if (!reminders.some((r) => r.id === id)) return;
+    const updated = reminders.map((r) =>
+      r.id === id ? { ...r, openedAt: new Date().toISOString() } : r
+    );
+    await saveReminders(updated);
+  });
+}
+
 export async function updateSnoozeById(
   id: string,
   datetime: string,
@@ -1176,29 +1301,35 @@ export async function applyRecipientTimeChangeByInvitationId(
   fromDatetime: string,
   recipientName: string
 ): Promise<string | undefined> {
-  const reminders = await loadReminders();
-  const target = reminders.find((r) => r.invitationId === invitationId);
-  if (!target) return undefined;
+  // See withWriteLock and markNotifiedById's comment above - this push can
+  // arrive at the exact moment the app's own mount-time
+  // rescheduleAllFutureReminders() is still in flight (a notification
+  // tapped cold-start), the same race, just from a third writer.
+  return withWriteLock(async () => {
+    const reminders = await loadReminders();
+    const target = reminders.find((r) => r.invitationId === invitationId);
+    if (!target) return undefined;
 
-  await cancelNotification(target.notificationId);
-  const updatedData = { ...target, datetime: toDatetime };
-  const notificationId = await scheduleNotification(updatedData, target.id);
+    await cancelNotification(target.notificationId);
+    const updatedData = { ...target, datetime: toDatetime };
+    const notificationId = await scheduleNotification(updatedData, target.id);
 
-  const updated = reminders.map((r) =>
-    r.id === target.id
-      ? {
-          ...r,
-          datetime: toDatetime,
-          notificationId,
-          recipientTimeChange: { from: fromDatetime, to: toDatetime, by: recipientName },
-        }
-      : r
-  );
-  await saveReminders(updated);
-  // Returned so a caller (the notification tap handler) can navigate
-  // straight to this reminder's detail screen without a second lookup by
-  // invitation id, which no other reminder-loading function supports.
-  return target.id;
+    const updated = reminders.map((r) =>
+      r.id === target.id
+        ? {
+            ...r,
+            datetime: toDatetime,
+            notificationId,
+            recipientTimeChange: { from: fromDatetime, to: toDatetime, by: recipientName },
+          }
+        : r
+    );
+    await saveReminders(updated);
+    // Returned so a caller (the notification tap handler) can navigate
+    // straight to this reminder's detail screen without a second lookup by
+    // invitation id, which no other reminder-loading function supports.
+    return target.id;
+  });
 }
 
 // --- Backup / restore -------------------------------------------------------
