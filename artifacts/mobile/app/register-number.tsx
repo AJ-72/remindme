@@ -27,7 +27,6 @@ import {
   clearRegisteredPhone,
   getRegisteredPhone,
   getUserName,
-  markRegistrationOnboardingComplete,
   setRegisteredPhone,
 } from "@/services/ReminderService";
 import { callingCodeForRegion, listCountries, normalizeForIdentity } from "@/utils/phoneNumber";
@@ -93,8 +92,12 @@ function copyForError(error: string): string {
 export default function RegisterNumberScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { firstRun } = useLocalSearchParams<{ firstRun?: string }>();
-  const isFirstRun = firstRun === "1";
+  // `optional` marks a prompted visit rather than one the user navigated to
+  // themselves: it adds the Optional badge and the Skip button. First run no
+  // longer pushes this screen at all - the number is asked where it buys the
+  // user something, never before their first reminder.
+  const { optional } = useLocalSearchParams<{ optional?: string }>();
+  const isOptional = optional === "1";
   const [raw, setRaw] = useState("");
   const [state, setState] = useState<ScreenState>({ phase: "input" });
   const countries = useState(() => listCountries())[0];
@@ -129,16 +132,10 @@ export default function RegisterNumberScreen() {
   const canSubmit = !!e164 && state.phase !== "submitting";
   const selectedCallingCode = callingCodeForRegion(selectedRegion) ?? "";
 
-  const finishFirstRunIfNeeded = async () => {
-    if (isFirstRun) await markRegistrationOnboardingComplete();
-  };
-
   const skip = async () => {
-    await finishFirstRunIfNeeded();
-    // This screen is pushed from a root-layout effect on first run, before
-    // the stack is always guaranteed to have an entry under it - a bare
-    // router.back() then no-ops and leaves this screen on screen forever.
-    // Same fallback as invitation-preview.tsx's goBack().
+    // A prompted visit can sit at the bottom of the stack with nothing under
+    // it - a bare router.back() then no-ops and leaves this screen on screen
+    // forever. Same fallback as invitation-preview.tsx's goBack().
     if (router.canGoBack()) {
       router.back();
     } else {
@@ -160,7 +157,6 @@ export default function RegisterNumberScreen() {
       return;
     }
     await setRegisteredPhone(e164);
-    await finishFirstRunIfNeeded();
     // B11: this is the first moment a session/users row exists for someone
     // who set their name before ever registering - syncDisplayName() from
     // setUserName() would have no-op'd back then (no session yet), so it's
@@ -334,7 +330,7 @@ export default function RegisterNumberScreen() {
       fontFamily: "Inter_500Medium",
       color: colors.mutedForeground,
     },
-    firstRunBadge: {
+    optionalBadge: {
       fontSize: 12,
       fontFamily: "Inter_600SemiBold",
       color: colors.primary,
@@ -359,14 +355,14 @@ export default function RegisterNumberScreen() {
         {state.phase === "input" || state.phase === "submitting" ? (
           <>
             <Feather name="phone" size={40} color={colors.primary} />
-            {isFirstRun && (
-              <Text style={styles.firstRunBadge} testID="register-number-optional-badge">
+            {isOptional && (
+              <Text style={styles.optionalBadge} testID="register-number-optional-badge">
                 Optional
               </Text>
             )}
             <Text style={styles.title}>Add your number</Text>
             <Text style={styles.message}>
-              {isFirstRun
+              {isOptional
                 ? "Only needed if you want to remind someone else, or have someone remind you, in-app. Your own reminders work without this — you can always add it later in Settings."
                 : "Lets other people find you and remind you in-app, instead of only over WhatsApp. We don't verify it with a code yet — just don't use someone else's number."}
             </Text>
@@ -408,7 +404,7 @@ export default function RegisterNumberScreen() {
                 </Text>
               )}
             </Pressable>
-            {isFirstRun && state.phase === "input" && (
+            {isOptional && state.phase === "input" && (
               <Pressable style={styles.skipBtn} onPress={skip} testID="register-number-skip">
                 <Text style={styles.skipBtnText}>Skip for now</Text>
               </Pressable>

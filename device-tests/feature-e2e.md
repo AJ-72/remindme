@@ -479,3 +479,53 @@ pattern (present sometimes, absent other times, same steps every time) is
 exactly the signature of the lost-update race the write lock was meant to
 close, and would mean the fix doesn't hold on real device I/O timing even
 though it holds against the mock.
+
+---
+
+## D48 — First run no longer leaves the app for exact-alarm settings — `PENDING`
+
+**Why hardware only.** Jest has no system settings screen and no launcher, so
+the old auto-jump to Android's exact-alarm settings and its absence look
+identical to the suite. The whole point of this change is what the user sees
+in the first ten seconds of a real install, which is exactly what jsdom
+cannot render.
+
+**Setup.** A fresh install on Android 12+ (uninstall first, or
+`adb shell pm clear com.curios.remindme` — the flags are in `AsyncStorage`,
+so a plain reinstall over existing data proves nothing).
+
+**Steps.**
+1. Launch the app for the first time.
+2. Answer the notification permission dialog, either way.
+3. Watch what happens next, without touching anything.
+
+**Pass.** The notification dialog appears, and after it is answered the app
+stays in the foreground: the name sheet opens, and behind it sits the home
+screen. The exact-alarm settings screen never opens by itself, and the
+`register-number` modal never appears. `ExactAlarmBanner` is visible at the
+top of the home screen if the permission is missing, and its button still
+reaches the settings screen when tapped.
+
+**Fails if.** The device leaves the app for a system settings screen at any
+point without a tap, or the "Add your number" modal appears on top of the
+name sheet, or the name sheet never opens at all (the permission dialog's
+dismissing tap eating it is the specific regression to watch for, since the
+name sheet is now the only first-run ask left).
+
+## D49 — A skipped name is still skipped after a relaunch — `PENDING`
+
+**Why hardware only.** The flag survives in real `AsyncStorage` across a real
+process death, which the in-memory mock cannot demonstrate.
+
+**Setup.** Continue from D48, or a fresh install.
+
+**Steps.**
+1. On the name sheet, tap Skip.
+2. Force-stop the app (`adb shell am force-stop com.curios.remindme`).
+3. Launch it again.
+
+**Pass.** The home screen opens directly. No name sheet, no permission
+dialog, no number modal. The header keeps its tap-to-add-name affordance.
+
+**Fails if.** Any first-run surface reappears — that would mean the flag did
+not persist, and every cold start would nag a user who already declined.

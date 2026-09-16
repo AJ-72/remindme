@@ -37,7 +37,6 @@ export const SHOW_DESCRIPTION_KEY = "@show_description_v1";
 export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
 export const VIBRATION_KEY = "@vibration_v1";
 export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
-export const REGISTRATION_ONBOARDING_KEY = "@registration_onboarding_v1";
 export const REGISTERED_PHONE_KEY = "@registered_phone_v1";
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 /**
@@ -520,25 +519,6 @@ export async function hasCompletedPermissionOnboarding(): Promise<boolean> {
 
 export async function markPermissionOnboardingComplete(): Promise<void> {
   await AsyncStorage.setItem(PERMISSION_ONBOARDING_KEY, "true");
-}
-
-/**
- * First-run registration onboarding (B12) — a separate, later gate from
- * `hasCompletedPermissionOnboarding` above. Runs once per install, shown
- * only after the permission onboarding finishes, and is skippable: the
- * "remind someone else" feature is optional, so this flag is set on either
- * Skip or a successful registration, never re-shown once seen.
- */
-export async function hasCompletedRegistrationOnboarding(): Promise<boolean> {
-  try {
-    return (await AsyncStorage.getItem(REGISTRATION_ONBOARDING_KEY)) !== null;
-  } catch {
-    return false;
-  }
-}
-
-export async function markRegistrationOnboardingComplete(): Promise<void> {
-  await AsyncStorage.setItem(REGISTRATION_ONBOARDING_KEY, "true");
 }
 
 /**
