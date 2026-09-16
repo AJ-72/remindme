@@ -21,19 +21,45 @@ Built by [CuriousMind Labs](#). Android; iOS not yet built.
 - **Malayalam and English input**, typed or dictated. Type
   `അഞ്ചരയ്ക്ക് ഡോക്ടറെ വിളിക്കാൻ` and it schedules for 5:30.
 - **Voice dictation** in either language, selectable in Settings — not tied to
-  the phone's system locale.
+  the phone's system locale. The mic ends itself after a pause, shows what it
+  has heard, and offers **Done** and **Cancel** as separate answers.
 - **Share-to-remind** — forward a WhatsApp text or voice note; audio is
   transcribed to a reminder.
 - **Notification actions** — Mark Done and Snooze work with the app fully
   closed, via a TaskManager task rather than a React listener.
+- **Remind someone else** — attach a person to a reminder and hand the message
+  off to WhatsApp or SMS. Their name and number can come from your contacts or
+  be typed in; the address book is never required.
+- **Adherence, derived not logged** — a "How you're doing" screen computed from
+  the reminder records themselves, which stays silent rather than reporting a
+  number its sample cannot support.
 - **Local-first.** Everything lives in AsyncStorage. No account, no server, no
   data leaves the device.
+
+### Permissions are asked where they are earned
+
+A cold-launch permission dialog asks for something the user cannot yet judge.
+This app asks later, and says why:
+
+- **Notifications** are requested on the **first save of a reminder that can
+  still ring** — the moment the answer decides something visible. Refuse, and
+  the home screen says so, each affected card carries a **Will not ring** chip,
+  and the repair path opens system settings once Android stops showing its own
+  dialog. Nothing in the app is a button that silently does nothing.
+- **Contacts** get the app's own ask first, carrying the reason. The system
+  dialog — which Android grants once — appears only after the user agrees to it.
+  A refusal leads to a retry, a typed name and number, or system settings,
+  depending on which of those can still work.
+- **Your own phone number** is offered only after you have sent a reminder to
+  somebody, which is the first moment being reachable back means anything. The
+  offer is capped and never repeats once answered.
 
 ## Stack
 
 TypeScript · React Native / Expo SDK 54 · Expo Router · AsyncStorage ·
-expo-notifications · expo-speech-recognition · Jest + Testing Library ·
-pnpm workspaces
+expo-notifications · expo-speech-recognition · expo-contacts ·
+Supabase (Postgres + RLS + Edge Functions, for app-to-app reminders only) ·
+Jest + Testing Library · Maestro · pnpm workspaces
 
 ---
 
@@ -61,14 +87,25 @@ to something smaller.
 
 ### 2. Tests are close to 1:1 with source
 
-~4,200 lines of test against ~5,900 lines of source, across 21 test files.
-Two standing rules held throughout: **never ignore a failing test**, and
-**never leave unused code or tests**.
+~14,600 lines of test against ~17,000 lines of source, across 63 test files and
+1,177 tests. Two standing rules held throughout: **never ignore a failing
+test**, and **never leave unused code or tests**.
 
 The convention was: write the failing test, *verify it fails for the right
 reason*, then implement. Several bugs in the ledger were caught because a test
 was confirmed to fail before the fix — and at least one was caught because it
 *didn't*.
+
+### 4. Green tests are not evidence the feature works
+
+Jest runs in jsdom: no viewport, no keyboard, no notification tray, no
+microphone, no OEM power manager. Anything that fails as "off-screen", "never
+fired", or "the mic kept listening" cannot be caught by the suite at all.
+
+[`device-tests/`](device-tests/) is the list of exactly those things, each with
+a status, a reason it needs hardware, and the steps to run it. Nothing there is
+marked `PASS` by the AI — a pass comes from a person who watched it happen on a
+real phone. The list is long on purpose.
 
 ### 3. The ledger records where the AI was wrong
 
@@ -155,8 +192,8 @@ context file.
 
 Pre-release. Not yet listed on the Play Store.
 
-Known gaps, tracked in [`backlog.md`](backlog.md): no dark mode, no recurring
-reminders, no cloud backup, Android only. These are open by choice — the backlog
+Known gaps, tracked in [`backlog.md`](backlog.md): no recurring reminders, no
+cloud backup, Android only. These are open by choice — the backlog
 and the ledger are kept honest rather than curated, since a tidy backlog would
 defeat the point of publishing them.
 
