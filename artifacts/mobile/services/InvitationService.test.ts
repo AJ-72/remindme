@@ -214,7 +214,7 @@ describe("checkForInvitations", () => {
     const navigate = jest.fn();
     const result = await checkForInvitations(navigate);
     expect(navigate).not.toHaveBeenCalled();
-    expect(result).toHaveLength(2);
+    expect(result.claimed).toHaveLength(2);
   });
 
   // B15
@@ -258,14 +258,17 @@ describe("checkForInvitations", () => {
       }),
     });
     const navigate = jest.fn();
-    await expect(checkForInvitations(navigate)).resolves.toHaveLength(2);
+    await expect(checkForInvitations(navigate)).resolves.toEqual({
+      ok: true,
+      claimed: expect.any(Array),
+    });
   });
 
   it("swallows a missing session / network failure and never throws", async () => {
     (SessionService.getCurrentSession as jest.Mock).mockResolvedValue(null);
     const navigate = jest.fn();
     const result = await checkForInvitations(navigate);
-    expect(result).toEqual([]);
+    expect(result).toEqual({ ok: false, claimed: [] });
     expect(navigate).not.toHaveBeenCalled();
   });
 });

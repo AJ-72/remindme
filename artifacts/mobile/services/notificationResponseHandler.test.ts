@@ -56,7 +56,7 @@ function makeDeps() {
       datetime: new Date("2026-08-07T08:30:00").toISOString(),
       completed: false,
     }),
-    checkForInvitations: jest.fn().mockResolvedValue([]),
+    onInvitationPush: jest.fn().mockResolvedValue(undefined),
     applyRecipientTimeChange: jest.fn().mockResolvedValue("r1"),
   };
 }
@@ -389,20 +389,18 @@ describe("handleNotificationResponse — invitation push", () => {
   it("checks for invitations on a body tap, without touching any local-reminder logic", async () => {
     const deps = makeDeps();
     await handleNotificationResponse(makeInvitationResponse(DEFAULT_ACTION_IDENTIFIER), deps);
-    expect(deps.checkForInvitations).toHaveBeenCalledTimes(1);
+    expect(deps.onInvitationPush).toHaveBeenCalledTimes(1);
     expect(deps.navigateToDetail).not.toHaveBeenCalled();
     expect(deps.navigateToSend).not.toHaveBeenCalled();
     expect(deps.markDoneById).not.toHaveBeenCalled();
   });
 
-  it("does not navigate itself — headless task has no navigator, so this only claims", async () => {
-    // checkForInvitations() takes its own navigate callback; the headless
-    // deps builder wires that to a no-op, same as navigateToDetail/
-    // navigateToSend for local-reminder actions (see notificationResponseTask.ts).
-    // This test only asserts handleNotificationResponse doesn't call the
-    // local-reminder navigators — the foreground app's own launch/AppState
-    // check (useInvitationCheck) is what actually navigates once the app
-    // is open again.
+  it("does not navigate itself - it delegates the whole reaction to the dep", async () => {
+    // This function never navigates for an invitation. WHAT the reaction is
+    // belongs to whoever built the deps: the foreground builder claims and
+    // navigates, the headless builder only arms pushPending because claiming
+    // with no navigator consumes the row and leaves nothing to present
+    // (see notificationResponseTask.ts).
     const deps = makeDeps();
     await handleNotificationResponse(makeInvitationResponse(DEFAULT_ACTION_IDENTIFIER), deps);
     expect(deps.navigateToDetail).not.toHaveBeenCalled();
@@ -413,7 +411,7 @@ describe("handleNotificationResponse — invitation push", () => {
     const response = makeInvitationResponse(DEFAULT_ACTION_IDENTIFIER);
     await handleNotificationResponse(response, deps);
     await handleNotificationResponse(response, deps);
-    expect(deps.checkForInvitations).toHaveBeenCalledTimes(1);
+    expect(deps.onInvitationPush).toHaveBeenCalledTimes(1);
   });
 });
 

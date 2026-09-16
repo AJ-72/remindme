@@ -10,11 +10,13 @@ import {
 import { MARK_DONE_ACTION_ID } from "@/services/ReminderService";
 import * as ReminderService from "@/services/ReminderService";
 import * as InvitationService from "@/services/InvitationService";
+import * as Throttle from "@/services/invitationClaimThrottle";
 
 jest.mock("@/services/InvitationService", () => ({
-  checkForInvitations: jest.fn().mockResolvedValue([]),
+  checkForInvitations: jest.fn().mockResolvedValue({ ok: true, claimed: [] }),
 }));
 
+jest.mock("@/services/invitationClaimThrottle");
 // Only markNotifiedById/applyRecipientTimeChangeByInvitationId are mocked;
 // everything else stays real so the existing tap-handling tests (which
 // exercise the real notificationResponseHandler deps) are unaffected.
@@ -34,7 +36,9 @@ jest.mock("@/services/ReminderService", () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
-  (InvitationService.checkForInvitations as jest.Mock).mockResolvedValue([]);
+  (InvitationService.checkForInvitations as jest.Mock).mockResolvedValue({ ok: true, claimed: [] });
+  (Throttle.setLastClaimAt as jest.Mock).mockResolvedValue(undefined);
+  (Throttle.setPushPending as jest.Mock).mockResolvedValue(undefined);
 });
 
 describe("NotificationResponseHandler", () => {
@@ -85,11 +89,15 @@ describe("NotificationResponseHandler", () => {
     expect(addNotificationReceivedListener).toHaveBeenCalledTimes(1);
   });
 
-  it("checks for invitations when a received notification is tagged type:invitation", () => {
+  // Awaited, not synchronous: the listener arms pushPending before it claims,
+  // so the claim lands a microtask later than it used to.
+  it("checks for invitations when a received notification is tagged type:invitation", async () => {
     render(<NotificationResponseHandler />);
     const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
     onReceived({ request: { content: { data: { type: "invitation", invitationId: "inv-1" } } } });
-    expect(InvitationService.checkForInvitations).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(InvitationService.checkForInvitations).toHaveBeenCalledTimes(1)
+    );
   });
 
   it("stamps notifiedAt for a reminder's own notification, without touching invitation logic", async () => {
@@ -113,6 +121,55 @@ describe("NotificationResponseHandler", () => {
     const { unmount } = render(<NotificationResponseHandler />);
     unmount();
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("records lastClaimAt when an invitation push is received", async () => {
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    onReceived({ request: { content: { data: { type: "invitation" } } } });
+
+    await waitFor(() =>
+      expect(Throttle.setLastClaimAt).toHaveBeenCalledWith(expect.any(Number))
+    );
+  });
+
+  it("clears pushPending when an invitation push is received", async () => {
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    onReceived({ request: { content: { data: { type: "invitation" } } } });
+
+    await waitFor(() =>
+      expect(Throttle.setPushPending).toHaveBeenCalledWith(false)
+    );
+  });
+
+  // The flag has to be armed BEFORE the claim runs, so a claim that fails
+  // leaves proof that this device did receive a push.
+  it("arms pushPending before claiming, so a failed claim is not lost", async () => {
+    (InvitationService.checkForInvitations as jest.Mock).mockResolvedValue({
+      ok: false,
+      claimed: [],
+    });
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    onReceived({ request: { content: { data: { type: "invitation" } } } });
+
+    await waitFor(() => expect(Throttle.setPushPending).toHaveBeenCalledWith(true));
+    expect(Throttle.setPushPending).not.toHaveBeenCalledWith(false);
+    expect(Throttle.setLastClaimAt).not.toHaveBeenCalled();
+  });
+
+  it("does not start a cooldown when a received-push claim fails", async () => {
+    (InvitationService.checkForInvitations as jest.Mock).mockResolvedValue({
+      ok: false,
+      claimed: [],
+    });
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    onReceived({ request: { content: { data: { type: "invitation" } } } });
+
+    await waitFor(() => expect(InvitationService.checkForInvitations).toHaveBeenCalled());
+    expect(Throttle.setLastClaimAt).not.toHaveBeenCalled();
   });
 
   it("applies an invitation_time_changed push immediately on receipt, without waiting for a tap", async () => {

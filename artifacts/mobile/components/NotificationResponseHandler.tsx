@@ -20,6 +20,7 @@ import { handleNotificationResponse } from "@/services/notificationResponseHandl
 import { checkForInvitations, resolveSenderNames } from "@/services/InvitationService";
 import { navigateToInvitationPreview, navigateToPendingList } from "@/hooks/useInvitationCheck";
 import { collapseInvitationNotifications } from "@/services/invitationNotificationGrouping";
+import { setLastClaimAt, setPushPending } from "@/services/invitationClaimThrottle";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -64,8 +65,19 @@ export default function NotificationResponseHandler() {
       // this listener is already live) - a navigator exists here, unlike the
       // headless task's own deps, so this can go straight to the invitation
       // instead of waiting for the next useInvitationCheck() foreground pass.
-      checkForInvitations: () =>
-        checkForInvitations(navigateToInvitationPreview, navigateToPendingList),
+      onInvitationPush: async () => {
+        const outcome = await checkForInvitations(
+          navigateToInvitationPreview,
+          navigateToPendingList
+        );
+        // Only a reached server starts a cooldown; a failed tap-claim must
+        // leave the polling window open so the next foreground retries.
+        if (outcome.ok) {
+          await setLastClaimAt(Date.now());
+          await setPushPending(false);
+        }
+        return outcome;
+      },
       applyRecipientTimeChange: (data: {
         invitationId: string;
         toDatetime: string;
@@ -150,10 +162,23 @@ export default function NotificationResponseHandler() {
 
           if (data?.type !== "invitation") return;
 
-          const claimed = await checkForInvitations(
+          // Set BEFORE claiming, not after. If this claim fails (offline, an
+          // expired session) the flag survives, so the next launch claims
+          // regardless of the cooldown rather than losing a push that the
+          // device demonstrably received.
+          await setPushPending(true);
+
+          const outcome = await checkForInvitations(
             navigateToInvitationPreview,
             navigateToPendingList
           );
+
+          if (outcome.ok) {
+            await setLastClaimAt(Date.now());
+            await setPushPending(false);
+          }
+          const claimed = outcome.claimed;
+
           // B15: a push just landed while the app was alive to see it - if
           // that leaves 2+ invitations pending, collapse the individual
           // tray notifications into one summary rather than letting them

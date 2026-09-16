@@ -49,18 +49,22 @@ export interface NotificationResponseHandlerDeps {
   loadReminderById: (id: string) => Promise<Reminder | undefined>;
   /**
    * Reacts to a tapped invitation push (see send-invitation/index.ts's
-   * data.type:"invitation" tag). Deliberately takes no navigate callback
-   * here - a tap on a background/killed-app push has no navigator
-   * available (same headless constraint documented in
-   * notificationResponseTask.ts), so this only claims. Tapping the
-   * notification launches the app, which runs useInvitationCheck() on
-   * mount and navigates from there once claimPendingInvitations() has
-   * something to show.
+   * data.type:"invitation" tag). Deliberately takes no navigate callback: the
+   * two callers react in different ways and only they know which is possible.
+   *
+   * - Foreground (NotificationResponseHandler.tsx) HAS a navigator, so it
+   *   claims and goes straight to the invitation.
+   * - Headless (notificationResponseTask.ts) has none, so it must NOT claim -
+   *   claiming consumes the row and there would be nothing left for the app
+   *   to show. It arms a flag and lets the launch do the work.
+   *
+   * Named for the event, not for claiming, because half the implementations
+   * deliberately do not claim.
    */
-  checkForInvitations: () => Promise<unknown>;
+  onInvitationPush: () => Promise<unknown>;
   /**
    * Reacts to a tapped invitation_time_changed push (see
-   * respond-invitation/index.ts). Unlike checkForInvitations above, this
+   * respond-invitation/index.ts). Unlike onInvitationPush above, this
    * DOES need to navigate on tap - the local reminder to update already
    * exists on this device (it's the sender's own), there is nothing to
    * "go check for" first. Returns the updated reminder's local id (or
@@ -137,7 +141,11 @@ export async function handleNotificationResponse(
   // custom actions, so any tap (the default action) means "open it".
   if (isInvitationData(data)) {
     await deps.markResponseHandled(responseKey);
-    await deps.checkForInvitations();
+    // What "react to this push" means is the INJECTED dep's job, not this
+    // function's: only the caller knows whether a navigator exists, and so
+    // whether claiming here would consume the row with nothing able to show
+    // it. This module stays free of storage side effects either way.
+    await deps.onInvitationPush();
     return;
   }
 
