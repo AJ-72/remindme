@@ -7,6 +7,7 @@ import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider, useSharedText } from "@/contexts/SharedTextContext";
 import {
   DEFAULT_ALARM_KEY,
+  DICTATION_LANGUAGE_KEY,
   MAX_REGISTER_PROMPTS,
   MIC_LANGUAGE_LINE_KEY,
   REGISTERED_PHONE_KEY,
@@ -1124,7 +1125,7 @@ describe("QuickAddInput — the listening surface", () => {
     it("says so on the first microphone of the install", async () => {
       const utils = await startMic();
       const line = await utils.findByTestId("listening-language");
-      expect(line.props.children).toMatch(/English or Malayalam/);
+      expect(line.props.children).toMatch(/Tap the language above/);
     });
 
     it("says it once, and never again", async () => {
@@ -1140,6 +1141,90 @@ describe("QuickAddInput — the listening surface", () => {
       await waitFor(async () =>
         expect(await AsyncStorage.getItem(MIC_LANGUAGE_LINE_KEY)).toBe("1")
       );
+    });
+
+  });
+
+  // The setting lived only in Settings, which is the one screen a user holding
+  // a reminder to dictate is not looking at. Nothing on this screen said
+  // whether the mic expected English or Malayalam.
+  describe("which language the mic is listening for", () => {
+    it("names both languages, in their own scripts, before the user speaks", () => {
+      const utils = renderComponent();
+      expect(utils.getByTestId("dictation-language-en-US").props.children).toBeTruthy();
+      expect(utils.getByTestId("dictation-language-ml-IN")).toBeTruthy();
+    });
+
+    it("marks the active language as selected", async () => {
+      const utils = renderComponent();
+      const en = utils.getByTestId("dictation-language-en-US");
+      const ml = utils.getByTestId("dictation-language-ml-IN");
+      expect(en.props.accessibilityState.selected).toBe(true);
+      expect(ml.props.accessibilityState.selected).toBe(false);
+    });
+
+    it("says it is about dictation to a screen reader, where the icon says nothing", () => {
+      const utils = renderComponent();
+      expect(utils.getByTestId("dictation-language").props.accessibilityLabel).toBe(
+        "Dictation language"
+      );
+      expect(
+        utils.getByTestId("dictation-language-ml-IN").props.accessibilityLabel
+      ).toBe("Dictate in മലയാളം");
+    });
+
+    it("persists the change, so the next mic session uses it too", async () => {
+      const utils = renderComponent();
+      fireEvent.press(utils.getByTestId("dictation-language-ml-IN"));
+      await waitFor(async () =>
+        expect(await AsyncStorage.getItem(DICTATION_LANGUAGE_KEY)).toBe("ml-IN")
+      );
+    });
+
+    it("hands the chosen language to the recognizer", async () => {
+      const utils = renderComponent();
+      fireEvent.press(utils.getByTestId("dictation-language-ml-IN"));
+      await waitFor(async () =>
+        expect(await AsyncStorage.getItem(DICTATION_LANGUAGE_KEY)).toBe("ml-IN")
+      );
+      fireEvent.press(utils.getByTestId("quick-add-mic"));
+      await waitFor(() =>
+        expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledWith(
+          expect.objectContaining({ lang: "ml-IN" })
+        )
+      );
+    });
+
+    // A user who only finds out the language is wrong once their own words
+    // come back as nonsense needs the fix in front of them, not in Settings.
+    it("offers the other language while the mic is open", async () => {
+      const utils = await startMic();
+      expect(
+        (await utils.findByTestId("listening-language-name")).props.children
+      ).toBe("English");
+      expect(
+        utils.getByTestId("listening-language-switch").props.accessibilityLabel
+      ).toBe("Switch dictation to മലയാളം");
+    });
+
+    it("restarts the recognizer in the new language, and drops the wrong-language words", async () => {
+      const utils = await startMic();
+      fireResult("nonsense from the wrong model", true);
+      (ExpoSpeechRecognitionModule.start as jest.Mock).mockClear();
+      fireEvent.press(await utils.findByTestId("listening-language-switch"));
+      await waitFor(() =>
+        expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledWith(
+          expect.objectContaining({ lang: "ml-IN" })
+        )
+      );
+      expect(ExpoSpeechRecognitionModule.abort).toHaveBeenCalled();
+    });
+
+    // Two controls for one setting on one screen is a question, not an answer.
+    it("hides the row control while the listening card carries its own switch", async () => {
+      const utils = await startMic();
+      await utils.findByTestId("listening-surface");
+      expect(utils.queryByTestId("dictation-language")).toBeNull();
     });
   });
 

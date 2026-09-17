@@ -14,6 +14,8 @@
 | [D41](#d41) | Better-time suggestion on save | `PENDING` | — | SEMI |
 | [D42](#d42) | Postponed-task intervention panel | `PENDING` | — | SEMI |
 | [D43](#d43) | notifiedAt / openedAt stamping survives a cold-start race | `PENDING` | — | SEMI |
+| [D83](#d83) | Dictation language is visible on quick-add | `PENDING` | — | SEMI |
+| [D84](#d84) | Switching dictation language mid-session | `PENDING` | — | MANUAL |
 
 ---
 
@@ -1231,3 +1233,46 @@ recipient chip stays in place.
 **Fails if.** The X sits under the keyboard or off the right edge, the X
 overlaps the text of a long multi-line reminder, the time pill stays on
 screen after the tap, or the recipient chip disappears.
+
+## D83 — The dictation language is visible on the quick-add screen · `PENDING`
+
+**Do.** Open the home screen. Look at the row above the mic button, before
+tapping anything. Then tap **മലയാളം**. Leave the screen, come back, and look
+again.
+
+**Pass.** A row reads: a mic glyph, the word "Voice", then two pills,
+**English** and **മലയാളം**. The active one is filled, the other is not. The
+Malayalam word renders in Malayalam glyphs, not in boxes. One tap moves the
+fill. The choice survives leaving and returning, and Settings → Dictation
+language shows the same value.
+
+**Fails if.** The Malayalam pill shows tofu boxes (the Noto font is not
+applied), the row wraps or pushes the save button off the right edge on a
+narrow device, the pills are under 40 pt of tap target, or the choice does
+not match Settings.
+
+**Note.** Check both themes. The selected pill uses the card colour on a
+muted track, which is the pair most likely to lose contrast in dark mode.
+
+## D84 — Switching the dictation language while the mic is open · `PENDING`
+
+**Do.** Set the language to English. Tap the mic. Say a short Malayalam
+sentence, and let the wrong-language words appear. Tap **Switch to മലയാളം**
+inside the listening card. Say the same sentence again.
+
+**Pass.** The card says "Hearing English" before the tap. The tap stops the
+session, throws the wrong-language words away, restores the field to what it
+held before dictation, and starts a new session in Malayalam. The second
+sentence arrives in Malayalam glyphs. The row control is not on screen while
+the listening card is up.
+
+**Fails if.** The wrong-language words stay in the field, the new session
+starts in the old language, the mic does not restart at all, two language
+controls show at once, or Android asks to download the Malayalam offline
+model and the session is left dead instead of showing "Preparing voice
+recognition".
+
+**Note.** On Android the first switch to a new locale can trigger the
+offline-model download. That is the documented behaviour of
+`ensureOfflineModelReady`, not a failure — but the app must say so and
+recover on the next tap.
