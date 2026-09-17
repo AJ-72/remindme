@@ -55,6 +55,8 @@ export default function SettingsScreen() {
     setDictationLanguage,
     userName,
     setUserName,
+    telemetryEnabled,
+    setTelemetryEnabled,
   } = useReminders();
   const { preference, setPreference } = useThemePreference();
 
@@ -623,6 +625,45 @@ export default function SettingsScreen() {
               trackColor={{ false: colors.muted, true: colors.primary + "66" }}
               thumbColor={inviteNudgeEnabled ? colors.primary : colors.mutedForeground}
             />
+          </View>
+        </View>
+
+        {/* Privacy */}
+        <Text style={styles.sectionLabel}>Privacy</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <Feather
+              name={telemetryEnabled ? "bar-chart-2" : "slash"}
+              size={18}
+              color={telemetryEnabled ? colors.primary : colors.mutedForeground}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Help improve this app</Text>
+              <Text style={styles.rowSubLabel}>
+                {telemetryEnabled
+                  ? "Sends anonymous usage counts and crash reports"
+                  : "Sends nothing"}
+              </Text>
+            </View>
+            <Switch
+              testID="telemetry-switch"
+              value={telemetryEnabled}
+              onValueChange={(v) => setTelemetryEnabled(v)}
+              trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+              thumbColor={telemetryEnabled ? colors.primary : colors.mutedForeground}
+            />
+          </View>
+          <View style={[styles.explainerBody, styles.rowDivider]}>
+            <Text style={styles.explainerText}>
+              What is sent: which screens you open, that a reminder was created
+              or completed or snoozed, how far ahead it was set, and crash
+              reports when something goes wrong.
+            </Text>
+            <Text style={styles.explainerText}>
+              What is never sent: what your reminders say, their descriptions,
+              who they are for, phone numbers, contacts, or anything you
+              dictate. Your reminders stay on your phone.
+            </Text>
           </View>
         </View>
 

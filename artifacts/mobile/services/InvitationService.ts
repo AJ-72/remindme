@@ -1,5 +1,7 @@
 import { getCurrentSession, ensureSession, getSupabaseClient } from "./SessionService";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/constants/supabase";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 
 export type SendInvitationResult =
   | { ok: true; invitationId: string }
@@ -18,7 +20,10 @@ export async function sendInvitation(
   datetime: string
 ): Promise<SendInvitationResult> {
   const session = await getCurrentSession();
-  if (!session) return { ok: false, error: "not_authenticated" };
+  if (!session) {
+    track(EVENTS.INVITATION_SENT, { ok: false, error: "not_authenticated" });
+    return { ok: false, error: "not_authenticated" };
+  }
 
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/send-invitation`, {
@@ -33,10 +38,18 @@ export async function sendInvitation(
 
     const json = await res.json();
     if (!res.ok) {
+      // The error CODE only - the server's own enum, never its message, which
+      // can quote the title that was rejected.
+      track(EVENTS.INVITATION_SENT, {
+        ok: false,
+        error: String(json?.error?.code ?? "send_failed"),
+      });
       return { ok: false, error: json?.error?.code ?? "send_failed" };
     }
+    track(EVENTS.INVITATION_SENT, { ok: true, error: null });
     return { ok: true, invitationId: json.invitation.id };
   } catch {
+    track(EVENTS.INVITATION_SENT, { ok: false, error: "network_error" });
     return { ok: false, error: "network_error" };
   }
 }

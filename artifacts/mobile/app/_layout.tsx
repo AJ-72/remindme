@@ -34,6 +34,12 @@ import {
   checkExactAlarmPermission,
   hasSeenFeatureTour,
 } from "@/services/ReminderService";
+import { initAnalytics } from "@/services/AnalyticsService";
+import {
+  captureHandledError,
+  initCrashReporting,
+} from "@/services/CrashReportingService";
+import { refreshTelemetryConsent } from "@/services/telemetryConsent";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
 import { registerNotificationResponseTask } from "@/tasks/notificationResponseTask";
 import { useInvitationCheck } from "@/hooks/useInvitationCheck";
@@ -130,6 +136,19 @@ export default function RootLayout() {
     registerNotificationResponseTask();
   }, []);
 
+  // Telemetry starts here, and consent is read back FIRST. Both services
+  // no-op without their env-var credentials, so this is inert in local dev
+  // and under Jest. Nothing here is awaited by render: a telemetry endpoint
+  // being slow or unreachable must not hold up first paint.
+  useEffect(() => {
+    refreshTelemetryConsent()
+      .then(() => {
+        initCrashReporting();
+        return initAnalytics();
+      })
+      .catch(() => {});
+  }, []);
+
   // Checks for pending invitations on launch and again on every foreground
   // resume, so an already-bound user sees a sender's reminder without
   // reloading or re-registering. See hooks/useInvitationCheck.ts.
@@ -178,7 +197,13 @@ export default function RootLayout() {
         {/* Inside ThemeProvider: the icons must follow the APP's resolved
             scheme, not the device's. See ThemedStatusBar. */}
         <ThemedStatusBar />
-        <ErrorBoundary>
+        {/* The one place a render crash can still be reported before the
+            fallback screen replaces the tree. */}
+        <ErrorBoundary
+          onError={(error, componentStack) =>
+            captureHandledError(error, { component_stack: componentStack })
+          }
+        >
           <QueryClientProvider client={queryClient}>
             <GestureHandlerRootView>
               <KeyboardProvider>

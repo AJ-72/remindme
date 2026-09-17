@@ -12,6 +12,8 @@ import {
 import { buildSnoozeTitle } from "@/utils/greeting";
 import { DEFAULT_QUIET_HOURS, type QuietHours } from "@/utils/quietHours";
 
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 import {
   mergeReminders,
   parseBackup,
@@ -857,10 +859,24 @@ export async function getNotificationPermissionState(): Promise<NotificationPerm
 export async function ensureNotificationPermission(): Promise<boolean> {
   const state = await getNotificationPermissionState();
   if (state.granted) return true;
-  if (!state.canAskAgain) return false;
-  if ((await getNotifPromptCount()) >= MAX_NOTIF_PROMPTS) return false;
+  if (!state.canAskAgain) {
+    // Not the same as a refusal just now: this user said no permanently, some
+    // time ago, and the app is silently useless for them until they go into
+    // system settings. Counted separately because the fix is different.
+    track(EVENTS.PERMISSION_RESULT, { permission: "notifications", outcome: "blocked" });
+    return false;
+  }
+  if ((await getNotifPromptCount()) >= MAX_NOTIF_PROMPTS) {
+    track(EVENTS.PERMISSION_RESULT, { permission: "notifications", outcome: "ask_capped" });
+    return false;
+  }
   await incrementNotifPromptCount();
-  return requestNotificationPermissions();
+  const granted = await requestNotificationPermissions();
+  track(EVENTS.PERMISSION_RESULT, {
+    permission: "notifications",
+    outcome: granted ? "granted" : "denied",
+  });
+  return granted;
 }
 
 /**
