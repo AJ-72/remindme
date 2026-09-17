@@ -17,11 +17,11 @@ ships it.**
 | --- | --- | --- |
 | [cross-cutting.md](cross-cutting.md) | Alarm delivery mechanics — the OEM battery/Doze/AlarmManager behavior everything else depends on | D1, D7, D19, D20, D22, D25, D26 |
 | [notifications.md](notifications.md) | Notification actions, channels, dedupe | D2, D3, D4, D15, D16 |
-| [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9, D10, D11, D12, D13 |
+| [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9, D10, D11, D12, D13, D40, D41, D42, D43, D45, D47, D48, D49, D50, D51, D52, D53, D54, D55, D56, D57, D58, D59, D60, D61, D62, D63, D64, D65, D66, D67, D68, D69, D70, D71, D72, D73, D74, D75, D76, D77, D78, D79 |
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14 |
-| [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete | D17, D18, D21, D23 |
+| [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete, telemetry privacy | D17, D18, D21, D23, D79, D80, D81 |
 | [malayalam-parsing.md](malayalam-parsing.md) | On-device Malayalam input/parsing (numerals, ambiguous readings, AM/PM) | D24, + 2 unnumbered checklists |
-| [remind-others.md](remind-others.md) | M4 Tier 2, app-to-app delivery — all `BLOCKED` on a backend that does not exist yet, except D38 (local-only) | D27-D38 |
+| [remind-others.md](remind-others.md) | M4 Tier 2, app-to-app delivery — all `BLOCKED` on a backend that does not exist yet, except D38 (local-only) | D27-D39, D44, D46 |
 
 ## Status legend
 
@@ -94,6 +94,40 @@ discovering.
 | D36 | Tier 2: rebind on a new phone, and the 45-day cliff | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d36) |
 | D37 | Tier 2: cancel while the recipient is offline | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d37) |
 | D38 | Tier 2: device key persists across restart, absent on fresh install | `PENDING` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d38) |
+| D47 | Registration "Skip for now" actually dismisses the screen | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d47) |
+| D44 | Tier 2: receiver's own quiet hours gate the accepted reminder, not the sender's | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d44) |
+| D46 | Tier 2: sender is notified when the receiver moves the reminder's time | `BLOCKED` | — | SEMI | **M4-T2** | [remind-others](remind-others.md#d46) |
+| D45 | Country-code picker on registration | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d45) |
+| D48 | First run no longer leaves the app for exact-alarm settings | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d48) |
+| D49 | A skipped name is still skipped after a relaunch | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d49) |
+| D50 | The notification ask arrives on the first save | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d50) |
+| D51 | A refused permission shows a live repair path | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d51) |
+| D52 | The nudge names a ring the user already lost | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d52) |
+| D53 | Dictation ends itself after a pause | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d53) |
+| D54 | Cancel throws the words away, Done keeps them | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d54) |
+| D55 | An open mic that hears nothing says so | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d55) |
+| D56 | Leaving the app stops dictation | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d56) |
+| D57 | The contacts ask explains itself before the OS asks | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d57) |
+| D58 | A reminder for someone, with no address book | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d58) |
+| D59 | The number offer arrives after a send, and stops | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d59) |
+| D60 | The name sheet stays above the keyboard | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d60) |
+| D61 | The notification banner's button is never dead | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d61) |
+| D62 | Dictation keeps every sentence across a pause | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d62) |
+| D63 | The add/edit sheet dictates like the home bar | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d63) |
+| D64 | Remind someone else is always reachable | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d64) |
+| D65 | A typed number carries its country code | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d65) |
+| D66 | The number offer reaches the people who need it | `PENDING` | — | SEMI | — | [feature-e2e](feature-e2e.md#d66) |
+| D67 | The cold open shows examples, not an empty list | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d67) |
+| D68 | The send-to-a-person chip reads the name | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d68) |
+| D69 | The number offer arrives on the third reminder | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d69) |
+| D70 | The waveform answers the user's own voice | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d70) |
+| D71 | The guessed words read as guesses | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d71) |
+| D72 | The pause bar tells the truth about the clock | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d72) |
+| D73 | The mic says which languages it takes, once | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d73) |
+| D74 | An invited install never sees onboarding | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d74) |
+| D75 | The ring ask carries the sender's stake | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d75) |
+| D76 | The invited name ask lands on the home screen | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d76) |
+| D77 | Nothing hides behind the tab bar | `PENDING` | — | MANUAL | — | [feature-e2e](feature-e2e.md#d77) |
 
 **2026-09-04 note:** D4, D11, D16, D17, D18 moved from `PENDING` to
 `PARTIAL` — new Maestro flows (`Maestro/d4_*`, `d11_*`, `d16_*`, `d17_*`,

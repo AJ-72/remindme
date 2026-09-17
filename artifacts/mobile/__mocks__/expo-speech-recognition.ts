@@ -19,5 +19,6 @@ export const ExpoSpeechRecognitionModule = {
   }),
   start: jest.fn(),
   stop: jest.fn(),
+  abort: jest.fn(),
   addListener: jest.fn().mockReturnValue({ remove: jest.fn() }),
 };

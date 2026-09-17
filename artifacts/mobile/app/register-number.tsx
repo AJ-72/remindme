@@ -4,6 +4,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -21,14 +23,15 @@ import {
   syncDisplayName,
   type ClaimedInvitation,
 } from "@/services/InvitationService";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 import {
   clearRegisteredPhone,
   getRegisteredPhone,
   getUserName,
-  markRegistrationOnboardingComplete,
   setRegisteredPhone,
 } from "@/services/ReminderService";
-import { normalizeForIdentity } from "@/utils/phoneNumber";
+import { callingCodeForRegion, listCountries, normalizeForIdentity } from "@/utils/phoneNumber";
 
 /**
  * Self-serve first-time registration (OTP verification deferred - tracked
@@ -91,10 +94,25 @@ function copyForError(error: string): string {
 export default function RegisterNumberScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { firstRun } = useLocalSearchParams<{ firstRun?: string }>();
-  const isFirstRun = firstRun === "1";
+  // `optional` marks a prompted visit rather than one the user navigated to
+  // themselves: it adds the Optional badge and the Skip button. First run no
+  // longer pushes this screen at all - the number is asked where it buys the
+  // user something, never before their first reminder.
+  const { optional } = useLocalSearchParams<{ optional?: string }>();
+  const isOptional = optional === "1";
   const [raw, setRaw] = useState("");
   const [state, setState] = useState<ScreenState>({ phase: "input" });
+  const countries = useState(() => listCountries())[0];
+  // Defaults to the device region when it's one we recognize, so the common
+  // case needs no picker interaction - but the choice is explicit from here
+  // on, never re-guessed from the device at submit time (see B-country-code
+  // in normalizeForIdentity: an explicit pick is not ambiguous the way a
+  // device-region guess is).
+  const [selectedRegion, setSelectedRegion] = useState<string>(() => {
+    const deviceRegion = getLocales()[0]?.regionCode ?? null;
+    return deviceRegion && callingCodeForRegion(deviceRegion) ? deviceRegion : "IN";
+  });
+  const [countryPickerVisible, setCountryPickerVisible] = useState(false);
 
   // B10: a device that already registered a number must not be able to
   // silently register a second one over it - the phone check only guards
@@ -112,17 +130,19 @@ export default function RegisterNumberScreen() {
     };
   }, []);
 
-  const region = getLocales()[0]?.regionCode ?? null;
-  const { e164 } = normalizeForIdentity(raw, region);
+  const { e164 } = normalizeForIdentity(raw, selectedRegion, true);
   const canSubmit = !!e164 && state.phase !== "submitting";
-
-  const finishFirstRunIfNeeded = async () => {
-    if (isFirstRun) await markRegistrationOnboardingComplete();
-  };
+  const selectedCallingCode = callingCodeForRegion(selectedRegion) ?? "";
 
   const skip = async () => {
-    await finishFirstRunIfNeeded();
-    router.back();
+    // A prompted visit can sit at the bottom of the stack with nothing under
+    // it - a bare router.back() then no-ops and leaves this screen on screen
+    // forever. Same fallback as invitation-preview.tsx's goBack().
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)");
+    }
   };
 
   const removeNumber = async () => {
@@ -135,11 +155,16 @@ export default function RegisterNumberScreen() {
     setState({ phase: "submitting" });
     const result = await selfRegister(e164);
     if (!result.ok) {
+      track(EVENTS.NUMBER_REGISTERED, {
+        method: "self_register",
+        ok: false,
+        error: String(result.error),
+        claimed: 0,
+      });
       setState({ phase: "error", error: result.error });
       return;
     }
     await setRegisteredPhone(e164);
-    await finishFirstRunIfNeeded();
     // B11: this is the first moment a session/users row exists for someone
     // who set their name before ever registering - syncDisplayName() from
     // setUserName() would have no-op'd back then (no session yet), so it's
@@ -155,6 +180,17 @@ export default function RegisterNumberScreen() {
     registerDeviceForPush();
 
     const claimed = await claimPendingInvitations();
+    // `claimed` is the number that makes this event worth having: it is how
+    // many reminders somebody had already been sent and could not receive
+    // until this moment. A stranded invitation is the exact bug that was
+    // found live-testing on two devices (see CLAUDE.md), so it is measured
+    // now rather than rediscovered.
+    track(EVENTS.NUMBER_REGISTERED, {
+      method: "self_register",
+      ok: true,
+      error: null,
+      claimed: claimed.length,
+    });
     setState({ phase: "success", claimed });
 
     // For exactly one claimed invitation, skip the intermediate list and go
@@ -197,16 +233,73 @@ export default function RegisterNumberScreen() {
       marginBottom: 20,
       lineHeight: 20,
     },
-    input: {
+    phoneRow: {
       width: "100%",
+      flexDirection: "row",
+      gap: 8,
+      marginBottom: 18,
+    },
+    countryBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      backgroundColor: colors.muted,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+    },
+    countryBtnText: {
+      fontSize: 16,
+      fontFamily: "Inter_500Medium",
+      color: colors.foreground,
+    },
+    input: {
+      flex: 1,
       fontSize: 16,
       color: colors.foreground,
       backgroundColor: colors.muted,
       borderRadius: 12,
       paddingHorizontal: 14,
       paddingVertical: 12,
-      marginBottom: 18,
+      textAlign: "left",
+    },
+    countryModalOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.4)",
+      justifyContent: "flex-end",
+    },
+    countryModalSheet: {
+      backgroundColor: colors.card,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      maxHeight: "70%",
+      paddingTop: 16,
+    },
+    countryModalTitle: {
+      fontSize: 16,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.foreground,
       textAlign: "center",
+      marginBottom: 8,
+    },
+    countryRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    countryRowName: {
+      fontSize: 15,
+      fontFamily: "Inter_400Regular",
+      color: colors.foreground,
+    },
+    countryRowCode: {
+      fontSize: 15,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
     },
     primaryBtn: {
       width: "100%",
@@ -256,7 +349,7 @@ export default function RegisterNumberScreen() {
       fontFamily: "Inter_500Medium",
       color: colors.mutedForeground,
     },
-    firstRunBadge: {
+    optionalBadge: {
       fontSize: 12,
       fontFamily: "Inter_600SemiBold",
       color: colors.primary,
@@ -281,28 +374,39 @@ export default function RegisterNumberScreen() {
         {state.phase === "input" || state.phase === "submitting" ? (
           <>
             <Feather name="phone" size={40} color={colors.primary} />
-            {isFirstRun && (
-              <Text style={styles.firstRunBadge} testID="register-number-optional-badge">
+            {isOptional && (
+              <Text style={styles.optionalBadge} testID="register-number-optional-badge">
                 Optional
               </Text>
             )}
             <Text style={styles.title}>Add your number</Text>
             <Text style={styles.message}>
-              {isFirstRun
+              {isOptional
                 ? "Only needed if you want to remind someone else, or have someone remind you, in-app. Your own reminders work without this — you can always add it later in Settings."
                 : "Lets other people find you and remind you in-app, instead of only over WhatsApp. We don't verify it with a code yet — just don't use someone else's number."}
             </Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Your phone number"
-              placeholderTextColor={colors.mutedForeground}
-              value={raw}
-              onChangeText={setRaw}
-              keyboardType="phone-pad"
-              autoFocus
-              editable={state.phase !== "submitting"}
-              testID="register-number-input"
-            />
+            <View style={styles.phoneRow}>
+              <Pressable
+                style={styles.countryBtn}
+                onPress={() => setCountryPickerVisible(true)}
+                disabled={state.phase === "submitting"}
+                testID="register-number-country-btn"
+              >
+                <Text style={styles.countryBtnText}>+{selectedCallingCode}</Text>
+                <Feather name="chevron-down" size={14} color={colors.mutedForeground} />
+              </Pressable>
+              <TextInput
+                style={styles.input}
+                placeholder="Phone number"
+                placeholderTextColor={colors.mutedForeground}
+                value={raw}
+                onChangeText={setRaw}
+                keyboardType="phone-pad"
+                autoFocus
+                editable={state.phase !== "submitting"}
+                testID="register-number-input"
+              />
+            </View>
             <Pressable
               style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
               onPress={submit}
@@ -319,7 +423,7 @@ export default function RegisterNumberScreen() {
                 </Text>
               )}
             </Pressable>
-            {isFirstRun && state.phase === "input" && (
+            {isOptional && state.phase === "input" && (
               <Pressable style={styles.skipBtn} onPress={skip} testID="register-number-skip">
                 <Text style={styles.skipBtnText}>Skip for now</Text>
               </Pressable>
@@ -398,6 +502,41 @@ export default function RegisterNumberScreen() {
           </>
         )}
       </View>
+
+      <Modal
+        visible={countryPickerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCountryPickerVisible(false)}
+      >
+        <Pressable
+          style={styles.countryModalOverlay}
+          onPress={() => setCountryPickerVisible(false)}
+          testID="register-number-country-modal-overlay"
+        >
+          <Pressable onPress={() => {}} style={styles.countryModalSheet}>
+            <Text style={styles.countryModalTitle}>Choose a country</Text>
+            <FlatList
+              data={countries}
+              keyExtractor={(item) => item.region}
+              initialNumToRender={countries.length}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={styles.countryRow}
+                  onPress={() => {
+                    setSelectedRegion(item.region);
+                    setCountryPickerVisible(false);
+                  }}
+                  testID={`register-number-country-${item.region}`}
+                >
+                  <Text style={styles.countryRowName}>{item.name}</Text>
+                  <Text style={styles.countryRowCode}>+{item.callingCode}</Text>
+                </Pressable>
+              )}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

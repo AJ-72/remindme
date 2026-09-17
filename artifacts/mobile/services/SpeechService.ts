@@ -2,6 +2,9 @@ import { Platform } from "react-native";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { File, Paths } from "expo-file-system";
 import { logDebug } from "@/services/DebugLogService";
+import { normaliseMicLevel } from "@/utils/micLevel";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 
 export async function getMicPermissionStatus(): Promise<{
   granted: boolean;
@@ -84,43 +87,131 @@ export async function resolveDictationReadiness(locale: string): Promise<{
 
 let activeMode: "live" | "file" | null = null;
 let activeSubscriptions: { remove: () => void }[] = [];
+/**
+ * Hands the segment still in progress to the field before the session closes.
+ * stopListening() clears the listeners synchronously, so a final result the
+ * recognizer emits on stop has nobody left to receive it - without this, the
+ * last words spoken before Done would be dropped.
+ */
+let flushPending: (() => void) | null = null;
 
 function clearActiveSession(): void {
   activeSubscriptions.forEach((sub) => sub.remove());
   activeSubscriptions = [];
   activeMode = null;
+  flushPending = null;
 }
 
+/** How often the recognizer reports loudness. Fast enough to read as a voice. */
+export const VOLUME_EVENT_INTERVAL_MS = 100;
+
+export interface LiveSessionHooks {
+  /**
+   * The segment the recognizer has not committed yet, or "" when there is
+   * none. Kept out of the text field on purpose: a guess and a committed
+   * word look identical once they are in the same input, and the field
+   * cannot render two colours.
+   */
+  onInterim?: (segment: string) => void;
+  /** Input loudness, already normalised to 0..1 by normaliseMicLevel(). */
+  onVolume?: (level: number) => void;
+}
+
+/**
+ * Dictation telemetry. Reported here rather than at the call sites because
+ * both of them (QuickAddInput's mic, and a shared audio payload) route
+ * through this module, and the question - does voice entry actually work for
+ * people, or do they give up on it - is meaningless split in two.
+ *
+ * Only the locale and whether a transcript came back are ever sent. The words
+ * themselves never leave the device through this path.
+ */
 export function startListening(
   baseline: string,
   locale: string,
   onResult: (fullText: string) => void,
   onEnd: () => void,
   onError: (message: string) => void,
-  onDevice: boolean = true
+  onDevice: boolean = true,
+  hooks?: LiveSessionHooks
 ): { busy: boolean } {
   if (activeMode !== null) return { busy: true };
   activeMode = "live";
+  track(EVENTS.DICTATION_STARTED, { locale, on_device: onDevice });
+  let heardAnything = false;
 
+  // With `continuous: true` the recognizer does not hand back one growing
+  // transcript. It closes a segment at each pause, emits it with
+  // isFinal: true, and starts the NEXT segment from empty - so a handler that
+  // rebuilds the field as `baseline + transcript` every time wipes out every
+  // earlier sentence the moment the user pauses and speaks again. Finished
+  // segments are kept here instead, and only the segment still in progress is
+  // replaced on each interim event.
+  let committed = "";
+  let pending = "";
+  const join = (...parts: string[]) => parts.filter((p) => p !== "").join(" ").trim();
+  const commit = (segment: string) => {
+    if (segment.trim() !== "") heardAnything = true;
+    committed = join(committed, segment);
+    pending = "";
+    hooks?.onInterim?.("");
+    onResult(join(baseline, committed));
+  };
+  flushPending = () => {
+    if (pending === "") return;
+    commit(pending);
+  };
   const resultSub = ExpoSpeechRecognitionModule.addListener("result", (event: any) => {
     const transcript = event.results?.[0]?.transcript ?? "";
-    const combined = `${baseline} ${transcript}`.trim();
-    onResult(combined);
+    if (event.isFinal) {
+      commit(transcript);
+      return;
+    }
+    // The field keeps only committed words. The segment in progress goes to
+    // the listening surface, where it can be drawn grey and read as a guess.
+    pending = transcript;
+    hooks?.onInterim?.(transcript);
   });
   const endSub = ExpoSpeechRecognitionModule.addListener("end", () => {
     clearActiveSession();
+    // A session that ends having heard nothing is the failure users actually
+    // hit - no error is raised, the mic just closes and the field is empty -
+    // and it is invisible without being counted separately here.
+    track(EVENTS.DICTATION_COMPLETED, { locale, got_text: heardAnything });
     onEnd();
   });
   const errorSub = ExpoSpeechRecognitionModule.addListener("error", (event: any) => {
     clearActiveSession();
+    // event.code is the recognizer's own enum, not user speech.
+    track(EVENTS.DICTATION_FAILED, {
+      locale,
+      code: String(event?.error ?? event?.code ?? "unknown"),
+    });
     onError(event?.message ?? "Speech recognition error");
   });
   activeSubscriptions = [resultSub, endSub, errorSub];
+  if (hooks?.onVolume) {
+    activeSubscriptions.push(
+      ExpoSpeechRecognitionModule.addListener("volumechange", (event: any) => {
+        hooks.onVolume?.(normaliseMicLevel(event?.value));
+      })
+    );
+  }
 
   ExpoSpeechRecognitionModule.start({
     lang: locale,
     interimResults: true,
     requiresOnDeviceRecognition: onDevice,
+    // Off by default in the module, and silent rather than an error when it
+    // is left off - so the waveform would simply never move.
+    ...(hooks?.onVolume
+      ? {
+          volumeChangeEventOptions: {
+            enabled: true,
+            intervalMillis: VOLUME_EVENT_INTERVAL_MS,
+          },
+        }
+      : {}),
     // Without this, recognition ends at the first pause in speech (iOS
     // 17-: after 3s of silence; iOS 18+/Android: as soon as any isFinal
     // result comes in) — the mic then reads as "stopped" mid-sentence.
@@ -134,8 +225,36 @@ export function startListening(
 
 export function stopListening(): void {
   if (activeMode === null) return;
+  // Before the listeners go, not after: Done must keep the half-spoken
+  // segment the user had just finished saying.
+  flushPending?.();
   ExpoSpeechRecognitionModule.stop();
   clearActiveSession();
+}
+
+/**
+ * Throw the session away instead of ending it.
+ *
+ * stopListening() asks the recognizer to finish, so a last partial phrase can
+ * still arrive and land in the input. Cancel means the user wants nothing of
+ * what was said, so the listeners are removed BEFORE the native call - a late
+ * result then has nowhere to go. Falls back to stop() on an older module
+ * build that has no abort().
+ */
+export function abortListening(): void {
+  if (activeMode === null) return;
+  clearActiveSession();
+  try {
+    const mod = ExpoSpeechRecognitionModule as unknown as {
+      abort?: () => void;
+      stop: () => void;
+    };
+    if (typeof mod.abort === "function") mod.abort();
+    else mod.stop();
+  } catch {
+    // The session is already forgotten on this side; a native failure here
+    // must not leave the caller believing the mic is still live.
+  }
 }
 
 export function isFileTranscriptionSupported(): boolean {

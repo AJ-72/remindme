@@ -4,6 +4,8 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import ReminderCard from "./ReminderCard";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import type { Reminder } from "@/services/ReminderService";
+import { getPermissionsAsync } from "expo-notifications";
+import { resetNotificationPermissionCache } from "@/hooks/useNotificationPermission";
 
 jest.mock("expo-haptics");
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
@@ -102,6 +104,43 @@ describe("ReminderCard — send reminders", () => {
       ])
     );
   });
+
+  it("shows a 'Moved by' note when the recipient changed the time", () => {
+    const { getByTestId, getByText } = renderCard(
+      makeReminder({
+        recipient: { name: "Priya", phone: "9876543210" },
+        recipientTimeChange: {
+          from: "2026-09-09T23:00:00.000Z",
+          to: "2026-09-10T08:00:00.000Z",
+          by: "Priya",
+        },
+      })
+    );
+    expect(getByTestId("recipient-time-change-note")).toBeTruthy();
+    expect(getByText("Moved by Priya")).toBeTruthy();
+  });
+
+  it("shows no time-change note when the recipient never moved it", () => {
+    const { queryByTestId } = renderCard(
+      makeReminder({ recipient: { name: "Priya", phone: "9876543210" } })
+    );
+    expect(queryByTestId("recipient-time-change-note")).toBeNull();
+  });
+
+  it("never shows the time-change note on an ordinary (non-send) reminder", () => {
+    // isSendReminder gates this the same as the recipient chip - a plain
+    // reminder has no recipient to have moved anything.
+    const { queryByTestId } = renderCard(
+      makeReminder({
+        recipientTimeChange: {
+          from: "2026-09-09T23:00:00.000Z",
+          to: "2026-09-10T08:00:00.000Z",
+          by: "Priya",
+        },
+      })
+    );
+    expect(queryByTestId("recipient-time-change-note")).toBeNull();
+  });
 });
 
 describe("ReminderCard — received reminders (B13)", () => {
@@ -173,5 +212,54 @@ describe("ReminderCard — tap routing", () => {
         params: { id: "r1" },
       })
     );
+  });
+});
+
+describe("ReminderCard — the will-not-ring chip", () => {
+  beforeEach(() => {
+    resetNotificationPermissionCache();
+    (getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: "denied",
+      canAskAgain: true,
+    });
+  });
+
+  afterEach(() => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: "granted",
+      android: { alarm: true },
+    });
+    resetNotificationPermissionCache();
+  });
+
+  it("marks a future reminder that cannot ring", async () => {
+    const { findByTestId } = renderCard(makeReminder());
+    expect(await findByTestId("will-not-ring-chip")).toBeTruthy();
+  });
+
+  // Granting permission now cannot rescue a ring that already failed, so the
+  // chip would be a label the user can do nothing about.
+  it("stays off an overdue reminder", async () => {
+    const { queryByTestId } = renderCard(
+      makeReminder({ datetime: new Date(Date.now() - 3600_000).toISOString() })
+    );
+    await waitFor(() => expect(getPermissionsAsync).toHaveBeenCalled());
+    expect(queryByTestId("will-not-ring-chip")).toBeNull();
+  });
+
+  it("stays off a completed reminder", async () => {
+    const { queryByTestId } = renderCard(makeReminder({ completed: true }));
+    await waitFor(() => expect(getPermissionsAsync).toHaveBeenCalled());
+    expect(queryByTestId("will-not-ring-chip")).toBeNull();
+  });
+
+  it("stays off entirely once permission is granted", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: "granted",
+      canAskAgain: true,
+    });
+    const { queryByTestId } = renderCard(makeReminder());
+    await waitFor(() => expect(getPermissionsAsync).toHaveBeenCalled());
+    expect(queryByTestId("will-not-ring-chip")).toBeNull();
   });
 });

@@ -10,6 +10,8 @@ import {
   claimPendingInvitations,
   type ClaimedInvitation,
 } from "@/services/InvitationService";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 import { registerDeviceForPush } from "@/services/DeviceRegistrationService";
 
 /**
@@ -81,6 +83,12 @@ export default function BindInviteScreen() {
       if (cancelled) return;
 
       if (!result.ok) {
+        track(EVENTS.NUMBER_REGISTERED, {
+          method: "invite_link",
+          ok: false,
+          error: String(result.error),
+          claimed: 0,
+        });
         setState({ phase: "error", error: result.error });
         return;
       }
@@ -93,15 +101,27 @@ export default function BindInviteScreen() {
       registerDeviceForPush();
 
       const claimed = await claimPendingInvitations();
+      track(EVENTS.NUMBER_REGISTERED, {
+        method: "invite_link",
+        ok: true,
+        error: null,
+        claimed: claimed.length,
+      });
       if (cancelled) return;
-      setState({ phase: "success", claimed });
 
       // For exactly one claimed invitation, skip the intermediate list and
       // go straight to invitation-preview - the list only earns its place
       // when there's more than one row to choose from (see task-16 brief).
+      //
+      // The success state is deliberately NOT set on that path. Setting it
+      // first painted "You're all set" for a frame before the navigation,
+      // which put a congratulation in front of the reminder the user tapped
+      // a link to read. The invitation is the payoff; nothing goes before it.
       if (claimed.length === 1) {
         navigateToInvitationPreview(claimed[0]);
+        return;
       }
+      setState({ phase: "success", claimed });
     }
 
     run();

@@ -3,6 +3,13 @@ import { AppState } from "react-native";
 import { router } from "expo-router";
 
 import { checkForInvitations, type ClaimedInvitation } from "@/services/InvitationService";
+import {
+  shouldClaimNow,
+  getLastClaimAt,
+  setLastClaimAt,
+  getPushPending,
+  setPushPending,
+} from "@/services/invitationClaimThrottle";
 
 /**
  * Closes the gap where a pending invitation only surfaced by re-running
@@ -51,11 +58,43 @@ export function navigateToPendingList(invitations: ClaimedInvitation[]) {
 
 export function useInvitationCheck(): void {
   useEffect(() => {
-    checkForInvitations(navigateToInvitationPreview, navigateToPendingList);
+    const checkAndClaim = async () => {
+      const now = Date.now();
+      const lastClaimAt = await getLastClaimAt();
+      const pushPending = await getPushPending();
+
+      if (!shouldClaimNow(lastClaimAt, now, pushPending)) {
+        return;
+      }
+
+      const outcome = await checkForInvitations(
+        navigateToInvitationPreview,
+        navigateToPendingList
+      );
+
+      // ONLY a confirmed server response may start a cooldown. An offline
+      // app-open, an expired session or a 500 all come back ok:false, and
+      // starting the window on one of those would blind the app for the
+      // whole cooldown over a call that never reached Supabase.
+      if (!outcome.ok) return;
+
+      await setLastClaimAt(now);
+
+      // Cleared on ANY successful claim, not only one that returned rows.
+      // The headless task sets this flag and then claims the row itself, so
+      // the launch that follows legitimately sees an empty list - gating the
+      // clear on claimed.length would leave the flag set forever and disable
+      // the throttle permanently for that install.
+      if (pushPending) {
+        await setPushPending(false);
+      }
+    };
+
+    checkAndClaim();
 
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
-        checkForInvitations(navigateToInvitationPreview, navigateToPendingList);
+        checkAndClaim();
       }
     });
     return () => sub.remove();

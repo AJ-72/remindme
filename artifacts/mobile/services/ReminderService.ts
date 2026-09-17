@@ -12,6 +12,8 @@ import {
 import { buildSnoozeTitle } from "@/utils/greeting";
 import { DEFAULT_QUIET_HOURS, type QuietHours } from "@/utils/quietHours";
 
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 import {
   mergeReminders,
   parseBackup,
@@ -36,9 +38,24 @@ export const DEFAULT_EXACT_TIMING_KEY = "@default_exact_timing_v1";
 export const SHOW_DESCRIPTION_KEY = "@show_description_v1";
 export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
 export const VIBRATION_KEY = "@vibration_v1";
-export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
-export const REGISTRATION_ONBOARDING_KEY = "@registration_onboarding_v1";
+/**
+ * How many times this install has put the system notification dialog in front
+ * of the user. Capped by MAX_NOTIF_PROMPTS: Android only honours the first
+ * two requests anyway, and a third refusal is an answer, not an accident.
+ */
+export const NOTIF_PROMPT_COUNT_KEY = "@notif_prompt_count_v1";
+export const MAX_NOTIF_PROMPTS = 3;
 export const REGISTERED_PHONE_KEY = "@registered_phone_v1";
+/**
+ * How many times this install has offered to register the user's own phone
+ * number. The offer only appears where it is earned - after the user sends a
+ * reminder to somebody else, which is the first moment being reachable back
+ * means anything - and MAX_REGISTER_PROMPTS stops it becoming a fixture.
+ */
+export const REGISTER_PROMPT_COUNT_KEY = "@register_prompt_count_v1";
+export const MAX_REGISTER_PROMPTS = 2;
+export const MIC_LANGUAGE_LINE_KEY = "@mic_language_line_seen_v1";
+export const INVITE_NAME_ASK_KEY = "@invite_name_ask_v1";
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 /**
  * Corrupt reminder payloads are copied here rather than discarded. AsyncStorage
@@ -49,10 +66,14 @@ export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 export const QUARANTINE_KEY_PREFIX = "@reminders_corrupt_";
 export const QUIET_HOURS_KEY = "@quiet_hours_v1";
 export const USER_NAME_KEY = "@user_name_v1";
-// Separate from PERMISSION_ONBOARDING_KEY on purpose: one flow completing must
-// not mark the other done, or a user who granted permissions before this
-// feature existed would never be asked their name.
+// Its own key on purpose: no other onboarding flow completing may mark the
+// name prompt done, or a user who granted permissions before this feature
+// existed would never be asked their name.
 export const NAME_PROMPT_KEY = "@name_prompt_v1";
+// Its own key too, for the same reason as NAME_PROMPT_KEY: a user who
+// installed before the feature tour existed should still see it once, not
+// have it silently marked seen by some other onboarding flag settling.
+export const FEATURE_TOUR_KEY = "@feature_tour_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 // NOTE: the value must stay "SNOOZE_10" even though snooze is now
 // user-configurable. It is written into the categoryIdentifier of every
@@ -129,6 +150,54 @@ export interface Reminder {
   /** The sender's app user id, paired with senderName. Local-only context;
    * never sent anywhere - see invitation-preview.tsx for where it's read. */
   senderId?: string;
+  /**
+   * Set only on the SENDER's own local copy of a send-reminder (never on the
+   * recipient's accepted copy, which has no reason to reference the row it
+   * came from). Lets an incoming `invitation_time_changed` push find the
+   * right local reminder to update - see
+   * applyRecipientTimeChangeByInvitationId() below and
+   * QuickAddInput.tsx#performSave, which is the only place this gets set.
+   */
+  invitationId?: string;
+  /**
+   * Present only when the recipient moved this reminder's time on accept
+   * (see respond-invitation's push and notificationResponseHandler.ts).
+   * Rendered as a note on the sender's own card/detail screen so the new
+   * time doesn't look unexplained - see ReminderCard.tsx/reminder-detail.tsx.
+   */
+  recipientTimeChange?: {
+    from: string;
+    to: string;
+    by: string;
+  };
+  /**
+   * Each deliberate postponement, in the order it happened: when, and how far
+   * it was pushed. `snoozeCount` alone says a task was avoided three times;
+   * this says whether that was three 5-minute nudges or three full days,
+   * which is a different task. Capped at MAX_SNOOZE_HISTORY_ENTRIES, oldest
+   * dropped first - the recent pattern is what matters, and an uncapped
+   * array on a reminder someone reschedules for months is unbounded growth
+   * for no benefit past a certain point.
+   */
+  snoozeHistory?: { at: string; minutes: number }[];
+  /**
+   * When a scheduled notification for this reminder last actually reached
+   * the device, stamped by NotificationResponseHandler's received listener.
+   * This is NOT the same question as "is it due" (`datetime`) - a delivered
+   * notification the user never acted on is what "missed" actually means,
+   * versus a reminder that simply has not come due yet.
+   *
+   * Real limitation, not a bug: `addNotificationReceivedListener` only fires
+   * while the app process is alive. A notification delivered to a fully
+   * killed app's tray is real but goes unrecorded here - this stamp is
+   * evidence the notification fired, not proof it's the only time it did.
+   */
+  notifiedAt?: string;
+  /** When the user last opened this reminder's own detail screen. Distinct
+   * from acting on it (`completedAt`/a snooze in `snoozeHistory`) - this
+   * alone means "looked at it", which a snooze or completion doesn't need to
+   * have happened for. */
+  openedAt?: string;
 }
 
 /**
@@ -201,6 +270,38 @@ export async function saveReminders(reminders: Reminder[]): Promise<void> {
 }
 
 /**
+ * Serializes a "load the full array, mutate one reminder, save the full
+ * array" cycle against every other one queued through here.
+ *
+ * Real bug this closes: `rescheduleAllFutureReminders()` (run once at app
+ * mount) and a by-id stamp like `markOpenedById` (run when a screen mounts)
+ * each do their own independent load-then-save. Nothing stopped them
+ * overlapping - both read the same pre-write snapshot, and whichever
+ * finished saving LAST won, silently discarding the other's change. This is
+ * not theoretical: tapping a reminder notification from a fully killed app
+ * cold-starts straight into reminder-detail, mounting alongside the
+ * provider's own mount-time reschedule sweep - exactly this race.
+ *
+ * Not yet applied to every writer in this file (addReminder, editReminder,
+ * deleteReminder(s), toggleComplete, snoozeReminder, updateSnoozeById) -
+ * those predate this queue and share the same class of risk in theory, but
+ * none of them run at the specific moment `rescheduleAllFutureReminders`
+ * does, which is what made this one observable. Widening the queue to cover
+ * all of them is future work, not assumed to already be covered here.
+ */
+let writeQueue: Promise<unknown> = Promise.resolve();
+function withWriteLock<T>(task: () => Promise<T>): Promise<T> {
+  const result = writeQueue.then(task, task);
+  // Swallow so one failed task doesn't permanently wedge the queue for
+  // everything queued after it.
+  writeQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
+/**
  * The user's own name, or "" when unset. Never undefined - the empty string is
  * the single "no name" signal every consumer checks.
  */
@@ -230,6 +331,23 @@ export async function hasSeenNamePrompt(): Promise<boolean> {
 export async function markNamePromptSeen(): Promise<void> {
   try {
     await AsyncStorage.setItem(NAME_PROMPT_KEY, "1");
+  } catch {}
+}
+
+/** Whether the first-launch feature tour has been shown (finished OR skipped). */
+export async function hasSeenFeatureTour(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(FEATURE_TOUR_KEY)) !== null;
+  } catch {
+    // Same reasoning as hasSeenNamePrompt: treat a storage failure as
+    // "already seen" rather than re-showing the tour on every cold start.
+    return true;
+  }
+}
+
+export async function markFeatureTourSeen(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(FEATURE_TOUR_KEY, "1");
   } catch {}
 }
 
@@ -360,6 +478,9 @@ export const INVITE_NUDGE_ENABLED_KEY = "@invite_nudge_enabled_v1";
  */
 export const INVITE_NUDGE_MAX_ENTRIES = 200;
 
+/** See Reminder.snoozeHistory. */
+export const MAX_SNOOZE_HISTORY_ENTRIES = 20;
+
 async function readNudgeCounts(): Promise<Record<string, number>> {
   try {
     const raw = await AsyncStorage.getItem(INVITE_NUDGE_COUNT_KEY);
@@ -427,35 +548,133 @@ export async function resolveNotificationBody(
   return "Reminder!";
 }
 
-export async function hasCompletedPermissionOnboarding(): Promise<boolean> {
+export async function getNotifPromptCount(): Promise<number> {
   try {
-    return (await AsyncStorage.getItem(PERMISSION_ONBOARDING_KEY)) !== null;
+    const raw = await AsyncStorage.getItem(NOTIF_PROMPT_COUNT_KEY);
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 0;
   } catch {
-    return false;
+    return 0;
   }
 }
 
-export async function markPermissionOnboardingComplete(): Promise<void> {
-  await AsyncStorage.setItem(PERMISSION_ONBOARDING_KEY, "true");
+export async function incrementNotifPromptCount(): Promise<number> {
+  const next = (await getNotifPromptCount()) + 1;
+  try {
+    await AsyncStorage.setItem(NOTIF_PROMPT_COUNT_KEY, String(next));
+  } catch {}
+  return next;
+}
+
+export async function getRegisterPromptCount(): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(REGISTER_PROMPT_COUNT_KEY);
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function incrementRegisterPromptCount(): Promise<number> {
+  const next = (await getRegisterPromptCount()) + 1;
+  try {
+    await AsyncStorage.setItem(REGISTER_PROMPT_COUNT_KEY, String(next));
+  } catch {}
+  return next;
 }
 
 /**
- * First-run registration onboarding (B12) — a separate, later gate from
- * `hasCompletedPermissionOnboarding` above. Runs once per install, shown
- * only after the permission onboarding finishes, and is skippable: the
- * "remind someone else" feature is optional, so this flag is set on either
- * Skip or a successful registration, never re-shown once seen.
+ * The name ask an invited install owes, and who is waiting to read it.
+ *
+ * An invited install meets the app through somebody else's reminder, so the
+ * first-launch name sheet is exactly the wrong thing to put in front of it -
+ * the invitation is the reason they opened the app. The ask moves to the
+ * home screen behind Accept, where it can name the person who will actually
+ * see the answer, which is the only argument for typing a name at all.
+ *
+ * The value is the sender's display name. It is cleared by answering OR by
+ * skipping: this is one ask, not a standing banner.
  */
-export async function hasCompletedRegistrationOnboarding(): Promise<boolean> {
+export async function getPendingInviteNameAsk(): Promise<string | null> {
   try {
-    return (await AsyncStorage.getItem(REGISTRATION_ONBOARDING_KEY)) !== null;
+    return await AsyncStorage.getItem(INVITE_NAME_ASK_KEY);
   } catch {
+    return null;
+  }
+}
+
+export async function setPendingInviteNameAsk(senderName: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, senderName);
+  } catch {
+    // The ask is a courtesy. Losing it costs the user nothing.
+  }
+}
+
+export async function clearPendingInviteNameAsk(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(INVITE_NAME_ASK_KEY);
+  } catch {}
+}
+
+/**
+ * Whether to say, on this mic session, which languages the mic takes.
+ *
+ * The app recognises Malayalam as well as English, and nothing on screen has
+ * ever said so - the setting is in Settings, which is the one place a user
+ * with a reminder to dictate is not looking. The first open microphone is
+ * where that sentence costs nothing and answers a question the user is
+ * already holding, so it is said exactly once per install.
+ */
+export async function shouldShowMicLanguageLine(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(MIC_LANGUAGE_LINE_KEY)) === null;
+  } catch {
+    // Unreadable storage must not cost the user their dictation. Staying
+    // silent repeats nothing; showing it again would.
     return false;
   }
 }
 
-export async function markRegistrationOnboardingComplete(): Promise<void> {
-  await AsyncStorage.setItem(REGISTRATION_ONBOARDING_KEY, "true");
+export async function markMicLanguageLineSeen(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(MIC_LANGUAGE_LINE_KEY, "1");
+  } catch {
+    // Worst case the line appears on one more mic tap.
+  }
+}
+
+/**
+ * Whether to offer registration at all.
+ *
+ * Two reasons not to: the number is already registered, so there is nothing
+ * to ask for; or the offer has been made its full number of times and refused,
+ * which is an answer.
+ */
+export async function shouldOfferNumberRegistration(): Promise<boolean> {
+  if (registerPromptShownThisSession) return false;
+  if (await getRegisteredPhone()) return false;
+  return (await getRegisterPromptCount()) < MAX_REGISTER_PROMPTS;
+}
+
+/**
+ * Two surfaces can reach the same offer in one run of the app - a reminder
+ * aimed at somebody else, and the third reminder saved - and two asks in one
+ * sitting read as nagging however well each one is placed on its own. This
+ * flag is deliberately in memory rather than in AsyncStorage: "this session"
+ * ends when the process does, and a persisted flag would silence the offer
+ * for good the first time it was set.
+ */
+let registerPromptShownThisSession = false;
+
+export function markRegisterPromptShown(): void {
+  registerPromptShownThisSession = true;
+}
+
+/** Test seam. The app itself never needs to un-show an offer. */
+export function resetRegisterPromptSession(): void {
+  registerPromptShownThisSession = false;
 }
 
 /**
@@ -596,6 +815,80 @@ export async function setupSnoozeCategory(preset: SnoozePreset): Promise<void> {
 // treat permission as denied and silently skip scheduling.
 let permissionRequestInFlight: Promise<boolean> | null = null;
 
+/**
+ * What the OS currently thinks, with no dialog shown.
+ *
+ * `canAskAgain === false` is the state nothing in this app used to read: the
+ * user has refused permanently, every further request resolves instantly as
+ * denied, and any button wired to a request silently does nothing. Callers
+ * must send that user to system settings instead.
+ */
+export interface NotificationPermissionState {
+  granted: boolean;
+  canAskAgain: boolean;
+}
+
+export async function getNotificationPermissionState(): Promise<NotificationPermissionState> {
+  if (Platform.OS === "web" || !Notifications) {
+    return { granted: false, canAskAgain: false };
+  }
+  try {
+    const res = await Notifications.getPermissionsAsync();
+    return {
+      granted: res?.status === "granted",
+      // Older expo-notifications versions omit the field. Treat a missing
+      // value as "may ask" - a wrongly suppressed dialog is worse than one
+      // extra request the OS will drop on the floor.
+      canAskAgain: res?.canAskAgain !== false,
+    };
+  } catch {
+    return { granted: false, canAskAgain: false };
+  }
+}
+
+/**
+ * The notification ladder. This is the only function a save path should call.
+ *
+ * Rung 1: already granted - nothing to do.
+ * Rung 2: may still ask, and this install has asked fewer than
+ *         MAX_NOTIF_PROMPTS times - show the system dialog and count it.
+ * Rung 3: refused permanently, or the cap is spent - do not ask. The caller
+ *         surfaces a repair path (openAppSettings) instead of a dialog the
+ *         user will never see.
+ */
+export async function ensureNotificationPermission(): Promise<boolean> {
+  const state = await getNotificationPermissionState();
+  if (state.granted) return true;
+  if (!state.canAskAgain) {
+    // Not the same as a refusal just now: this user said no permanently, some
+    // time ago, and the app is silently useless for them until they go into
+    // system settings. Counted separately because the fix is different.
+    track(EVENTS.PERMISSION_RESULT, { permission: "notifications", outcome: "blocked" });
+    return false;
+  }
+  if ((await getNotifPromptCount()) >= MAX_NOTIF_PROMPTS) {
+    track(EVENTS.PERMISSION_RESULT, { permission: "notifications", outcome: "ask_capped" });
+    return false;
+  }
+  await incrementNotifPromptCount();
+  const granted = await requestNotificationPermissions();
+  track(EVENTS.PERMISSION_RESULT, {
+    permission: "notifications",
+    outcome: granted ? "granted" : "denied",
+  });
+  return granted;
+}
+
+/**
+ * The app's own page in Android/iOS settings - the only way back for a user
+ * who refused permanently.
+ */
+export function openAppSettings(): void {
+  try {
+    Linking.openSettings();
+  } catch {}
+}
+
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (Platform.OS === "web" || !Notifications) return false;
   if (permissionRequestInFlight) return permissionRequestInFlight;
@@ -637,11 +930,18 @@ export async function scheduleNotification(
 ): Promise<string | undefined> {
   if (!Notifications) return undefined;
   try {
-    const granted = await requestNotificationPermissions();
-    if (!granted) return undefined;
+    // Order matters. A reminder whose time has already passed schedules
+    // nothing, so asking for permission first would spend one of the three
+    // prompts on a reminder that cannot ring either way - the same empty ask
+    // that was removed from cold launch. The banner on the home screen is the
+    // route for that user.
     const trigger = new Date(reminder.datetime);
     const now = new Date();
     if (trigger <= now) return undefined;
+    // The ladder, not a raw request: a user who refused permanently must not
+    // be handed a dialog the OS will never show.
+    const granted = await ensureNotificationPermission();
+    if (!granted) return undefined;
     const alarmOn = reminder.alarm !== false;
     const exactOn = reminder.exactTiming !== false;
     const channelId = channelIdForAlarm(alarmOn, await getVibrationEnabled());
@@ -980,7 +1280,8 @@ export async function snoozeReminder(
   const target = current.find((r) => r.id === id);
   if (!target) return current;
   const alarmOn = target.alarm !== false;
-  const snoozeTarget = resolveSnoozeTarget(preset, target.datetime, new Date());
+  const snoozedAt = new Date();
+  const snoozeTarget = resolveSnoozeTarget(preset, target.datetime, snoozedAt);
   const projected: Reminder = { ...target, datetime: snoozeTarget.toISOString() };
   // Guarded by the shared default (still-in-the-future, not completed),
   // evaluated against the PROJECTED snooze time — a snooze target that has
@@ -1015,6 +1316,19 @@ export async function snoozeReminder(
           // value must survive every later snooze, since it is what makes the
           // distance a task has slid measurable.
           originalDatetime: r.originalDatetime ?? r.datetime,
+          // How far THIS snooze pushed it, measured from the moment of
+          // snoozing rather than from the reminder's own datetime - that is
+          // what "5 minutes" or "tomorrow" actually mean to the user doing
+          // it, and it handles both preset kinds uniformly.
+          snoozeHistory: [
+            ...(r.snoozeHistory ?? []),
+            {
+              at: snoozedAt.toISOString(),
+              minutes: Math.round(
+                (snoozeTarget.getTime() - snoozedAt.getTime()) / 60000
+              ),
+            },
+          ].slice(-MAX_SNOOZE_HISTORY_ENTRIES),
         }
       : r
   );
@@ -1023,27 +1337,33 @@ export async function snoozeReminder(
 }
 
 export async function rescheduleAllFutureReminders(): Promise<void> {
-  const reminders = await loadReminders();
-  let changed = false;
-  const updated = await Promise.all(
-    reminders.map(async (reminder) => {
-      // rearmReminder's default guard (not completed, still in the future)
-      // is exactly right here too: a reminder whose datetime has passed has
-      // ALREADY been delivered, and rescheduling it would show a second copy
-      // while orphaning the first — see isPendingForAlarmRewrite's doc.
-      const notificationId = await rearmReminder(reminder, {
-        schedule: () => scheduleNotification(reminder, reminder.id),
-      });
-      if (notificationId !== undefined) {
-        changed = true;
-        return { ...reminder, notificationId };
-      }
-      return reminder;
-    })
-  );
-  if (changed) {
-    await saveReminders(updated);
-  }
+  // See withWriteLock: this runs at app mount and can otherwise race a
+  // by-id stamp (markOpenedById/markNotifiedById) landing at the same
+  // moment - e.g. a killed app cold-started straight into reminder-detail
+  // via a notification tap.
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    let changed = false;
+    const updated = await Promise.all(
+      reminders.map(async (reminder) => {
+        // rearmReminder's default guard (not completed, still in the future)
+        // is exactly right here too: a reminder whose datetime has passed has
+        // ALREADY been delivered, and rescheduling it would show a second copy
+        // while orphaning the first — see isPendingForAlarmRewrite's doc.
+        const notificationId = await rearmReminder(reminder, {
+          schedule: () => scheduleNotification(reminder, reminder.id),
+        });
+        if (notificationId !== undefined) {
+          changed = true;
+          return { ...reminder, notificationId };
+        }
+        return reminder;
+      })
+    );
+    if (changed) {
+      await saveReminders(updated);
+    }
+  });
 }
 
 /**
@@ -1139,6 +1459,48 @@ export async function markDoneById(id: string): Promise<void> {
   await saveReminders(updated);
 }
 
+/**
+ * Stamps notifiedAt: a scheduled notification for this reminder actually
+ * reached the device just now. Called from the received listener, not the
+ * response listener - "arrived" and "the user acted on it" are different
+ * facts, and this one only needs the first.
+ *
+ * A silent no-op for an unknown id (the notification could theoretically
+ * outlive a since-deleted reminder) rather than an error - there is nothing
+ * useful to do with that case.
+ */
+export async function markNotifiedById(id: string): Promise<void> {
+  // See withWriteLock: this can run at the same moment as the app's
+  // mount-time rescheduleAllFutureReminders() (a notification just arrived
+  // and got tapped) - without the lock, whichever finished saving second
+  // would win and silently drop the other's write.
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    if (!reminders.some((r) => r.id === id)) return;
+    const updated = reminders.map((r) =>
+      r.id === id ? { ...r, notifiedAt: new Date().toISOString() } : r
+    );
+    await saveReminders(updated);
+  });
+}
+
+/** Stamps openedAt: the user just looked at this reminder's own detail
+ * screen. See Reminder.openedAt for why this is tracked separately from
+ * completing or snoozing it. */
+export async function markOpenedById(id: string): Promise<void> {
+  // See withWriteLock and markNotifiedById's comment above - same race, this
+  // time from a notification tap cold-starting straight into the detail
+  // screen while the app's own mount-time reschedule is still in flight.
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    if (!reminders.some((r) => r.id === id)) return;
+    const updated = reminders.map((r) =>
+      r.id === id ? { ...r, openedAt: new Date().toISOString() } : r
+    );
+    await saveReminders(updated);
+  });
+}
+
 export async function updateSnoozeById(
   id: string,
   datetime: string,
@@ -1151,6 +1513,70 @@ export async function updateSnoozeById(
     r.id === id ? { ...r, datetime, notificationId } : r
   );
   await saveReminders(updated);
+}
+
+/**
+ * Tags the sender's just-created local reminder with the server invitation
+ * id it corresponds to, once send-invitation confirms it. Deliberately a
+ * separate call from addReminder rather than a field passed at creation
+ * time - the local Tier 1 save (QuickAddInput.tsx#performSave) must
+ * complete and be visible regardless of whether the Tier 2 send even
+ * happens, and the invitation id doesn't exist until it does.
+ */
+export async function attachInvitationId(id: string, invitationId: string): Promise<void> {
+  const reminders = await loadReminders();
+  const target = reminders.find((r) => r.id === id);
+  if (!target) return;
+  const updated = reminders.map((r) => (r.id === id ? { ...r, invitationId } : r));
+  await saveReminders(updated);
+}
+
+/**
+ * Applies an `invitation_time_changed` push to the SENDER's own local copy
+ * of the send-reminder (see Reminder.invitationId's header). Reschedules
+ * the local notification at the new time - the sender's own alert must
+ * fire when the receiver actually expects it, not the stale time originally
+ * sent - and records the change so ReminderCard/reminder-detail can explain
+ * it rather than showing a silently different time. No-ops if the local
+ * reminder is gone (deleted, or this device never had one), which is a
+ * legitimate outcome, not an error - a push replaying after local cleanup
+ * must not resurrect anything.
+ */
+export async function applyRecipientTimeChangeByInvitationId(
+  invitationId: string,
+  toDatetime: string,
+  fromDatetime: string,
+  recipientName: string
+): Promise<string | undefined> {
+  // See withWriteLock and markNotifiedById's comment above - this push can
+  // arrive at the exact moment the app's own mount-time
+  // rescheduleAllFutureReminders() is still in flight (a notification
+  // tapped cold-start), the same race, just from a third writer.
+  return withWriteLock(async () => {
+    const reminders = await loadReminders();
+    const target = reminders.find((r) => r.invitationId === invitationId);
+    if (!target) return undefined;
+
+    await cancelNotification(target.notificationId);
+    const updatedData = { ...target, datetime: toDatetime };
+    const notificationId = await scheduleNotification(updatedData, target.id);
+
+    const updated = reminders.map((r) =>
+      r.id === target.id
+        ? {
+            ...r,
+            datetime: toDatetime,
+            notificationId,
+            recipientTimeChange: { from: fromDatetime, to: toDatetime, by: recipientName },
+          }
+        : r
+    );
+    await saveReminders(updated);
+    // Returned so a caller (the notification tap handler) can navigate
+    // straight to this reminder's detail screen without a second lookup by
+    // invitation id, which no other reminder-loading function supports.
+    return target.id;
+  });
 }
 
 // --- Backup / restore -------------------------------------------------------

@@ -7,6 +7,7 @@ import { Feather } from "@expo/vector-icons";
 import React from "react";
 import { Platform, StyleSheet, View, useColorScheme } from "react-native";
 
+import { TAB_BAR_HEIGHT_WEB } from "@/constants/tabBar";
 import { useColors } from "@/hooks/useColors";
 
 // IMPORTANT: iOS 26 uses NativeTabs for native tabs with liquid glass support.
@@ -51,7 +52,7 @@ function ClassicTabLayout() {
           borderTopWidth: isWeb ? 1 : 0,
           borderTopColor: colors.border,
           elevation: 0,
-          ...(isWeb ? { height: 84 } : {}),
+          ...(isWeb ? { height: TAB_BAR_HEIGHT_WEB } : {}),
         },
         tabBarBackground: () =>
           isIOS ? (

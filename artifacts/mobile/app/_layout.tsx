@@ -12,7 +12,7 @@ import {
   NotoSansMalayalam_700Bold,
 } from "@expo-google-fonts/noto-sans-malayalam";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { router, Stack } from "expo-router";
+import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
 import { AppState, View } from "react-native";
@@ -28,14 +28,18 @@ import NotificationResponseHandler from "@/components/NotificationResponseHandle
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
+import { TourProvider, useTour } from "@/contexts/TourContext";
+import TourOverlay from "@/components/TourOverlay";
 import {
   checkExactAlarmPermission,
-  hasCompletedPermissionOnboarding,
-  hasCompletedRegistrationOnboarding,
-  markPermissionOnboardingComplete,
-  openExactAlarmSettings,
-  requestNotificationPermissions,
+  hasSeenFeatureTour,
 } from "@/services/ReminderService";
+import { initAnalytics } from "@/services/AnalyticsService";
+import {
+  captureHandledError,
+  initCrashReporting,
+} from "@/services/CrashReportingService";
+import { refreshTelemetryConsent } from "@/services/telemetryConsent";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
 import { registerNotificationResponseTask } from "@/tasks/notificationResponseTask";
 import { useInvitationCheck } from "@/hooks/useInvitationCheck";
@@ -81,6 +85,27 @@ function RootLayoutNav() {
   );
 }
 
+/**
+ * Bridges NameOnboarding's onSettled callback into TourContext.start().
+ * A separate component because useTour() must be called under TourProvider,
+ * which sits inside RemindersProvider alongside NameOnboarding itself.
+ */
+function FeatureTourAutoStart({ trigger }: { trigger: number }) {
+  const tour = useTour();
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (trigger === 0 || started.current) return;
+    started.current = true;
+    (async () => {
+      const seen = await hasSeenFeatureTour();
+      if (!seen) tour.start();
+    })();
+  }, [trigger, tour]);
+
+  return null;
+}
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
@@ -94,8 +119,11 @@ export default function RootLayout() {
   });
 
   const [showAlarmBanner, setShowAlarmBanner] = useState(false);
-  const [readyForNamePrompt, setReadyForNamePrompt] = useState(false);
   const alarmChecked = useRef(false);
+  // A counter, not a boolean: NameOnboarding's effect can legitimately fire
+  // onSettled more than once across remounts, and FeatureTourAutoStart only
+  // needs to know "settled happened", not how many times.
+  const [nameSettledTick, setNameSettledTick] = useState(0);
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
@@ -106,6 +134,19 @@ export default function RootLayout() {
   useEffect(() => {
     registerRescheduleTask();
     registerNotificationResponseTask();
+  }, []);
+
+  // Telemetry starts here, and consent is read back FIRST. Both services
+  // no-op without their env-var credentials, so this is inert in local dev
+  // and under Jest. Nothing here is awaited by render: a telemetry endpoint
+  // being slow or unreachable must not hold up first paint.
+  useEffect(() => {
+    refreshTelemetryConsent()
+      .then(() => {
+        initCrashReporting();
+        return initAnalytics();
+      })
+      .catch(() => {});
   }, []);
 
   // Checks for pending invitations on launch and again on every foreground
@@ -122,47 +163,13 @@ export default function RootLayout() {
     });
   }, []);
 
-  // First-launch onboarding: proactively request the notification permission
-  // (rather than waiting for the user's first reminder save) and, on
-  // Android 12+, send them straight to the exact-alarm settings screen if
-  // it isn't already granted. Runs once per install, tracked in AsyncStorage.
-  useEffect(() => {
-    hasCompletedPermissionOnboarding().then(async (completed) => {
-      if (completed) {
-        setReadyForNamePrompt(true);
-        return;
-      }
-      await requestNotificationPermissions();
-      const exactAlarmGranted = await checkExactAlarmPermission();
-      if (exactAlarmGranted === false) {
-        openExactAlarmSettings();
-      }
-      await markPermissionOnboardingComplete();
-      // Only now may the name sheet open. Asking while a system permission
-      // dialog is up would put it behind that dialog, and the tap dismissing
-      // the dialog would skip the name prompt for good.
-      setReadyForNamePrompt(true);
-    });
-  }, []);
-
-  // First-run registration onboarding (B12) - deliberately AFTER the
-  // permission onboarding and name-prompt gate settle (readyForNamePrompt),
-  // same stacking-dialog concern as NameOnboarding above: pushing a modal
-  // route while a system permission dialog is up would bury it. Explicitly
-  // optional (skippable in the screen itself) - this app's core reminder
-  // loop needs no account, so this never blocks reaching the home screen,
-  // it only offers registration once per install.
-  const registrationOnboardingChecked = useRef(false);
-  useEffect(() => {
-    if (!readyForNamePrompt || registrationOnboardingChecked.current) return;
-    registrationOnboardingChecked.current = true;
-    hasCompletedRegistrationOnboarding().then((completed) => {
-      if (!completed) {
-        router.push({ pathname: "/register-number", params: { firstRun: "1" } });
-      }
-    });
-  }, [readyForNamePrompt]);
-
+  // There is deliberately no notification permission request here any more.
+  // A cold-launch dialog asks for something the user cannot yet judge: they
+  // have no reminder, so "Allow notifications" buys them nothing visible and
+  // a refusal costs them nothing they can see. The ask now happens on the
+  // first save, where the answer decides whether that reminder rings - see
+  // ensureNotificationPermission() in ReminderService.
+  //
   // Re-check when user returns from Settings so banner clears automatically
   // once the permission is granted, without requiring an app restart.
   useEffect(() => {
@@ -190,23 +197,36 @@ export default function RootLayout() {
         {/* Inside ThemeProvider: the icons must follow the APP's resolved
             scheme, not the device's. See ThemedStatusBar. */}
         <ThemedStatusBar />
-        <ErrorBoundary>
+        {/* The one place a render crash can still be reported before the
+            fallback screen replaces the tree. */}
+        <ErrorBoundary
+          onError={(error, componentStack) =>
+            captureHandledError(error, { component_stack: componentStack })
+          }
+        >
           <QueryClientProvider client={queryClient}>
             <GestureHandlerRootView>
               <KeyboardProvider>
                 <RemindersProvider>
-                  <NotificationResponseHandler />
-                  <NameOnboarding enabled={readyForNamePrompt} />
-                  <SharedTextProvider>
-                    <View style={{ flex: 1 }}>
-                      {showAlarmBanner && (
-                        <ExactAlarmBanner
-                          onDismiss={() => setShowAlarmBanner(false)}
-                        />
-                      )}
-                      <RootLayoutNav />
-                    </View>
-                  </SharedTextProvider>
+                  <TourProvider>
+                    <NotificationResponseHandler />
+                    <NameOnboarding
+                      enabled
+                      onSettled={() => setNameSettledTick((t) => t + 1)}
+                    />
+                    <FeatureTourAutoStart trigger={nameSettledTick} />
+                    <SharedTextProvider>
+                      <View style={{ flex: 1 }}>
+                        {showAlarmBanner && (
+                          <ExactAlarmBanner
+                            onDismiss={() => setShowAlarmBanner(false)}
+                          />
+                        )}
+                        <RootLayoutNav />
+                      </View>
+                    </SharedTextProvider>
+                    <TourOverlay />
+                  </TourProvider>
                 </RemindersProvider>
               </KeyboardProvider>
             </GestureHandlerRootView>

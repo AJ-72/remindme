@@ -4,7 +4,14 @@ import { getLocales } from "expo-localization";
 import {
   DEFAULT_ALARM_KEY,
   DICTATION_LANGUAGE_KEY,
-  PERMISSION_ONBOARDING_KEY,
+  NOTIF_PROMPT_COUNT_KEY,
+  MAX_NOTIF_PROMPTS,
+  MAX_REGISTER_PROMPTS,
+  getRegisterPromptCount,
+  incrementRegisterPromptCount,
+  shouldOfferNumberRegistration,
+  setRegisteredPhone,
+  clearRegisteredPhone,
   SNOOZE_CATEGORY_ID,
   SNOOZE_ACTION_ID,
   MARK_DONE_ACTION_ID,
@@ -30,11 +37,16 @@ import {
   getDictationLanguage,
   getSnoozePreset,
   setSnoozePreset,
-  hasCompletedPermissionOnboarding,
+  getNotifPromptCount,
+  incrementNotifPromptCount,
+  ensureNotificationPermission,
+  getNotificationPermissionState,
   loadReminders,
   saveReminders,
   markDoneById,
-  markPermissionOnboardingComplete,
+  markNotifiedById,
+  markOpenedById,
+  MAX_SNOOZE_HISTORY_ENTRIES,
   requestNotificationPermissions,
   rescheduleAllFutureReminders,
   setAlarmForPendingReminders,
@@ -48,6 +60,8 @@ import {
   snoozeReminder,
   toggleComplete,
   updateSnoozeById,
+  attachInvitationId,
+  applyRecipientTimeChangeByInvitationId,
   isSendReminder,
   INVITE_NUDGE_COUNT_KEY,
   INVITE_NUDGE_ENABLED_KEY,
@@ -66,6 +80,7 @@ import {
   cancelScheduledNotificationAsync,
   dismissNotificationAsync,
   requestPermissionsAsync,
+  getPermissionsAsync,
   setNotificationCategoryAsync,
   getAllScheduledNotificationsAsync,
 } from "expo-notifications";
@@ -875,24 +890,109 @@ describe("dictation language setting", () => {
   });
 });
 
-describe("permission onboarding", () => {
-  it("hasCompletedPermissionOnboarding is false when unset", async () => {
-    const result = await hasCompletedPermissionOnboarding();
-    expect(result).toBe(false);
+describe("the registration offer", () => {
+  it("offers to a new user who has not been asked", async () => {
+    expect(await shouldOfferNumberRegistration()).toBe(true);
   });
 
-  it("markPermissionOnboardingComplete persists completion under PERMISSION_ONBOARDING_KEY", async () => {
-    await markPermissionOnboardingComplete();
-    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-      PERMISSION_ONBOARDING_KEY,
-      "true"
-    );
+  it("counts each offer", async () => {
+    await incrementRegisterPromptCount();
+    expect(await getRegisterPromptCount()).toBe(1);
+    await incrementRegisterPromptCount();
+    expect(await getRegisterPromptCount()).toBe(2);
   });
 
-  it("hasCompletedPermissionOnboarding reflects a completed onboarding", async () => {
-    await markPermissionOnboardingComplete();
-    const result = await hasCompletedPermissionOnboarding();
-    expect(result).toBe(true);
+  it("stops at the cap, because a refusal repeated twice is an answer", async () => {
+    for (let i = 0; i < MAX_REGISTER_PROMPTS; i++) {
+      await incrementRegisterPromptCount();
+    }
+    expect(await shouldOfferNumberRegistration()).toBe(false);
+  });
+
+  it("never offers once the number is registered, whatever the count says", async () => {
+    await setRegisteredPhone("+919876543210");
+    expect(await shouldOfferNumberRegistration()).toBe(false);
+  });
+
+  it("offers again if the registered number is removed", async () => {
+    await setRegisteredPhone("+919876543210");
+    await clearRegisteredPhone();
+    expect(await shouldOfferNumberRegistration()).toBe(true);
+  });
+});
+
+describe("notification permission ladder", () => {
+  it("getNotifPromptCount is 0 when unset", async () => {
+    expect(await getNotifPromptCount()).toBe(0);
+  });
+
+  it("incrementNotifPromptCount persists the next count", async () => {
+    expect(await incrementNotifPromptCount()).toBe(1);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(NOTIF_PROMPT_COUNT_KEY, "1");
+    expect(await incrementNotifPromptCount()).toBe(2);
+    expect(await getNotifPromptCount()).toBe(2);
+  });
+
+  it("getNotificationPermissionState reports granted and canAskAgain", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: false,
+    });
+    expect(await getNotificationPermissionState()).toEqual({
+      granted: false,
+      canAskAgain: false,
+    });
+  });
+
+  it("getNotificationPermissionState treats a missing canAskAgain as askable", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({ status: "denied" });
+    expect(await getNotificationPermissionState()).toEqual({
+      granted: false,
+      canAskAgain: true,
+    });
+  });
+
+  it("ensureNotificationPermission asks nothing when already granted", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "granted",
+      canAskAgain: true,
+    });
+    expect(await ensureNotificationPermission()).toBe(true);
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(0);
+  });
+
+  it("ensureNotificationPermission asks and counts the ask when it may", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: true,
+    });
+    (requestPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "granted",
+    });
+    expect(await ensureNotificationPermission()).toBe(true);
+    expect(requestPermissionsAsync).toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(1);
+  });
+
+  it("ensureNotificationPermission never asks after a permanent refusal", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: false,
+    });
+    expect(await ensureNotificationPermission()).toBe(false);
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(0);
+  });
+
+  it("ensureNotificationPermission stops asking once the cap is spent", async () => {
+    for (let i = 0; i < MAX_NOTIF_PROMPTS; i++) await incrementNotifPromptCount();
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: true,
+    });
+    expect(await ensureNotificationPermission()).toBe(false);
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
   });
 
   it("requestNotificationPermissions returns true when the OS grants the request", async () => {
@@ -1106,6 +1206,177 @@ describe("updateSnoozeById", () => {
     await expect(
       updateSnoozeById("unknown", new Date().toISOString(), "x")
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("attachInvitationId", () => {
+  it("tags the target reminder with the given invitation id", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await attachInvitationId("r1", "inv-1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].invitationId).toBe("inv-1");
+  });
+
+  it("no-ops safely when the id does not exist", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await expect(attachInvitationId("unknown", "inv-1")).resolves.toBeUndefined();
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].invitationId).toBeUndefined();
+  });
+});
+
+describe("applyRecipientTimeChangeByInvitationId", () => {
+  it("moves the matching reminder's datetime, reschedules its notification, and records who moved it", async () => {
+    const r = makeReminder({ id: "r1", notificationId: "old-notif", invitationId: "inv-1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    const from = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const to = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+
+    const returnedId = await applyRecipientTimeChangeByInvitationId("inv-1", to, from, "Amma");
+
+    expect(returnedId).toBe("r1");
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("old-notif");
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].datetime).toBe(to);
+    expect(stored[0].notificationId).toBe("mock-notif-id");
+    expect(stored[0].recipientTimeChange).toEqual({ from, to, by: "Amma" });
+  });
+
+  it("no-ops and returns undefined when no local reminder carries that invitation id", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    const returnedId = await applyRecipientTimeChangeByInvitationId(
+      "inv-does-not-exist",
+      new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      "Amma"
+    );
+
+    expect(returnedId).toBeUndefined();
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].recipientTimeChange).toBeUndefined();
+  });
+});
+
+describe("snoozeReminder snoozeHistory", () => {
+  it("records how far this snooze actually pushed it, not just that it happened", async () => {
+    const r = makeReminder({ id: "r1", notificationId: "old-notif" });
+    const before = Date.now();
+
+    const result = await snoozeReminder([r], "r1", { kind: "minutes", minutes: 15 });
+
+    const updated = result.find((x) => x.id === "r1")!;
+    expect(updated.snoozeHistory).toHaveLength(1);
+    const entry = updated.snoozeHistory![0];
+    expect(entry.minutes).toBe(15);
+    expect(new Date(entry.at).getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("appends rather than replacing across repeated snoozes", async () => {
+    let reminders = [makeReminder({ id: "r1" })];
+    reminders = await snoozeReminder(reminders, "r1", { kind: "minutes", minutes: 5 });
+    reminders = await snoozeReminder(reminders, "r1", { kind: "minutes", minutes: 60 });
+
+    const updated = reminders.find((x) => x.id === "r1")!;
+    expect(updated.snoozeHistory).toHaveLength(2);
+    expect(updated.snoozeHistory!.map((e) => e.minutes)).toEqual([5, 60]);
+  });
+
+  it("caps history at MAX_SNOOZE_HISTORY_ENTRIES, dropping the oldest first", async () => {
+    let reminders = [makeReminder({ id: "r1" })];
+    for (let i = 0; i < MAX_SNOOZE_HISTORY_ENTRIES + 3; i += 1) {
+      reminders = await snoozeReminder(reminders, "r1", { kind: "minutes", minutes: 5 });
+    }
+    const updated = reminders.find((x) => x.id === "r1")!;
+    expect(updated.snoozeHistory).toHaveLength(MAX_SNOOZE_HISTORY_ENTRIES);
+  });
+
+  it("records a large positive delay for the tomorrow preset, not zero", async () => {
+    const r = makeReminder({
+      id: "r1",
+      datetime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    const result = await snoozeReminder([r], "r1", { kind: "tomorrow" });
+    const entry = result.find((x) => x.id === "r1")!.snoozeHistory![0];
+    // Roughly 25 hours: 1 hour until the original time, plus the +24h push.
+    expect(entry.minutes).toBeGreaterThan(24 * 60);
+  });
+});
+
+describe("markNotifiedById", () => {
+  it("stamps notifiedAt on the target reminder", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    const before = Date.now();
+
+    await markNotifiedById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(new Date(stored[0].notifiedAt).getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("no-ops safely for an id with no matching reminder", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder({ id: "r1" })]));
+    await expect(markNotifiedById("unknown")).resolves.toBeUndefined();
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].notifiedAt).toBeUndefined();
+  });
+});
+
+describe("markOpenedById", () => {
+  it("stamps openedAt on the target reminder", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+    const before = Date.now();
+
+    await markOpenedById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(new Date(stored[0].openedAt).getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("no-ops safely for an id with no matching reminder", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder({ id: "r1" })]));
+    await expect(markOpenedById("unknown")).resolves.toBeUndefined();
+  });
+});
+
+describe("concurrent writes do not clobber each other", () => {
+  // Regression for a real race: rescheduleAllFutureReminders (mount-time)
+  // and markOpenedById (a screen mounting at the same moment - e.g. a
+  // killed app cold-started straight into reminder-detail via a
+  // notification tap) each used to do their own independent load-then-save,
+  // with no ordering guarantee between them. Whichever saved last won,
+  // silently discarding the other's write.
+  it("survives markOpenedById racing rescheduleAllFutureReminders", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    // Both started together, as they are at a real cold start into the
+    // detail screen: the provider's mount-time reschedule sweep, and the
+    // screen's own open-stamp.
+    await Promise.all([rescheduleAllFutureReminders(), markOpenedById("r1")]);
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].openedAt).toBeTruthy();
+  });
+
+  it("survives markNotifiedById racing rescheduleAllFutureReminders", async () => {
+    const r = makeReminder({ id: "r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await Promise.all([rescheduleAllFutureReminders(), markNotifiedById("r1")]);
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].notifiedAt).toBeTruthy();
   });
 });
 
@@ -1659,5 +1930,51 @@ describe("quiet hours persistence", () => {
     await setQuietHours({ startMinute: 1320, endMinute: 480 });
     const parsed = JSON.parse(await buildBackupJson());
     expect(parsed.settings.quietHours).toEqual({ startMinute: 1320, endMinute: 480 });
+  });
+});
+
+describe("scheduleNotification and the permission ask", () => {
+  it("never asks for permission for a reminder whose time has already passed", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: "denied",
+      canAskAgain: true,
+    });
+
+    const id = await scheduleNotification(
+      {
+        title: "Already gone",
+        description: "",
+        datetime: new Date(Date.now() - 60_000).toISOString(),
+        alarm: true,
+        exactTiming: true,
+      },
+      "r-past"
+    );
+
+    expect(id).toBeUndefined();
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+    // The prompt budget is for reminders that can still ring.
+    expect(await getNotifPromptCount()).toBe(0);
+  });
+
+  it("asks for a reminder that still has a ring ahead of it", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: "denied",
+      canAskAgain: true,
+    });
+
+    await scheduleNotification(
+      {
+        title: "Still ahead",
+        description: "",
+        datetime: new Date(Date.now() + 3_600_000).toISOString(),
+        alarm: true,
+        exactTiming: true,
+      },
+      "r-future"
+    );
+
+    expect(requestPermissionsAsync).toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(1);
   });
 });

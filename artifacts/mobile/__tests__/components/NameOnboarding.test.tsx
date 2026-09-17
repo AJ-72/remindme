@@ -1,5 +1,6 @@
 import React from "react";
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
+import { Linking } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NameOnboarding from "@/components/NameOnboarding";
 import { RemindersProvider } from "@/contexts/RemindersContext";
@@ -57,5 +58,46 @@ describe("NameOnboarding", () => {
     const { queryByTestId } = renderOnboarding(false);
     await waitFor(() => expect(queryByTestId("name-sheet-input")).toBeNull());
     expect(await AsyncStorage.getItem(NAME_PROMPT_KEY)).toBeNull();
+  });
+});
+
+// Rule 04 of the first-run study: an invited install never sees onboarding.
+// That user tapped a link to read somebody else's reminder, and this sheet
+// would render over the bind screen, in front of the thing they came for.
+// Their name ask waits on the home screen behind Accept.
+describe("NameOnboarding — an install opened by an invite link", () => {
+  function launchedFrom(url: string | null) {
+    return jest.spyOn(Linking, "getInitialURL").mockResolvedValue(url);
+  }
+
+  it("stays away when the app was opened by a bind-invite link", async () => {
+    const spy = launchedFrom("mobile://bind-invite?token=abc-123");
+    const { queryByTestId } = renderOnboarding();
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(queryByTestId("name-sheet-input")).toBeNull();
+    spy.mockRestore();
+  });
+
+  // Not marked as seen, only skipped for this launch: a bind that failed
+  // must not cost the user their name prompt for good.
+  it("leaves the prompt unspent, so an ordinary launch still asks", async () => {
+    const spy = launchedFrom("mobile://bind-invite?token=abc-123");
+    renderOnboarding();
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(await AsyncStorage.getItem(NAME_PROMPT_KEY)).toBeNull();
+
+    spy.mockResolvedValue(null);
+    const { findByTestId } = renderOnboarding();
+    expect(await findByTestId("name-sheet-input")).toBeTruthy();
+    spy.mockRestore();
+  });
+
+  it("asks as usual on a launch from any other link", async () => {
+    const spy = launchedFrom("mobile://reminder-detail?id=r1");
+    const { findByTestId } = renderOnboarding();
+
+    expect(await findByTestId("name-sheet-input")).toBeTruthy();
+    spy.mockRestore();
   });
 });

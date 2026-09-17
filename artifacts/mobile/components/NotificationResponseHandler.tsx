@@ -2,11 +2,13 @@ import { router } from "expo-router";
 import React, { useEffect, useRef } from "react";
 
 import {
+  applyRecipientTimeChangeByInvitationId,
   cancelNotification,
   cancelScheduledForReminder,
   getSnoozePreset,
   loadReminderById,
   markDoneById,
+  markNotifiedById,
   scheduleSnoozeNotification,
   updateSnoozeById,
 } from "@/services/ReminderService";
@@ -15,9 +17,12 @@ import {
   markResponseHandled,
 } from "@/services/handledResponses";
 import { handleNotificationResponse } from "@/services/notificationResponseHandler";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 import { checkForInvitations, resolveSenderNames } from "@/services/InvitationService";
 import { navigateToInvitationPreview, navigateToPendingList } from "@/hooks/useInvitationCheck";
 import { collapseInvitationNotifications } from "@/services/invitationNotificationGrouping";
+import { setLastClaimAt, setPushPending } from "@/services/invitationClaimThrottle";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -26,6 +31,28 @@ try {
   Notifications = require("expo-notifications");
 } catch {
   Notifications = null;
+}
+
+/**
+ * Reports that a notification was acted on, and how.
+ *
+ * This is the only place that fact exists. A notification that fires and is
+ * swiped away leaves no trace in the reminder record (see CLAUDE.md,
+ * "Adherence is derived, not logged"), so without this event there is no way
+ * to tell "the alert never arrived" from "the alert arrived and was ignored" -
+ * two problems with opposite fixes.
+ *
+ * The action identifier is a constant from this app's own code, never user
+ * text, so it is safe to send as-is.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function trackResponse(response: any, launch: "cold_start" | "foreground"): void {
+  try {
+    track(EVENTS.NOTIFICATION_OPENED, {
+      launch,
+      action: String(response?.actionIdentifier ?? "unknown"),
+    });
+  } catch {}
 }
 
 export default function NotificationResponseHandler() {
@@ -62,8 +89,31 @@ export default function NotificationResponseHandler() {
       // this listener is already live) - a navigator exists here, unlike the
       // headless task's own deps, so this can go straight to the invitation
       // instead of waiting for the next useInvitationCheck() foreground pass.
-      checkForInvitations: () =>
-        checkForInvitations(navigateToInvitationPreview, navigateToPendingList),
+      onInvitationPush: async () => {
+        const outcome = await checkForInvitations(
+          navigateToInvitationPreview,
+          navigateToPendingList
+        );
+        // Only a reached server starts a cooldown; a failed tap-claim must
+        // leave the polling window open so the next foreground retries.
+        if (outcome.ok) {
+          await setLastClaimAt(Date.now());
+          await setPushPending(false);
+        }
+        return outcome;
+      },
+      applyRecipientTimeChange: (data: {
+        invitationId: string;
+        toDatetime: string;
+        fromDatetime: string;
+        recipientName: string;
+      }) =>
+        applyRecipientTimeChangeByInvitationId(
+          data.invitationId,
+          data.toDatetime,
+          data.fromDatetime,
+          data.recipientName
+        ),
     };
 
     // NOT a queue drain: this keeps resolving with the same response on every
@@ -74,6 +124,7 @@ export default function NotificationResponseHandler() {
     Notifications.getLastNotificationResponseAsync()
       .then(async (response: any) => {
         if (!response) return;
+        trackResponse(response, "cold_start");
         await handleNotificationResponse(response, deps);
         try {
           // clearLastNotificationResponseAsync is the deprecated spelling;
@@ -90,6 +141,7 @@ export default function NotificationResponseHandler() {
     try {
       subscription = Notifications.addNotificationResponseReceivedListener(
         (response: any) => {
+          trackResponse(response, "foreground");
           handleNotificationResponse(response, deps);
         }
       );
@@ -109,12 +161,50 @@ export default function NotificationResponseHandler() {
       receivedSubscription = Notifications.addNotificationReceivedListener(
         async (notification: any) => {
           const data = notification?.request?.content?.data;
+
+          // Applied immediately, not deferred to a tap: this is the
+          // sender's OWN reminder being corrected to match what the
+          // receiver actually chose - the local alert must not fire at the
+          // stale time just because the sender never tapped the tray.
+          if (data?.type === "invitation_time_changed" && typeof data.invitationId === "string") {
+            await applyRecipientTimeChangeByInvitationId(
+              data.invitationId,
+              data.toDatetime,
+              data.fromDatetime,
+              data.recipientName
+            );
+            return;
+          }
+
+          // A reminder's own scheduled notification carries reminderId, not
+          // an invitation's `type`. Stamped here rather than in the tap
+          // listener above: "delivered" and "the user acted on it" are
+          // different facts, and this only needs the first - see
+          // Reminder.notifiedAt for the real limitation (this listener only
+          // runs while the app process is alive).
+          if (data?.reminderId) {
+            await markNotifiedById(data.reminderId);
+          }
+
           if (data?.type !== "invitation") return;
 
-          const claimed = await checkForInvitations(
+          // Set BEFORE claiming, not after. If this claim fails (offline, an
+          // expired session) the flag survives, so the next launch claims
+          // regardless of the cooldown rather than losing a push that the
+          // device demonstrably received.
+          await setPushPending(true);
+
+          const outcome = await checkForInvitations(
             navigateToInvitationPreview,
             navigateToPendingList
           );
+
+          if (outcome.ok) {
+            await setLastClaimAt(Date.now());
+            await setPushPending(false);
+          }
+          const claimed = outcome.claimed;
+
           // B15: a push just landed while the app was alive to see it - if
           // that leaves 2+ invitations pending, collapse the individual
           // tray notifications into one summary rather than letting them

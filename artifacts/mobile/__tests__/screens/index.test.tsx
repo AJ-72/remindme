@@ -1,12 +1,23 @@
 import React from "react";
 import { render, waitFor, fireEvent, act } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { StyleSheet } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import HomeScreen from "@/app/(tabs)/index";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
-import { STORAGE_KEY, USER_NAME_KEY, type Reminder } from "@/services/ReminderService";
+import {
+  INVITE_NAME_ASK_KEY,
+  MAX_REGISTER_PROMPTS,
+  REGISTERED_PHONE_KEY,
+  REGISTER_PROMPT_COUNT_KEY,
+  resetRegisterPromptSession,
+  STORAGE_KEY,
+  USER_NAME_KEY,
+  type Reminder,
+} from "@/services/ReminderService";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
+import { TAB_BAR_HEIGHT } from "@/constants/tabBar";
 
 jest.mock("expo-haptics");
 jest.mock("expo-router", () => ({
@@ -48,6 +59,9 @@ function renderScreen() {
 beforeEach(async () => {
   jest.clearAllMocks();
   await (AsyncStorage as any).clear();
+  // The "one offer per session" guard is a module-level flag, so without this
+  // the first test to see an offer silences it for every test after it.
+  resetRegisterPromptSession();
 });
 
 describe("HomeScreen", () => {
@@ -468,5 +482,193 @@ describe("HomeScreen — header fits a long name", () => {
     expect((await findByTestId("header-date")).props.children).toBe(
       formatHeaderDate(new Date())
     );
+  });
+});
+
+describe("the insights button in the header", () => {
+  it("opens the adherence screen", async () => {
+    const { router } = jest.requireMock("expo-router");
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("header-insights-button"));
+    expect(router.push).toHaveBeenCalledWith("/insights");
+  });
+});
+
+
+// Frame 13 of the first-run study. The number ask left first run entirely,
+// where it was seen by everybody and meant nothing to anybody. It comes back
+// here, to a user who has saved three reminders and therefore has a habit the
+// offer can argue about.
+describe("HomeScreen — the number offer, once the app has earned it", () => {
+  async function seed(count: number) {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(
+        Array.from({ length: count }, (_, i) =>
+          makeReminder({ id: `r${i}`, title: `Task ${i}`, notificationId: `n${i}` })
+        )
+      )
+    );
+  }
+
+  it("offers once the third reminder is there", async () => {
+    await seed(3);
+    const { findByTestId } = renderScreen();
+    expect(await findByTestId("register-number-nudge")).toBeTruthy();
+  });
+
+  it("says what the number buys, without a person to name", async () => {
+    await seed(3);
+    const { findByText } = renderScreen();
+    expect(await findByText("Remind someone else?")).toBeTruthy();
+  });
+
+  it("stays away before the third", async () => {
+    await seed(2);
+    const { findByTestId, queryByTestId } = renderScreen();
+    await findByTestId("header-greeting");
+    await waitFor(() => expect(queryByTestId("register-number-nudge")).toBeNull());
+  });
+
+  it("stays away once a number is already registered", async () => {
+    await seed(3);
+    await AsyncStorage.setItem(REGISTERED_PHONE_KEY, "+919876543210");
+    const { findByTestId, queryByTestId } = renderScreen();
+    await findByTestId("header-greeting");
+    await waitFor(() => expect(queryByTestId("register-number-nudge")).toBeNull());
+  });
+
+  it("stays away once the cap is spent, two refusals being an answer", async () => {
+    await seed(3);
+    await AsyncStorage.setItem(REGISTER_PROMPT_COUNT_KEY, String(MAX_REGISTER_PROMPTS));
+    const { findByTestId, queryByTestId } = renderScreen();
+    await findByTestId("header-greeting");
+    await waitFor(() => expect(queryByTestId("register-number-nudge")).toBeNull());
+  });
+
+  it("counts the offer when it is shown, since a refusal is still an answer", async () => {
+    await seed(3);
+    const { findByTestId } = renderScreen();
+    await findByTestId("register-number-nudge");
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(REGISTER_PROMPT_COUNT_KEY)).toBe("1")
+    );
+  });
+
+  it("goes away for good on No thanks", async () => {
+    await seed(3);
+    const { findByTestId, queryByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("register-number-nudge-later"));
+    await waitFor(() => expect(queryByTestId("register-number-nudge")).toBeNull());
+  });
+
+  // Two asks in one sitting read as nagging however well each is placed.
+  it("spends only one offer per run of the app", async () => {
+    await seed(3);
+    const first = renderScreen();
+    await first.findByTestId("register-number-nudge");
+    first.unmount();
+
+    const second = renderScreen();
+    await second.findByTestId("header-greeting");
+    await waitFor(() => expect(second.queryByTestId("register-number-nudge")).toBeNull());
+  });
+});
+
+// Frame I3 of the first-run study. An invited install skips the first-run
+// name sheet - it would have rendered over the bind screen, in front of the
+// reminder the user tapped a link to read. The ask lands here instead, where
+// it can name the person who will actually read the answer.
+describe("HomeScreen — the name ask an invited install gets instead", () => {
+  it("names the sender who is waiting to read it", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "Priya");
+    const { findByTestId, findByText } = renderScreen();
+
+    expect(await findByTestId("invite-name-ask")).toBeTruthy();
+    expect(await findByText(/Priya sees that someone accepted/)).toBeTruthy();
+  });
+
+  it("stays away when nothing recorded an ask", async () => {
+    const { queryByTestId, findByText } = renderScreen();
+    await findByText(formatHeaderDate(new Date()));
+    expect(queryByTestId("invite-name-ask")).toBeNull();
+  });
+
+  // The question is already answered. Asking anyway reads as an app that is
+  // not listening.
+  it("stays away once the user has a name, whatever is recorded", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "Priya");
+    await AsyncStorage.setItem(USER_NAME_KEY, "Anand");
+    const { queryByTestId, findByText } = renderScreen();
+
+    await findByText(formatHeaderDate(new Date()));
+    await waitFor(() => expect(queryByTestId("invite-name-ask")).toBeNull());
+  });
+
+  it("opens the name sheet from Add name", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "Priya");
+    const { findByTestId } = renderScreen();
+
+    fireEvent.press(await findByTestId("invite-name-ask-add"));
+    expect(await findByTestId("name-sheet-input")).toBeTruthy();
+  });
+
+  it("stores the name and spends the ask", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "Priya");
+    const { findByTestId, queryByTestId } = renderScreen();
+
+    fireEvent.press(await findByTestId("invite-name-ask-add"));
+    fireEvent.changeText(await findByTestId("name-sheet-input"), "Anand");
+    fireEvent.press(await findByTestId("name-sheet-save"));
+
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(USER_NAME_KEY)).toBe("Anand")
+    );
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(INVITE_NAME_ASK_KEY)).toBeNull()
+    );
+    await waitFor(() => expect(queryByTestId("invite-name-ask")).toBeNull());
+  });
+
+  // One ask, not a standing banner. A skip is an answer.
+  it("spends the ask on Skip too, with no name stored", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "Priya");
+    const { findByTestId, queryByTestId } = renderScreen();
+
+    fireEvent.press(await findByTestId("invite-name-ask-skip"));
+
+    await waitFor(() => expect(queryByTestId("invite-name-ask")).toBeNull());
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(INVITE_NAME_ASK_KEY)).toBeNull()
+    );
+    expect(await AsyncStorage.getItem(USER_NAME_KEY)).toBeNull();
+  });
+
+  // Inter carries no Malayalam glyphs, so the sender's own name would render
+  // as boxes in the one sentence that exists to name them.
+  it("renders a Malayalam sender name in the Malayalam face", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "\u0D05\u0D2E\u0D4D\u0D2E");
+    const { findByText } = renderScreen();
+
+    const line = await findByText(/sees that someone accepted/);
+    expect(StyleSheet.flatten(line.props.style).fontFamily).toBe(
+      "NotoSansMalayalam_400Regular"
+    );
+  });
+});
+
+// The tab bar is absolutely positioned, so it paints over this list. Without
+// enough bottom padding the last card, or the number offer under it, stays
+// behind the tabs - which is what a user reported on a real device.
+describe("clearance under the tab bar", () => {
+  it("pads the list past the tab bar, not just the gesture area", async () => {
+    const { findByTestId } = renderScreen();
+
+    const scroll = await findByTestId("home-scroll");
+    const padding = StyleSheet.flatten(
+      scroll.props.contentContainerStyle
+    ).paddingBottom;
+
+    expect(padding).toBeGreaterThan(TAB_BAR_HEIGHT);
   });
 });

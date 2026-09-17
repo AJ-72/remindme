@@ -364,3 +364,171 @@ step 4's curl response first: `{"status":"error",...,"details":{"error":
 "InvalidCredentials","fault":"developer"}}` means the FCM service-account
 credential is missing from Expo's dashboard (a separate step from
 `google-services.json` - see CLAUDE.md Gotchas), not a device or app bug.
+
+---
+
+## Claim-polling throttle (PENDING)
+
+Added 2026-09-15 with `services/invitationClaimThrottle.ts`. Jest cannot
+prove any of the three: the first needs a real server call count, the second
+needs a real broken-push device, the third needs a real device clock.
+
+`CLAIM_COOLDOWN_MS` is 1 hour. Every item below assumes that value.
+
+### 1. The saving is real (PENDING)
+
+**Why on-device.** Jest counts calls to a mock. Only the server knows how
+many invocations actually arrived.
+
+**Steps.**
+1. Bind a device to a number.
+2. Foreground and background the app 5 times inside 10 minutes.
+3. Read the Edge Function invocation count for `claim-invitations` in the
+   Supabase dashboard, or query `pg_stat_statements` for `claim_invitations`.
+
+**Pass.** Exactly one invocation for the 5 opens.
+
+**Fails if.** Five invocations - the gate is not reading stored state (check
+that `AsyncStorage` is not being cleared between launches by a dev-client
+reload, which is not the same as a cold start).
+
+### 2. A broken-push recipient still gets the invitation (PENDING)
+
+**Why on-device.** This is the user-facing cost of the throttle. It needs a
+device where push genuinely fails, which jsdom cannot produce.
+
+**Setup.** Recipient device with notification permission **denied** in
+Android Settings, so no push can arrive.
+
+**Steps.**
+1. Open the recipient app once, then background it. This starts a cooldown.
+2. From the sender, send an invitation with a datetime **3 hours out**.
+3. Immediately foreground the recipient app. Confirm nothing appears - this
+   is the throttle working as designed.
+4. Wait out the cooldown, then foreground the recipient app again.
+
+**Pass.** The invitation appears at step 4, and its `expires_at` is still in
+the future.
+
+**Fails if.** It never appears. Read the invitation row: `status = 'expired'`
+means the cooldown outlived the invitation, and `CLAIM_COOLDOWN_MS` must come
+down. This is the failure mode the 6-hour original value would have caused
+for most reminders.
+
+### 3. A backward clock jump does not lock the user out (PENDING)
+
+**Why on-device.** `Date.now()` is the real device clock. Only a real device
+can move it.
+
+**Steps.**
+1. Open the app so a claim time is stored.
+2. In Android Settings, turn off automatic time and set the clock back 2 days.
+3. Cold-start the app.
+
+**Pass.** A claim still runs. Restore automatic time, cold-start again, and
+confirm a claim runs then too (the stored value repaired itself).
+
+**Fails if.** No claim runs at step 3 - the `now < lastClaimAt` guard in
+`shouldClaimNow()` is not reached.
+
+### 4. Tapping an invitation push with the app killed (PENDING)
+
+Added 2026-09-15 with the headless-claim fix. Jest cannot prove this: it
+needs the app process actually dead, which only a real device produces.
+
+**Why it was broken.** The headless task claimed the invitation, and
+`claim_invitations()` consumes the row. The launch that followed claimed an
+empty list, so the tap opened the app to the home screen with the invitation
+nowhere. The cold-start replay could not rescue it either - the headless pass
+had already called `markResponseHandled()`, so the replay deduped out.
+
+**Setup.** Two devices, push confirmed working (device test 3 above).
+
+**Steps.**
+1. On the recipient's device, force-stop the app (Settings -> Apps -> Force
+   stop). Do not just background it - the process must be dead, or the
+   foreground listener handles the tap and the headless path never runs.
+2. From the sender, send an invitation.
+3. On the recipient's device, tap the notification body.
+
+**Pass.** The app launches and lands on the invitation preview, showing the
+sender's name, the title and the time.
+
+**Fails if.** The app launches to the home screen with no preview. Read the
+invitation row: `recipient_id` populated means something still claimed it
+before a navigator existed - check that `buildBackgroundResponseDeps()`'s
+`onInvitationPush` only arms `pushPending`.
+
+**Also check.** Repeat with the device in flight mode at step 3, then restore
+the network and open the app. The invitation must still appear: `pushPending`
+survives a failed claim.
+
+---
+
+<a id="d44"></a>
+## D44 — Receiver's own quiet hours gate the accepted reminder, not the sender's · `BLOCKED` — needs two devices with different quiet-hours settings
+Jest can drive this (see `invitation-preview.test.tsx`'s "recipient's own
+quiet hours" cases), but it cannot prove the sender's own quiet-hours prompt
+in `QuickAddInput` is truly independent of this one — that needs two real
+devices with two different quiet-hours settings, confirming the sender's
+prompt never influences what the receiver sees.
+
+**Setup.** Two devices, sender and receiver already bound. Set the
+receiver's quiet hours (Settings → Smart Alerts) to a window that will
+cover the test time; set the sender's quiet hours to something that does
+NOT cover it (or turn the sender's off) — the two devices must disagree.
+
+**Steps.**
+1. On the sender's device, create a reminder for the receiver at a time
+   inside the receiver's quiet window (and outside the sender's). Confirm
+   the sender sees no quiet-hours prompt of their own for a time that, on
+   their device, isn't quiet.
+2. On the receiver's device, open the invitation and tap Accept.
+3. Confirm the receiver's own quiet-hours sheet appears ("inside your quiet
+   hours"), referencing the receiver's window, not the sender's.
+4. Tap "Move to <time>" and confirm the locally scheduled reminder lands at
+   the receiver's quiet-hours end, not the sender's.
+
+**Pass.** The quiet-hours prompt the receiver sees is driven entirely by
+the receiver's own device settings; the sender's settings have no bearing
+on it at any step.
+
+**Fails if.** The receiver's accepted reminder schedules silently inside
+their own quiet hours (no prompt at all), or the "Move to" time it offers
+matches the sender's quiet-hours window instead of the receiver's.
+
+<a id="d46"></a>
+## D46 — Sender is notified when the receiver moves the reminder's time · `BLOCKED` — needs two physical devices, real FCM push
+Jest covers the SQL function (`respondToInvitation.test.ts`), the Edge
+Function logic (`respond-invitation/index.test.ts`), and every mobile-side
+piece in isolation (`ReminderService.test.ts`, `notificationResponseHandler.test.ts`,
+`NotificationResponseHandler.test.tsx`, `ReminderCard.test.tsx`,
+`reminder-detail.test.tsx`, `QuickAddInput.test.tsx`, `add-reminder.test.tsx`).
+None of that proves a real push reaches a real second device and updates
+its screen - see D39's own header for why a mocked push API can report
+success while Expo's real service silently rejects the send.
+
+**Setup.** Two devices, both registered/bound (same setup as D39/D44).
+Sender's quiet hours must NOT cover the chosen time; receiver's quiet
+hours MUST cover it, so accepting forces a move.
+
+**Steps.**
+1. Sender creates a reminder for the receiver.
+2. Receiver opens the invitation, accepts, and chooses "Move to <time>" on
+   their own quiet-hours prompt.
+3. Watch the sender's device without touching it.
+4. Once the push arrives, open the reminder from the sender's home list.
+
+**Pass.** The sender's device receives a push naming the receiver
+("{name} moved a reminder") within seconds of step 2. The reminder card
+on the sender's home list shows "Moved by {name}" under the recipient
+chip. Opening the reminder shows the full sentence with the original and
+new times, correctly rendered in the SENDER's own local timezone. The
+sender's own local alarm/notification for this reminder is rescheduled to
+the new time, not the original one.
+
+**Fails if.** No push arrives despite `respond-invitation` returning 200
+(check the same diagnostic curl as D39 first - FCM credential issues look
+identical from inside the app), the card/detail screen shows the moved
+time with no explanation, or the sender's own local alert still fires at
+the stale original time.

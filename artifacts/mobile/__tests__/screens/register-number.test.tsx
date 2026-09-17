@@ -15,6 +15,8 @@ jest.mock("@/services/InvitationService");
 
 const mockBack = jest.fn();
 const mockPush = jest.fn();
+const mockReplace = jest.fn();
+const mockCanGoBack = jest.fn(() => true);
 
 let mockSearchParams: Record<string, string> = {};
 
@@ -22,7 +24,8 @@ jest.mock("expo-router", () => ({
   router: {
     back: (...args: any[]) => mockBack(...args),
     push: (...args: any[]) => mockPush(...args),
-    canGoBack: () => true,
+    replace: (...args: any[]) => mockReplace(...args),
+    canGoBack: () => mockCanGoBack(),
   },
   useLocalSearchParams: () => mockSearchParams,
 }));
@@ -59,6 +62,33 @@ describe("RegisterNumberScreen", () => {
     fireEvent.changeText(getByTestId("register-number-input"), "4155552671");
 
     expect(getByTestId("register-number-submit").props.accessibilityState?.disabled).toBe(false);
+  });
+
+  describe("country code picker", () => {
+    it("defaults to the device region's calling code", () => {
+      const { getByTestId, getByText } = renderScreen();
+      // Mocked region is US (see __mocks__/expo-localization.ts).
+      expect(getByText("+1")).toBeTruthy();
+      expect(getByTestId("register-number-country-btn")).toBeTruthy();
+    });
+
+    it("lets the user pick a different country and normalizes against it explicitly", async () => {
+      (InvitationService.selfRegister as jest.Mock).mockResolvedValue({
+        ok: true,
+        appUserId: "user-1",
+      });
+
+      const { getByTestId, findByTestId, findByText } = renderScreen();
+      fireEvent.press(getByTestId("register-number-country-btn"));
+      fireEvent.press(await findByTestId("register-number-country-IN"));
+
+      fireEvent.changeText(getByTestId("register-number-input"), "9876543210");
+      fireEvent.press(getByTestId("register-number-submit"));
+
+      await findByText(/you're registered/i);
+      // +91, not the device region's +1 - the explicit pick overrides it.
+      expect(InvitationService.selfRegister).toHaveBeenCalledWith("+919876543210");
+    });
   });
 
   it("stays disabled for input that doesn't resolve to a phone number at all", () => {
@@ -283,9 +313,9 @@ describe("RegisterNumberScreen", () => {
     );
   });
 
-  describe("first-run mode (B12)", () => {
+  describe("optional mode (prompted visit)", () => {
     beforeEach(() => {
-      mockSearchParams = { firstRun: "1" };
+      mockSearchParams = { optional: "1" };
     });
 
     it("shows an Optional badge and a Skip button", () => {
@@ -294,22 +324,31 @@ describe("RegisterNumberScreen", () => {
       expect(getByTestId("register-number-skip")).toBeTruthy();
     });
 
-    it("does not show the Optional badge or Skip button outside first-run mode", () => {
+    it("does not show the Optional badge or Skip button on a direct visit", () => {
       mockSearchParams = {};
       const { queryByTestId } = renderScreen();
       expect(queryByTestId("register-number-optional-badge")).toBeNull();
       expect(queryByTestId("register-number-skip")).toBeNull();
     });
 
-    it("marks registration onboarding complete and goes back on Skip", async () => {
+    it("goes back on Skip", async () => {
       const { getByTestId } = renderScreen();
       fireEvent.press(getByTestId("register-number-skip"));
 
       await waitFor(() => expect(mockBack).toHaveBeenCalled());
-      expect(await AsyncStorage.getItem("@registration_onboarding_v1")).toBe("true");
+      expect(mockReplace).not.toHaveBeenCalled();
     });
 
-    it("marks registration onboarding complete on a successful registration", async () => {
+    it("falls back to replacing with the home tab when there is nothing to go back to", async () => {
+      mockCanGoBack.mockReturnValue(false);
+      const { getByTestId } = renderScreen();
+      fireEvent.press(getByTestId("register-number-skip"));
+
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/(tabs)"));
+      expect(mockBack).not.toHaveBeenCalled();
+    });
+
+    it("registers normally from a prompted visit", async () => {
       (InvitationService.selfRegister as jest.Mock).mockResolvedValue({
         ok: true,
         appUserId: "user-1",
@@ -320,7 +359,7 @@ describe("RegisterNumberScreen", () => {
       fireEvent.press(getByTestId("register-number-submit"));
 
       await findByText(/you're registered/i);
-      expect(await AsyncStorage.getItem("@registration_onboarding_v1")).toBe("true");
+      expect(await AsyncStorage.getItem("@registered_phone_v1")).toBe("+14155552671");
     });
   });
 

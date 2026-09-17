@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useColors } from "@/hooks/useColors";
 import { getFontFamily } from "@/utils/getFontFamily";
 
@@ -47,6 +48,9 @@ export default function NameSheet({
   }, [visible, initialName]);
 
   const styles = StyleSheet.create({
+    flex: {
+      flex: 1,
+    },
     overlay: {
       flex: 1,
       backgroundColor: "rgba(0,0,0,0.4)",
@@ -128,6 +132,12 @@ export default function NameSheet({
       animationType="slide"
       onRequestClose={onDismiss}
     >
+      {/* The field sits at the bottom of a bottom sheet, so the soft keyboard
+          covers the thing the user is typing into. RN's own
+          KeyboardAvoidingView does not work inside an Android Modal - the
+          modal gets its own window and never receives the soft-input resize -
+          so this uses the same library ContactPickerModal already relies on. */}
+      <KeyboardAvoidingView behavior="padding" style={styles.flex}>
       <Pressable
         style={styles.overlay}
         onPress={onDismiss}
@@ -171,6 +181,7 @@ export default function NameSheet({
           </Pressable>
         </Pressable>
       </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

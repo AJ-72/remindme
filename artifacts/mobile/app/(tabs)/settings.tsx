@@ -14,10 +14,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import NameSheet from "@/components/NameSheet";
+import { tabBarContentInset } from "@/constants/tabBar";
 import { buildAppShareMessage } from "@/utils/appShare";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
+import { useTour, useTourTarget } from "@/contexts/TourContext";
 import { countPendingRemindersDisagreeingWithAlarm } from "@/services/ReminderService";
 import {
   useThemePreference,
@@ -34,6 +36,8 @@ export default function SettingsScreen() {
   const colors = useColors();
   const [alarmIconExplained, setAlarmIconExplained] = useState(false);
   const insets = useSafeAreaInsets();
+  const tour = useTour();
+  const smartAlertsTourRef = useTourTarget("smart-alerts-row");
   const {
     defaultAlarmEnabled,
     defaultExactTimingEnabled,
@@ -51,6 +55,8 @@ export default function SettingsScreen() {
     setDictationLanguage,
     userName,
     setUserName,
+    telemetryEnabled,
+    setTelemetryEnabled,
   } = useReminders();
   const { preference, setPreference } = useThemePreference();
 
@@ -131,7 +137,8 @@ export default function SettingsScreen() {
     content: {
       paddingHorizontal: 20,
       paddingTop: 4,
-      paddingBottom: insets.bottom + 24,
+      // Clears the absolutely positioned tab bar, not only the gesture area.
+      paddingBottom: tabBarContentInset(insets.bottom, 24),
     },
     // Plain-language section headers, so the screen reads as a handful of
     // grouped topics instead of one undifferentiated list of cards.
@@ -293,6 +300,20 @@ export default function SettingsScreen() {
             </View>
             <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
           </Pressable>
+          <Pressable
+            style={[styles.row, styles.rowDivider]}
+            onPress={() => router.push("/insights")}
+            testID="insights-row"
+          >
+            <Feather name="bar-chart-2" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>How you&apos;re doing</Text>
+              <Text style={styles.rowSubLabel}>
+                Your completion rate, your strongest times, and what keeps slipping
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
+          </Pressable>
         </View>
 
         {/* When reminders go off — the settings a user actually returns for */}
@@ -438,6 +459,7 @@ export default function SettingsScreen() {
           </View>
 
           <Pressable
+            ref={smartAlertsTourRef}
             style={[styles.row, styles.rowDivider]}
             onPress={() => router.push("/smart-alerts")}
             testID="smart-alerts-row"
@@ -606,6 +628,45 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Privacy */}
+        <Text style={styles.sectionLabel}>Privacy</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <Feather
+              name={telemetryEnabled ? "bar-chart-2" : "slash"}
+              size={18}
+              color={telemetryEnabled ? colors.primary : colors.mutedForeground}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Help improve this app</Text>
+              <Text style={styles.rowSubLabel}>
+                {telemetryEnabled
+                  ? "Sends anonymous usage counts and crash reports"
+                  : "Sends nothing"}
+              </Text>
+            </View>
+            <Switch
+              testID="telemetry-switch"
+              value={telemetryEnabled}
+              onValueChange={(v) => setTelemetryEnabled(v)}
+              trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+              thumbColor={telemetryEnabled ? colors.primary : colors.mutedForeground}
+            />
+          </View>
+          <View style={[styles.explainerBody, styles.rowDivider]}>
+            <Text style={styles.explainerText}>
+              What is sent: which screens you open, that a reminder was created
+              or completed or snoozed, how far ahead it was set, and crash
+              reports when something goes wrong.
+            </Text>
+            <Text style={styles.explainerText}>
+              What is never sent: what your reminders say, their descriptions,
+              who they are for, phone numbers, contacts, or anything you
+              dictate. Your reminders stay on your phone.
+            </Text>
+          </View>
+        </View>
+
         {/* More */}
         <Text style={styles.sectionLabel}>More</Text>
         <View style={styles.card}>
@@ -619,6 +680,21 @@ export default function SettingsScreen() {
               <Text style={styles.rowLabel}>Backup &amp; troubleshooting</Text>
               <Text style={styles.rowSubLabel}>
                 Save a copy of your reminders, or get logs for a problem
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
+          </Pressable>
+
+          <Pressable
+            style={[styles.row, styles.rowDivider]}
+            onPress={() => tour.start()}
+            testID="feature-tour-row"
+          >
+            <Feather name="compass" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Feature tour</Text>
+              <Text style={styles.rowSubLabel}>
+                See a quick walkthrough of what the app can do
               </Text>
             </View>
             <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />

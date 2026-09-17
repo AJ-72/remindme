@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -15,18 +15,38 @@ import ConfirmSheet from "@/components/ConfirmSheet";
 import QuickAddInput from "@/components/QuickAddInput";
 import ReminderCard from "@/components/ReminderCard";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
+import { tabBarContentInset } from "@/constants/tabBar";
 import { useReminders, type Reminder } from "@/contexts/RemindersContext";
-import { isSendReminder } from "@/services/ReminderService";
+import {
+  clearPendingInviteNameAsk,
+  getPendingInviteNameAsk,
+  incrementRegisterPromptCount,
+  isSendReminder,
+  markRegisterPromptShown,
+  shouldOfferNumberRegistration,
+} from "@/services/ReminderService";
 import { useColors } from "@/hooks/useColors";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
 import { buildGreeting, greetingName, initialsFor } from "@/utils/greeting";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { groupByDate } from "@/utils/groupByDate";
 import NameSheet from "@/components/NameSheet";
+import InviteNameAsk from "@/components/InviteNameAsk";
+import NotificationNudge from "@/components/NotificationNudge";
+import RegisterNumberNudge from "@/components/RegisterNumberNudge";
+import { useTourTarget } from "@/contexts/TourContext";
 
 // Distinguishes the two confirm sheets that share pendingDelete* state below:
 // deleting one reminder vs. clearing every completed one at once.
 type PendingDelete = { kind: "single"; id: string } | { kind: "clear-completed" };
+
+/**
+ * How many reminders a user saves before the app offers to take their number.
+ * The offer is about being reachable by other people, which is worth nothing
+ * to someone who has not yet decided the app is worth keeping. Three saved
+ * reminders is the cheapest available evidence that they have.
+ */
+export const REMINDERS_BEFORE_NUMBER_OFFER = 3;
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -36,6 +56,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [nameSheetVisible, setNameSheetVisible] = useState(false);
+  const insightsTourRef = useTourTarget("header-insights-button");
 
   const { upcomingGroups, upcomingCount, sending, completed } = useMemo(() => {
     const byDateAsc = (a: Reminder, b: Reminder) =>
@@ -132,6 +153,19 @@ export default function HomeScreen() {
       alignItems: "center",
       justifyContent: "center",
     },
+    // Same size as the avatar so the two sit level, and separated from it
+    // (rather than merged into one control) since they open unrelated
+    // things - a name edit vs. a whole screen - and a merged control would
+    // need to guess which one a tap meant.
+    headerInsightsBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.muted,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: 8,
+    },
     headerAvatarText: {
       fontSize: 14,
       color: colors.primary,
@@ -145,7 +179,9 @@ export default function HomeScreen() {
     scrollContent: {
       paddingHorizontal: 20,
       paddingTop: 4,
-      paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 20,
+      // The tab bar floats over this list, so the padding must clear the bar
+      // itself, not just the gesture area under it.
+      paddingBottom: tabBarContentInset(insets.bottom),
     },
     sectionLabel: {
       fontSize: 13,
@@ -225,6 +261,9 @@ export default function HomeScreen() {
     // deliberately smaller and unstyled-as-a-badge compared to sectionHeaderLabel,
     // since these are sub-groups of one section rather than section headers
     // themselves.
+    numberOfferWrap: {
+      marginTop: 16,
+    },
     dateGroupLabel: {
       fontSize: 12,
       fontFamily: "Inter_600SemiBold",
@@ -233,6 +272,69 @@ export default function HomeScreen() {
       marginTop: 10,
     },
   });
+
+  // The offer to register the user's own number, once they have a habit.
+  // Null means nothing on screen; the flag is not persisted, because
+  // shouldOfferNumberRegistration() already owns the across-install decision
+  // and a second store of it could disagree with the first.
+  const [numberOffer, setNumberOffer] = useState(false);
+  // The offer is counted when it is SHOWN, so this guards against the effect
+  // spending a second one on a re-render.
+  const offerCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (loading || offerCheckedRef.current) return;
+    if (reminders.length < REMINDERS_BEFORE_NUMBER_OFFER) return;
+    offerCheckedRef.current = true;
+    let live = true;
+    (async () => {
+      if (!(await shouldOfferNumberRegistration())) return;
+      markRegisterPromptShown();
+      await incrementRegisterPromptCount();
+      if (live) setNumberOffer(true);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [loading, reminders.length]);
+
+  // Frame I3 of the first-run study. An invited install skips the first-run
+  // name sheet, so the ask lands here instead - after the friend's reminder
+  // is on screen, where it can name the person who will read the answer.
+  //
+  // Keyed on the reminder count because accepting an invitation is what adds
+  // one: this tab stays mounted under the preview, so a mount-only check
+  // would never see the accept that wrote the ask.
+  const [inviteNameAsk, setInviteNameAsk] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (loading) return;
+    let live = true;
+    void getPendingInviteNameAsk().then((sender) => {
+      // A name typed in the meantime answers the question already.
+      if (live) setInviteNameAsk(sender !== null && userName.trim() === "" ? sender : null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [loading, reminders.length, userName]);
+
+  const settleInviteNameAsk = useCallback(() => {
+    setInviteNameAsk(null);
+    void clearPendingInviteNameAsk();
+  }, []);
+
+  // Dismissal lasts for this mount only. The banner is not an advert: it
+  // describes a live fault, so it comes back on the next launch while the
+  // fault does, and disappears for good the moment permission is granted.
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
+  const hasMissedRing = useMemo(
+    () =>
+      reminders.some(
+        (r) => !r.completed && new Date(r.datetime).getTime() < Date.now()
+      ),
+    [reminders]
+  );
 
   if (loading) {
     return (
@@ -303,6 +405,17 @@ export default function HomeScreen() {
             </View>
           </View>
           <Pressable
+            ref={insightsTourRef}
+            style={styles.headerInsightsBtn}
+            onPress={() => router.push("/insights")}
+            accessibilityRole="button"
+            accessibilityLabel="How you're doing"
+            hitSlop={6}
+            testID="header-insights-button"
+          >
+            <Feather name="bar-chart-2" size={17} color={colors.mutedForeground} />
+          </Pressable>
+          <Pressable
             style={styles.headerAvatar}
             onPress={() => setNameSheetVisible(true)}
             accessibilityRole="button"
@@ -329,6 +442,7 @@ export default function HomeScreen() {
       <QuickAddInput />
 
       <KeyboardAwareScrollViewCompat
+        testID="home-scroll"
         contentContainerStyle={[styles.scrollContent, !hasAny && { flexGrow: 1 }]}
         refreshControl={
           <RefreshControl
@@ -340,6 +454,13 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {!nudgeDismissed && (
+          <NotificationNudge
+            hasMissedRing={hasMissedRing}
+            onDismiss={() => setNudgeDismissed(true)}
+          />
+        )}
+
         {!hasAny ? (
           <View style={styles.emptyWrap}>
             <View style={styles.emptyIcon}>
@@ -422,6 +543,26 @@ export default function HomeScreen() {
               </>
             )}
           </>
+        )}
+
+        {/* Under the list, not over it: the reminders are what the user came
+            for, and an offer above them would be read as the app interrupting
+            its own answer. */}
+        {numberOffer && (
+          <View style={styles.numberOfferWrap}>
+            <RegisterNumberNudge
+              reason="milestone"
+              onDismiss={() => setNumberOffer(false)}
+            />
+          </View>
+        )}
+
+        {inviteNameAsk !== null && (
+          <InviteNameAsk
+            senderName={inviteNameAsk}
+            onSettled={settleInviteNameAsk}
+            onSave={setUserName}
+          />
         )}
       </KeyboardAwareScrollViewCompat>
 
