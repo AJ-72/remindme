@@ -20,6 +20,7 @@ import QuietHoursSheet from "@/components/QuietHoursSheet";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
+import { useTourTarget } from "@/contexts/TourContext";
 import {
   abortListening,
   ensureOfflineModelReady,
@@ -120,6 +121,9 @@ interface Props {
 
 export default function QuickAddInput({ onSaved }: Props) {
   const colors = useColors();
+  const quickAddInputTourRef = useTourTarget("quick-add-input");
+  const micTourRef = useTourTarget("quick-add-mic");
+  const remindSomeoneTourRef = useTourTarget("quick-add-remind-someone");
   const {
     addReminder,
     attachInvitationId,
@@ -1023,6 +1027,7 @@ export default function QuickAddInput({ onSaved }: Props) {
     <View style={styles.wrapper}>
       <View style={styles.bar}>
         <TextInput
+          ref={quickAddInputTourRef}
           style={[styles.textInput, { fontFamily: getFontFamily(input, "400Regular") }]}
           placeholder="Add a reminder…"
           placeholderTextColor={colors.mutedForeground}
@@ -1095,6 +1100,7 @@ export default function QuickAddInput({ onSaved }: Props) {
 
         <View style={styles.actionRow}>
         <Pressable
+          ref={micTourRef}
           style={[styles.micBtn, listening && styles.micBtnListening]}
           onPress={handleMicPress}
           hitSlop={8}
@@ -1177,6 +1183,7 @@ export default function QuickAddInput({ onSaved }: Props) {
           every session. The action-row icon stays as the shortcut for a user
           who already knows where it is. */}
       <Pressable
+        ref={remindSomeoneTourRef}
         style={styles.remindSomeoneBtn}
         onPress={() => setContactPickerVisible(true)}
         accessibilityRole="button"

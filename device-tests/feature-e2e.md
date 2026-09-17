@@ -1114,3 +1114,39 @@ are available. Enough reminders to make the home list scroll.
 with a clear gap. No text or button is cut off, and no item needs an extra pull
 to come into view. Reported as a defect on 2026-09-17: the **Remind someone
 else?** panel was cut off on Home.
+
+---
+
+## D78 — First-launch feature tour (coach marks) — `PENDING`
+
+**Why hardware only.** Jest cannot measure real screen coordinates
+(`measureInWindow`), so the spotlight cutout position, whether the tooltip
+card clips off-screen, and whether the SVG mask actually dims the rest of the
+screen are all unverified by the passing unit/context tests in
+`contexts/TourContext.test.tsx`.
+
+**Setup.** A fresh install (clear app data, or a new device), no reminders yet.
+
+**Steps.**
+1. Complete first launch through the name prompt (answer or skip it).
+2. Confirm the tour starts on its own, spotlighting the quick-add field first.
+3. Step through every card with **Next**, confirming each spotlight lands on
+   the right control: quick-add field, mic button, (no spotlight) snooze
+   card, Insights icon, Remind-someone-else button, then Smart Alerts on the
+   Settings screen (the tour should navigate there on its own for this step).
+4. Tap **Skip** partway through on a fresh reinstall; confirm the overlay
+   closes immediately and does not reappear on the next cold start.
+5. From Settings → More → **Feature tour**, replay the tour on demand and
+   confirm it still runs correctly on a device that has already seen it.
+6. Try a small device and confirm the tooltip card never renders off-screen
+   or overlapping the spotlighted control.
+
+**Pass.** The tour appears once automatically on first launch, every
+spotlight aligns with the real control it names, Skip and Next both work at
+every step, the on-demand replay from Settings works after the tour has
+already been seen, and the tooltip card stays fully on-screen at each step.
+
+**Fails if.** The tour never appears on first launch, appears again on a
+later cold start after being finished/skipped, a spotlight is misaligned or
+missing on a control that does exist, the tour gets stuck navigating to
+Settings for the Smart Alerts step, or the tooltip card clips off-screen.

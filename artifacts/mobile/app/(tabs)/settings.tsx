@@ -19,6 +19,7 @@ import { buildAppShareMessage } from "@/utils/appShare";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
+import { useTour, useTourTarget } from "@/contexts/TourContext";
 import { countPendingRemindersDisagreeingWithAlarm } from "@/services/ReminderService";
 import {
   useThemePreference,
@@ -35,6 +36,8 @@ export default function SettingsScreen() {
   const colors = useColors();
   const [alarmIconExplained, setAlarmIconExplained] = useState(false);
   const insets = useSafeAreaInsets();
+  const tour = useTour();
+  const smartAlertsTourRef = useTourTarget("smart-alerts-row");
   const {
     defaultAlarmEnabled,
     defaultExactTimingEnabled,
@@ -454,6 +457,7 @@ export default function SettingsScreen() {
           </View>
 
           <Pressable
+            ref={smartAlertsTourRef}
             style={[styles.row, styles.rowDivider]}
             onPress={() => router.push("/smart-alerts")}
             testID="smart-alerts-row"
@@ -635,6 +639,21 @@ export default function SettingsScreen() {
               <Text style={styles.rowLabel}>Backup &amp; troubleshooting</Text>
               <Text style={styles.rowSubLabel}>
                 Save a copy of your reminders, or get logs for a problem
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
+          </Pressable>
+
+          <Pressable
+            style={[styles.row, styles.rowDivider]}
+            onPress={() => tour.start()}
+            testID="feature-tour-row"
+          >
+            <Feather name="compass" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Feature tour</Text>
+              <Text style={styles.rowSubLabel}>
+                See a quick walkthrough of what the app can do
               </Text>
             </View>
             <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />

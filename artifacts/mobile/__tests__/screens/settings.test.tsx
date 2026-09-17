@@ -19,6 +19,7 @@ import {
 } from "@/services/ReminderService";
 import darkColors from "@/constants/colors";
 import { ThemeProvider, THEME_PREFERENCE_KEY } from "@/contexts/ThemeContext";
+import { TourProvider } from "@/contexts/TourContext";
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn(), back: jest.fn() } }));
 jest.mock("expo-haptics");
@@ -36,7 +37,9 @@ function renderScreen() {
     >
       <ThemeProvider>
         <RemindersProvider>
-          <SettingsScreen />
+          <TourProvider>
+            <SettingsScreen />
+          </TourProvider>
         </RemindersProvider>
       </ThemeProvider>
     </SafeAreaProvider>

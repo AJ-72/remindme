@@ -68,6 +68,10 @@ export const USER_NAME_KEY = "@user_name_v1";
 // name prompt done, or a user who granted permissions before this feature
 // existed would never be asked their name.
 export const NAME_PROMPT_KEY = "@name_prompt_v1";
+// Its own key too, for the same reason as NAME_PROMPT_KEY: a user who
+// installed before the feature tour existed should still see it once, not
+// have it silently marked seen by some other onboarding flag settling.
+export const FEATURE_TOUR_KEY = "@feature_tour_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 // NOTE: the value must stay "SNOOZE_10" even though snooze is now
 // user-configurable. It is written into the categoryIdentifier of every
@@ -325,6 +329,23 @@ export async function hasSeenNamePrompt(): Promise<boolean> {
 export async function markNamePromptSeen(): Promise<void> {
   try {
     await AsyncStorage.setItem(NAME_PROMPT_KEY, "1");
+  } catch {}
+}
+
+/** Whether the first-launch feature tour has been shown (finished OR skipped). */
+export async function hasSeenFeatureTour(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(FEATURE_TOUR_KEY)) !== null;
+  } catch {
+    // Same reasoning as hasSeenNamePrompt: treat a storage failure as
+    // "already seen" rather than re-showing the tour on every cold start.
+    return true;
+  }
+}
+
+export async function markFeatureTourSeen(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(FEATURE_TOUR_KEY, "1");
   } catch {}
 }
 
