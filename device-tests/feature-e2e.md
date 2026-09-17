@@ -1151,6 +1151,33 @@ later cold start after being finished/skipped, a spotlight is misaligned or
 missing on a control that does exist, the tour gets stuck navigating to
 Settings for the Smart Alerts step, or the tooltip card clips off-screen.
 
+## D78b — Navigation is not trapped while the tour runs · `PENDING`
+
+*Added 2026-09-17.* Regression guard for the route-group bug: `usePathname()`
+reports the home tab as `/`, never `/(tabs)`, so TourOverlay's raw string
+compare never matched. The tour stayed active but invisible and pushed the
+user back to the home screen on every navigation. Jest now pins the compare
+(`components/TourOverlay.test.tsx`), but only a device shows the real
+pathname expo-router produces.
+
+**Setup.** Clear app data (or a fresh install), so the tour auto-starts.
+
+**Steps.**
+1. Launch the app and pass the name onboarding. The coach mark must appear.
+2. Skip the tour.
+3. Tap a reminder card. The edit screen must open and stay open.
+4. Open Settings, Insights, and a received/send reminder. Each must stay open.
+5. Clear app data again, launch, and this time tap a reminder card while the
+   tour is still on screen.
+
+**Pass.** The coach marks are visible at step 1, every screen in steps 3-4
+stays open, and the home screen shows no repeated push (the back button
+returns to the previous screen once, not to more copies of home).
+
+**Fails if.** Any screen closes on its own and returns to home, the tour is
+active but draws nothing, or the tour restarts on a later cold launch after
+being skipped.
+
 ## D79 — System-wide "Remind Me" text-selection menu · `PENDING`
 
 *Added 2026-09-17.* `ACTION_PROCESS_TEXT` is pure system integration: the
