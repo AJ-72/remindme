@@ -53,6 +53,7 @@ export const REGISTERED_PHONE_KEY = "@registered_phone_v1";
 export const REGISTER_PROMPT_COUNT_KEY = "@register_prompt_count_v1";
 export const MAX_REGISTER_PROMPTS = 2;
 export const MIC_LANGUAGE_LINE_KEY = "@mic_language_line_seen_v1";
+export const INVITE_NAME_ASK_KEY = "@invite_name_ask_v1";
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 /**
  * Corrupt reminder payloads are copied here rather than discarded. AsyncStorage
@@ -558,6 +559,40 @@ export async function incrementRegisterPromptCount(): Promise<number> {
     await AsyncStorage.setItem(REGISTER_PROMPT_COUNT_KEY, String(next));
   } catch {}
   return next;
+}
+
+/**
+ * The name ask an invited install owes, and who is waiting to read it.
+ *
+ * An invited install meets the app through somebody else's reminder, so the
+ * first-launch name sheet is exactly the wrong thing to put in front of it -
+ * the invitation is the reason they opened the app. The ask moves to the
+ * home screen behind Accept, where it can name the person who will actually
+ * see the answer, which is the only argument for typing a name at all.
+ *
+ * The value is the sender's display name. It is cleared by answering OR by
+ * skipping: this is one ask, not a standing banner.
+ */
+export async function getPendingInviteNameAsk(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(INVITE_NAME_ASK_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setPendingInviteNameAsk(senderName: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, senderName);
+  } catch {
+    // The ask is a courtesy. Losing it costs the user nothing.
+  }
+}
+
+export async function clearPendingInviteNameAsk(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(INVITE_NAME_ASK_KEY);
+  } catch {}
 }
 
 /**

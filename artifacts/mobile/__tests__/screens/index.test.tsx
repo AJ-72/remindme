@@ -1,11 +1,13 @@
 import React from "react";
 import { render, waitFor, fireEvent, act } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { StyleSheet } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import HomeScreen from "@/app/(tabs)/index";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
 import {
+  INVITE_NAME_ASK_KEY,
   MAX_REGISTER_PROMPTS,
   REGISTERED_PHONE_KEY,
   REGISTER_PROMPT_COUNT_KEY,
@@ -569,5 +571,87 @@ describe("HomeScreen — the number offer, once the app has earned it", () => {
     const second = renderScreen();
     await second.findByTestId("header-greeting");
     await waitFor(() => expect(second.queryByTestId("register-number-nudge")).toBeNull());
+  });
+});
+
+// Frame I3 of the first-run study. An invited install skips the first-run
+// name sheet - it would have rendered over the bind screen, in front of the
+// reminder the user tapped a link to read. The ask lands here instead, where
+// it can name the person who will actually read the answer.
+describe("HomeScreen — the name ask an invited install gets instead", () => {
+  it("names the sender who is waiting to read it", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "Priya");
+    const { findByTestId, findByText } = renderScreen();
+
+    expect(await findByTestId("invite-name-ask")).toBeTruthy();
+    expect(await findByText(/Priya sees that someone accepted/)).toBeTruthy();
+  });
+
+  it("stays away when nothing recorded an ask", async () => {
+    const { queryByTestId, findByText } = renderScreen();
+    await findByText(formatHeaderDate(new Date()));
+    expect(queryByTestId("invite-name-ask")).toBeNull();
+  });
+
+  // The question is already answered. Asking anyway reads as an app that is
+  // not listening.
+  it("stays away once the user has a name, whatever is recorded", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "Priya");
+    await AsyncStorage.setItem(USER_NAME_KEY, "Anand");
+    const { queryByTestId, findByText } = renderScreen();
+
+    await findByText(formatHeaderDate(new Date()));
+    await waitFor(() => expect(queryByTestId("invite-name-ask")).toBeNull());
+  });
+
+  it("opens the name sheet from Add name", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "Priya");
+    const { findByTestId } = renderScreen();
+
+    fireEvent.press(await findByTestId("invite-name-ask-add"));
+    expect(await findByTestId("name-sheet-input")).toBeTruthy();
+  });
+
+  it("stores the name and spends the ask", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "Priya");
+    const { findByTestId, queryByTestId } = renderScreen();
+
+    fireEvent.press(await findByTestId("invite-name-ask-add"));
+    fireEvent.changeText(await findByTestId("name-sheet-input"), "Anand");
+    fireEvent.press(await findByTestId("name-sheet-save"));
+
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(USER_NAME_KEY)).toBe("Anand")
+    );
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(INVITE_NAME_ASK_KEY)).toBeNull()
+    );
+    await waitFor(() => expect(queryByTestId("invite-name-ask")).toBeNull());
+  });
+
+  // One ask, not a standing banner. A skip is an answer.
+  it("spends the ask on Skip too, with no name stored", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "Priya");
+    const { findByTestId, queryByTestId } = renderScreen();
+
+    fireEvent.press(await findByTestId("invite-name-ask-skip"));
+
+    await waitFor(() => expect(queryByTestId("invite-name-ask")).toBeNull());
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(INVITE_NAME_ASK_KEY)).toBeNull()
+    );
+    expect(await AsyncStorage.getItem(USER_NAME_KEY)).toBeNull();
+  });
+
+  // Inter carries no Malayalam glyphs, so the sender's own name would render
+  // as boxes in the one sentence that exists to name them.
+  it("renders a Malayalam sender name in the Malayalam face", async () => {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, "\u0D05\u0D2E\u0D4D\u0D2E");
+    const { findByText } = renderScreen();
+
+    const line = await findByText(/sees that someone accepted/);
+    expect(StyleSheet.flatten(line.props.style).fontFamily).toBe(
+      "NotoSansMalayalam_400Regular"
+    );
   });
 });

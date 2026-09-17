@@ -8,6 +8,11 @@ import QuietHoursSheet from "@/components/QuietHoursSheet";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 import { respondToInvitation } from "@/services/InvitationService";
+import {
+  ensureNotificationPermission,
+  getNotificationPermissionState,
+  setPendingInviteNameAsk,
+} from "@/services/ReminderService";
 import { getSupabaseClient, getCurrentSession } from "@/services/SessionService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
@@ -52,7 +57,12 @@ export default function InvitationPreviewScreen() {
     senderId: string;
   }>();
 
-  const { addReminder, quietHours } = useReminders();
+  const { addReminder, quietHours, userName } = useReminders();
+  // The time this Accept is waiting on a ring-permission answer, or null.
+  // Frame I2 of the first-run study: the same system dialog as an ordinary
+  // install, reached through a reason this user cares about more - a person
+  // is waiting on it.
+  const [ringConsentFor, setRingConsentFor] = useState<Date | null>(null);
   const [senderName, setSenderName] = useState<string | null>(null);
   const [blocking, setBlocking] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -123,6 +133,11 @@ export default function InvitationPreviewScreen() {
       senderName: displaySenderName,
       senderId,
     });
+    // Frame I3: the ask the first-run sheet did not make. It waits for the
+    // home screen, where it can name the person who will read the answer.
+    if (userName.trim() === "") {
+      await setPendingInviteNameAsk(displaySenderName);
+    }
     goBack();
   };
 
@@ -143,9 +158,35 @@ export default function InvitationPreviewScreen() {
     }
   };
 
-  const handleAccept = () => {
-    if (!id || responding) return;
-    const target = new Date(datetime);
+  /**
+   * Say what the permission is for, then let Android ask.
+   *
+   * Returns true when the caller should carry on without a sentence: the
+   * permission is already granted, or the OS has stopped asking and a
+   * sentence would only promise a dialog that will never appear.
+   */
+  const ringConsentSettled = async (): Promise<boolean> => {
+    const state = await getNotificationPermissionState();
+    return state.granted || !state.canAskAgain;
+  };
+
+  const handleRingAllow = async () => {
+    const target = ringConsentFor;
+    setRingConsentFor(null);
+    await ensureNotificationPermission();
+    if (target) continueAccept(target);
+  };
+
+  const handleRingNotNow = () => {
+    const target = ringConsentFor;
+    setRingConsentFor(null);
+    // Never a gate. A refused ring costs the reminder its sound, not its
+    // existence, and the home screen carries the repair path.
+    if (target) continueAccept(target);
+  };
+
+  /** Everything after the ring question: quiet hours, then the accept. */
+  const continueAccept = (target: Date) => {
     // Ask, never block - and ask about THIS device's own quiet hours, since
     // the receiving device is the one that will actually alert. The
     // sender's quiet hours (checked separately in QuickAddInput) have no
@@ -155,6 +196,18 @@ export default function InvitationPreviewScreen() {
       return;
     }
     void doAccept(target);
+  };
+
+  const handleAccept = () => {
+    if (!id || responding) return;
+    const target = new Date(datetime);
+    void (async () => {
+      if (await ringConsentSettled()) {
+        continueAccept(target);
+        return;
+      }
+      setRingConsentFor(target);
+    })();
   };
 
   const handleQuietKeep = () => {
@@ -248,6 +301,26 @@ export default function InvitationPreviewScreen() {
       color: colors.mutedForeground,
     },
     actionsWrap: { gap: 12 },
+    ringConsent: {
+      gap: 6,
+      marginBottom: 16,
+      padding: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.secondary,
+    },
+    ringConsentTitle: {
+      fontSize: 15,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.secondaryForeground,
+    },
+    ringConsentBody: {
+      fontSize: 14,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+    },
+    ringConsentRow: { flexDirection: "row", gap: 8, marginTop: 6 },
     actionBtn: {
       flexDirection: "row",
       alignItems: "center",
@@ -323,6 +396,36 @@ export default function InvitationPreviewScreen() {
           <Feather name="clock" size={14} color={colors.mutedForeground} />
           <Text style={styles.timeText}>{formatDatetime(datetime)}</Text>
         </View>
+
+        {/* Said before Android asks, never after. A permission dialog with
+            no sentence in front of it is a question about nothing; this one
+            names the time and the person waiting on it. */}
+        {ringConsentFor !== null && (
+          <View style={styles.ringConsent} testID="invite-ring-consent">
+            <Text style={styles.ringConsentTitle}>
+              We ring you {formatDatetime(ringConsentFor.toISOString())}.
+            </Text>
+            <Text style={styles.ringConsentBody}>
+              Allow notifications so {displaySenderName}&apos;s reminder can reach you.
+            </Text>
+            <View style={styles.ringConsentRow}>
+              <Pressable
+                style={[styles.actionBtn, styles.primaryBtn]}
+                onPress={handleRingAllow}
+                testID="invite-ring-allow"
+              >
+                <Text style={styles.primaryBtnText}>Allow</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.actionBtn, styles.secondaryBtn]}
+                onPress={handleRingNotNow}
+                testID="invite-ring-not-now"
+              >
+                <Text style={styles.secondaryBtnText}>Not now</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
 
         <View style={styles.actionsWrap}>
           <Pressable

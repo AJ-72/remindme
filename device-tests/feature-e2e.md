@@ -1022,3 +1022,72 @@ again, in any field, in any run of the app.
 
 **Fails if.** The line returns on a second tap or after a restart, or never
 appears at all on a fresh install.
+
+## D74 — An invited install never sees onboarding — `PENDING`
+
+**Why hardware only.** The launch URL only exists when the OS opens the app
+from a real link. Jest can fake `getInitialURL`; it cannot prove Android hands
+this app that URL at cold start, which is the whole claim.
+
+**Setup.** A device with the app **not installed**. A real invite link sent
+from a second device.
+
+**Steps.**
+1. Install the app but do not open it from the launcher.
+2. Tap the invite link in the message.
+3. Watch every screen between the tap and the reminder.
+4. Read the screen when it settles.
+
+**Pass.** The link opens the app straight onto the invitation. No name sheet
+appears at any point. No "You're all set" screen appears before the
+invitation. The sender's name and the reminder time are on screen.
+
+**Fails if.** The name sheet renders over the bind screen, a success screen
+flashes before the invitation, or the app lands on the empty home list.
+
+## D75 — The ring ask carries the sender's stake — `PENDING`
+
+**Why hardware only.** Only a real device shows the Android permission dialog,
+and only a real install has an unspent one.
+
+**Setup.** A fresh install reached by an invite link. Notifications not yet
+granted.
+
+**Steps.**
+1. Tap **Accept** on the invitation.
+2. Read the panel before any system dialog appears.
+3. Tap **Allow** and answer the Android dialog.
+4. Repeat on a second fresh install, tapping **Not now** instead.
+5. Repeat on an install where notifications are already on.
+
+**Pass.** The panel appears before the Android dialog and names the sender and
+the time. **Allow** opens the Android dialog. **Not now** accepts the
+invitation anyway and the reminder appears on the home list. With notifications
+already on, no panel appears and Accept goes straight through.
+
+**Fails if.** The Android dialog opens before the sentence is read, the panel
+names the wrong person or time, or **Not now** loses the reminder.
+
+## D76 — The invited name ask lands on the home screen — `PENDING`
+
+**Why hardware only.** The ask is written at accept and read on a screen that
+stayed mounted underneath. Only a real accept, on a real device, proves the
+home screen notices.
+
+**Setup.** A fresh install reached by an invite link, with no name set.
+
+**Steps.**
+1. Accept the invitation and watch the home screen.
+2. Read the panel under the reminder list.
+3. Tap **Skip**, then close and reopen the app.
+4. Repeat on a second install and tap **Add name** instead.
+5. Repeat with a sender whose name is in Malayalam.
+
+**Pass.** The panel appears under the list after Accept, reading *<Sender> sees
+that someone accepted. Add your name so they see who.* **Skip** removes it for
+good, including after a restart. **Add name** opens the name sheet and the
+header greeting changes at once. A Malayalam sender name renders as Malayalam
+letters, not boxes.
+
+**Fails if.** The panel never appears, returns after being skipped or answered,
+names the wrong person, or shows boxes for a Malayalam name.

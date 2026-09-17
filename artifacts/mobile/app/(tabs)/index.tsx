@@ -17,6 +17,8 @@ import ReminderCard from "@/components/ReminderCard";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useReminders, type Reminder } from "@/contexts/RemindersContext";
 import {
+  clearPendingInviteNameAsk,
+  getPendingInviteNameAsk,
   incrementRegisterPromptCount,
   isSendReminder,
   markRegisterPromptShown,
@@ -28,6 +30,7 @@ import { buildGreeting, greetingName, initialsFor } from "@/utils/greeting";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { groupByDate } from "@/utils/groupByDate";
 import NameSheet from "@/components/NameSheet";
+import InviteNameAsk from "@/components/InviteNameAsk";
 import NotificationNudge from "@/components/NotificationNudge";
 import RegisterNumberNudge from "@/components/RegisterNumberNudge";
 
@@ -290,6 +293,32 @@ export default function HomeScreen() {
     };
   }, [loading, reminders.length]);
 
+  // Frame I3 of the first-run study. An invited install skips the first-run
+  // name sheet, so the ask lands here instead - after the friend's reminder
+  // is on screen, where it can name the person who will read the answer.
+  //
+  // Keyed on the reminder count because accepting an invitation is what adds
+  // one: this tab stays mounted under the preview, so a mount-only check
+  // would never see the accept that wrote the ask.
+  const [inviteNameAsk, setInviteNameAsk] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (loading) return;
+    let live = true;
+    void getPendingInviteNameAsk().then((sender) => {
+      // A name typed in the meantime answers the question already.
+      if (live) setInviteNameAsk(sender !== null && userName.trim() === "" ? sender : null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [loading, reminders.length, userName]);
+
+  const settleInviteNameAsk = useCallback(() => {
+    setInviteNameAsk(null);
+    void clearPendingInviteNameAsk();
+  }, []);
+
   // Dismissal lasts for this mount only. The banner is not an advert: it
   // describes a live fault, so it comes back on the next launch while the
   // fault does, and disappears for good the moment permission is granted.
@@ -519,6 +548,14 @@ export default function HomeScreen() {
               onDismiss={() => setNumberOffer(false)}
             />
           </View>
+        )}
+
+        {inviteNameAsk !== null && (
+          <InviteNameAsk
+            senderName={inviteNameAsk}
+            onSettled={settleInviteNameAsk}
+            onSave={setUserName}
+          />
         )}
       </KeyboardAwareScrollViewCompat>
 
