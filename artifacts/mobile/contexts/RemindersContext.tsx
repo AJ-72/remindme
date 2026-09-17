@@ -142,6 +142,20 @@ const RemindersContext = createContext<RemindersContextType | null>(null);
 
 initNotifications();
 
+/**
+ * One event for every setting, rather than one event per setting.
+ *
+ * `setting` names which switch moved and `value` its new state, so a single
+ * series answers "what do people actually configure" without twelve
+ * near-identical event names to keep in step with the Settings screen. The
+ * value is always a primitive the user could have chosen from a fixed list -
+ * never free text, so "Your name" is deliberately absent from every call site
+ * below.
+ */
+function trackSetting(setting: string, value: string | number | boolean): void {
+  track(EVENTS.SETTING_CHANGED, { setting, value });
+}
+
 export function RemindersProvider({
   children,
 }: {
@@ -254,11 +268,13 @@ export function RemindersProvider({
   const setDefaultAlarmEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetDefaultAlarmEnabled(enabled);
     setDefaultAlarmEnabledState(enabled);
+    trackSetting("default_alarm", enabled);
   }, []);
 
   const setDefaultExactTimingEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetDefaultExactTimingEnabled(enabled);
     setDefaultExactTimingEnabledState(enabled);
+    trackSetting("default_exact_timing", enabled);
   }, []);
 
   const setAlarmForPending = useCallback(async (alarm: boolean) => {
@@ -269,12 +285,14 @@ export function RemindersProvider({
   const setInviteNudgeEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetInviteNudgeEnabled(enabled);
     setInviteNudgeEnabledState(enabled);
+    trackSetting("invite_nudge", enabled);
   }, []);
 
   const setShowDescriptionInNotifications = useCallback(
     async (enabled: boolean) => {
       await serviceSetShowDescriptionEnabled(enabled);
       setShowDescriptionInNotificationsState(enabled);
+      trackSetting("show_description", enabled);
     },
     []
   );
@@ -282,6 +300,7 @@ export function RemindersProvider({
   const setVibrationEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetVibrationEnabled(enabled);
     setVibrationEnabledState(enabled);
+    trackSetting("vibration", enabled);
   }, []);
 
   const setTelemetry = useCallback(async (enabled: boolean) => {
@@ -296,6 +315,14 @@ export function RemindersProvider({
   const setQuietHours = useCallback(async (window: QuietHours) => {
     await serviceSetQuietHours(window);
     setQuietHoursState(window);
+    // The exact start and end are the user's own routine - close to a sleep
+    // schedule - so the window itself is never sent. Only whether they moved
+    // it off the default, which is what says the default is wrong.
+    trackSetting(
+      "quiet_hours",
+      window.startMinute !== DEFAULT_QUIET_HOURS.startMinute ||
+        window.endMinute !== DEFAULT_QUIET_HOURS.endMinute,
+    );
   }, []);
 
   const setUserName = useCallback(async (name: string) => {
@@ -312,6 +339,8 @@ export function RemindersProvider({
   const setDictationLanguage = useCallback(async (lang: DictationLanguage) => {
     await serviceSetDictationLanguage(lang);
     setDictationLanguageState(lang);
+    trackSetting("dictation_language", lang);
+    setPersonProperties({ dictation_language: lang });
   }, []);
 
   const addReminder = useCallback(
@@ -445,6 +474,8 @@ export function RemindersProvider({
   const setSnoozePreset = useCallback(async (preset: SnoozePreset) => {
     await serviceSetSnoozePreset(preset);
     setSnoozePresetState(preset);
+    trackSetting("snooze_preset", snoozePresetKey(preset));
+    setPersonProperties({ snooze_preset: snoozePresetKey(preset) });
     // Re-register so the notification-tray button label matches. Fire-and-
     // forget by design: setupSnoozeCategory swallows its own errors, and a
     // stale label is cosmetic — the action ID and handler still work.

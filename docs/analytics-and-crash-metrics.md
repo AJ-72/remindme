@@ -106,7 +106,7 @@ stays.
 | Malayalam share of content | `script` on every reminder event | Whether the Malayalam parser and font work serve a real population, and whether Malayalam users complete reminders at the same rate as English ones. If they do not, that gap is a bug |
 | Share-intent use | `share_intent_received` | Whether the WhatsApp-to-reminder path is used enough to keep maintaining |
 | Insights screen views | `insights_viewed`, with `has_rate` | A user who opens "How you're doing" and finds every figure blanked for want of data has had a wasted trip. That is a thresholds-and-copy problem, not a demand problem |
-| Tier 2 adoption | `invitation_sent`, `for_someone_else` | The largest feature in the app by build cost. The send half is wired; the accept half (`invitation_responded`) is not yet — see §5 |
+| Tier 2 adoption | `invitation_sent`, `invitation_responded`, `for_someone_else` | The largest feature in the app by build cost. Its funnel: sent → responded, split by accept/decline and by whether the recipient moved the time |
 | Backup use | `backup_exported` / `backup_imported` | Reminders live only in AsyncStorage. Low export use plus any reinstall means silent data loss for real people |
 
 ### 2.5 Is the app healthy?
@@ -186,19 +186,26 @@ estimate.
 
 ## 5. What is wired today, and what is not
 
-Wired and sending (given credentials): `reminder_created`, `reminder_completed`,
-`reminder_snoozed`, `reminder_deleted`, `reminder_edited`,
-`notification_opened`, `permission_result`, `dictation_started`,
-`dictation_completed`, `dictation_failed`, `share_intent_received`,
-`invitation_sent`, `insights_viewed`, `backup_exported`, `backup_imported`,
-`telemetry_opt_out`, plus PostHog's automatic lifecycle events and the
-`insights` screen view.
+**Every event in `constants/analytics.ts` has a real emitter**, and
+`constants/analytics.test.ts` fails the build if one stops having one — the
+guard exists because a catalogued event with no call site renders a chart that
+reads zero forever and gets believed.
 
-**Declared in `constants/analytics.ts` but NOT yet emitted by any call site:**
-`nl_parse_result`, `invitation_responded`, `number_registered`,
-`setting_changed`. They are named because this document argues for them, and
-marked in the source, so that nobody reads a zero on a dashboard as a finding.
-Wiring them is a follow-up, not a claim made here.
+Three of the four wired last have a call site worth knowing about:
+
+- `nl_parse_result` fires at **save**, not at parse. The natural-language
+  parser runs on every keystroke, so tracking it where it happens would send
+  one event per character typed and drown every other series in the project.
+- `number_registered` fires on **both** paths that prove number ownership —
+  self-registration and an invite link — separated by a `method` property, and
+  carries how many stranded invitations that registration released. That count
+  is the exact bug found live-testing on two devices (CLAUDE.md), now measured
+  rather than rediscovered.
+- `setting_changed` is one event with a `setting` name and a `value`, not one
+  event per switch. Free-text settings are absent from every call site: "Your
+  name" is never sent, and quiet hours report only whether the user moved the
+  window off its default, never the window — that is close to a sleep
+  schedule.
 
 Nothing in this file has been verified against a live PostHog or Sentry
 project. The code is covered by unit tests (opt-out behaviour, scrubbing,

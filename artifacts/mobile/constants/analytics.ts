@@ -52,11 +52,10 @@ export const SENTRY_TRACES_SAMPLE_RATE = Number(
  * Naming: `object_verb_past_tense`, lower snake case. Screens are NOT events —
  * PostHog's own `$screen` handles those, see AnalyticsService.trackScreen.
  *
- * Four entries below are marked DECLARED, NOT YET EMITTED: they are named here
- * because docs/analytics-and-crash-metrics.md argues for them, but no call
- * site sends them yet. The marker is deliberate — an event name in a catalogue
- * with no emitter is how a dashboard ends up quietly reading zero and being
- * believed.
+ * Every name here has at least one real emitter, and `analytics.test.ts`
+ * fails the build if one stops having one. An event in a catalogue with no
+ * emitter renders a chart that reads zero forever and gets believed, which is
+ * worse than no chart at all.
  */
 export const EVENTS = {
   // --- Core loop: does the app do its one job? ---
@@ -74,22 +73,18 @@ export const EVENTS = {
   DICTATION_STARTED: "dictation_started",
   DICTATION_COMPLETED: "dictation_completed",
   DICTATION_FAILED: "dictation_failed",
-  /** DECLARED, NOT YET EMITTED. */
   NL_PARSE_RESULT: "nl_parse_result",
   SHARE_INTENT_RECEIVED: "share_intent_received",
 
   // --- Tier 2: remind someone else ---
   INVITATION_SENT: "invitation_sent",
-  /** DECLARED, NOT YET EMITTED. */
   INVITATION_RESPONDED: "invitation_responded",
-  /** DECLARED, NOT YET EMITTED. */
   NUMBER_REGISTERED: "number_registered",
 
   // --- Everything else worth a decision ---
   INSIGHTS_VIEWED: "insights_viewed",
   BACKUP_EXPORTED: "backup_exported",
   BACKUP_IMPORTED: "backup_imported",
-  /** DECLARED, NOT YET EMITTED. */
   SETTING_CHANGED: "setting_changed",
   TELEMETRY_OPT_OUT: "telemetry_opt_out",
 } as const;

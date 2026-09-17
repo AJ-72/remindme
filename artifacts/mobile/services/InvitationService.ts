@@ -280,7 +280,15 @@ export async function respondToInvitation(
   acceptedDatetime?: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const session = await getCurrentSession();
-  if (!session) return { ok: false, error: "not_authenticated" };
+  if (!session) {
+    track(EVENTS.INVITATION_RESPONDED, {
+      response,
+      ok: false,
+      error: "not_authenticated",
+      time_changed: false,
+    });
+    return { ok: false, error: "not_authenticated" };
+  }
 
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/respond-invitation`, {
@@ -293,9 +301,30 @@ export async function respondToInvitation(
       body: JSON.stringify({ invitationId, response, acceptedDatetime }),
     });
     const json = await res.json();
-    if (!res.ok) return { ok: false, error: json?.error?.code ?? "respond_failed" };
+    // `time_changed` is the half of this that the sender's side cannot see:
+    // an invitation accepted at a DIFFERENT time than it was sent for is a
+    // weaker success than a plain accept, and counting them together would
+    // hide how often the proposed time simply does not suit people.
+    const responded = (ok: boolean, error: string | null) =>
+      track(EVENTS.INVITATION_RESPONDED, {
+        response,
+        ok,
+        error,
+        time_changed: acceptedDatetime !== undefined,
+      });
+    if (!res.ok) {
+      responded(false, String(json?.error?.code ?? "respond_failed"));
+      return { ok: false, error: json?.error?.code ?? "respond_failed" };
+    }
+    responded(true, null);
     return { ok: true };
   } catch {
+    track(EVENTS.INVITATION_RESPONDED, {
+      response,
+      ok: false,
+      error: "network_error",
+      time_changed: acceptedDatetime !== undefined,
+    });
     return { ok: false, error: "network_error" };
   }
 }
