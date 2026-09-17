@@ -23,6 +23,20 @@ const MEASURE_TIMEOUT_MS = 1500;
 const MEASURE_RETRY_MS = 100;
 
 /**
+ * Strips expo-router group segments from a path so a step's declared route
+ * can be compared against the live pathname. `usePathname()` reports the
+ * home tab as "/" and the settings tab as "/settings", never "/(tabs)" or
+ * "/(tabs)/settings" - comparing the two raw strings never matches, which
+ * left the tour permanently active-but-invisible and pushed the user back
+ * to the home screen on every navigation (a tapped reminder card bounced
+ * straight back). Normalize both sides, always.
+ */
+export function normalizeRoute(path: string): string {
+  const stripped = path.replace(/\/\([^)]*\)/g, "");
+  return stripped === "" ? "/" : stripped;
+}
+
+/**
  * Full-screen coach-mark overlay. Mounted once at the app root; renders
  * nothing while the tour is inactive. Drives its own navigation - when the
  * active step's route differs from the current screen, it pushes there so
@@ -46,12 +60,15 @@ export default function TourOverlay() {
   }, [step]);
 
   // Navigate to the step's screen if we're not already there.
+  const onStepRoute =
+    !!step && normalizeRoute(pathname) === normalizeRoute(step.route);
+
   useEffect(() => {
     if (!active || !step) return;
-    if (pathname !== step.route) {
+    if (!onStepRoute) {
       router.push(step.route as never);
     }
-  }, [active, step, pathname, router]);
+  }, [active, step, onStepRoute, router]);
 
   // Measure (and re-measure on a short poll) the step's target once its
   // screen is current. Falls back to no-spotlight after MEASURE_TIMEOUT_MS.
@@ -66,7 +83,7 @@ export default function TourOverlay() {
       setReady(true);
       return;
     }
-    if (pathname !== step.route) {
+    if (!onStepRoute) {
       setReady(false);
       return;
     }
@@ -93,7 +110,7 @@ export default function TourOverlay() {
     return () => {
       cancelled = true;
     };
-  }, [active, step, pathname, measureTarget]);
+  }, [active, step, onStepRoute, measureTarget]);
 
   if (!active || !step || !ready) return null;
 
