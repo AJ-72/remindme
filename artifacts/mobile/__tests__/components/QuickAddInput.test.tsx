@@ -1,14 +1,23 @@
 import React from "react";
-import { render, waitFor, fireEvent } from "@testing-library/react-native";
+import { render, waitFor, fireEvent, act } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import QuickAddInput from "@/components/QuickAddInput";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { SharedTextProvider, useSharedText } from "@/contexts/SharedTextContext";
-import { DEFAULT_ALARM_KEY, STORAGE_KEY } from "@/services/ReminderService";
+import {
+  DEFAULT_ALARM_KEY,
+  MAX_REGISTER_PROMPTS,
+  MIC_LANGUAGE_LINE_KEY,
+  REGISTERED_PHONE_KEY,
+  REGISTER_PROMPT_COUNT_KEY,
+  resetRegisterPromptSession,
+  STORAGE_KEY,
+} from "@/services/ReminderService";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
-import { Linking, Platform, StyleSheet } from "react-native";
+import { AppState, Linking, Platform, StyleSheet } from "react-native";
 import * as SpeechService from "@/services/SpeechService";
+import { WAVEFORM_BARS } from "@/utils/micLevel";
 import * as ContactsService from "@/services/ContactsService";
 import * as InvitationService from "@/services/InvitationService";
 import * as RecipientLookupService from "@/services/RecipientLookupService";
@@ -43,6 +52,9 @@ function renderComponent() {
 beforeEach(async () => {
   jest.clearAllMocks();
   await (AsyncStorage as any).clear();
+  // The "one offer per session" guard is a module-level flag, so without this
+  // the first test to see an offer silences it for every test after it.
+  resetRegisterPromptSession();
   (useSharedText as jest.Mock).mockReturnValue({
     sharedText: "",
     clearSharedText: jest.fn(),
@@ -839,5 +851,495 @@ describe("QuickAddInput — vague task hint", () => {
       expect(stored).toHaveLength(1);
       expect(stored[0].title).toContain("Sort out the insurance");
     });
+  });
+});
+
+describe("QuickAddInput — the listening surface", () => {
+  // The pause/no-speech clocks themselves are covered in
+  // utils/dictationTimer.test.ts, against a plain fake clock. These tests
+  // cover what the component does around them: the surface, the two ways out
+  // of a session, and an interruption.
+  function fireResult(transcript: string, isFinal = false) {
+    const call = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (c) => c[0] === "result"
+    );
+    act(() => {
+      call[1]({ isFinal, results: [{ transcript }] });
+    });
+  }
+
+  /** One loudness reading from the recognizer, as the waveform receives it. */
+  function fireVolume(value: number) {
+    const call = (ExpoSpeechRecognitionModule.addListener as jest.Mock).mock.calls.find(
+      (c) => c[0] === "volumechange"
+    );
+    act(() => {
+      call[1]({ value });
+    });
+  }
+
+  beforeEach(() => {
+    SpeechService.stopListening();
+    jest.replaceProperty(Platform, "OS", "android");
+    (ExpoSpeechRecognitionModule.getPermissionsAsync as jest.Mock).mockResolvedValue({
+      granted: true,
+      canAskAgain: true,
+      status: "granted",
+    });
+    (ExpoSpeechRecognitionModule.androidTriggerOfflineModelDownload as jest.Mock).mockResolvedValue({
+      status: "download_success",
+      message: "ok",
+    });
+  });
+
+  async function startMic() {
+    const utils = renderComponent();
+    const micButton = await utils.findByTestId("quick-add-mic");
+    fireEvent.press(micButton);
+    await waitFor(() => expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalled());
+    return utils;
+  }
+
+  it("shows the surface, with both ways out, while the live mic is open", async () => {
+    const { findByTestId } = await startMic();
+    expect(await findByTestId("listening-surface")).toBeTruthy();
+    expect(await findByTestId("listening-done")).toBeTruthy();
+    expect(await findByTestId("listening-cancel")).toBeTruthy();
+  });
+
+  it("shows no surface for a shared audio transcription, which has nothing to stop", async () => {
+    (useSharedText as jest.Mock).mockReturnValue({
+      sharedText: "",
+      clearSharedText: jest.fn(),
+      sharedAudioTranscribing: true,
+      sharedAudioNotice: null,
+    });
+    const { queryByTestId } = renderComponent();
+    await waitFor(() => expect(queryByTestId("listening-surface")).toBeNull());
+  });
+
+  it("says whether anything has been heard yet", async () => {
+    const { findByText } = await startMic();
+    expect(await findByText(/say your reminder/i)).toBeTruthy();
+
+    fireResult("buy milk");
+    expect(await findByText(/stop speaking when you/i)).toBeTruthy();
+  });
+
+  it("keeps the words when Done is pressed", async () => {
+    const stopSpy = jest.spyOn(SpeechService, "stopListening");
+    const { findByTestId, queryByTestId } = await startMic();
+    fireResult("water the plants");
+
+    fireEvent.press(await findByTestId("listening-done"));
+
+    await waitFor(() => expect(queryByTestId("listening-surface")).toBeNull());
+    expect(stopSpy).toHaveBeenCalled();
+    const titleInput = await findByTestId("quick-add-input");
+    expect(titleInput.props.value).toBe("water the plants");
+  });
+
+  it("throws the words away when Cancel is pressed", async () => {
+    const { findByTestId, queryByTestId } = await startMic();
+    const titleInput = await findByTestId("quick-add-input");
+    fireResult("something the user did not mean", true);
+    expect(titleInput.props.value).toBe("something the user did not mean");
+
+    fireEvent.press(await findByTestId("listening-cancel"));
+
+    await waitFor(() => expect(queryByTestId("listening-surface")).toBeNull());
+    expect(titleInput.props.value).toBe("");
+    expect(ExpoSpeechRecognitionModule.abort).toHaveBeenCalled();
+  });
+
+  it("cancels back to what was already typed, not to an empty field", async () => {
+    const { findByTestId } = await startMic();
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.press(await findByTestId("listening-cancel"));
+
+    fireEvent.changeText(titleInput, "pay rent");
+    fireEvent.press(await findByTestId("quick-add-mic"));
+    await waitFor(() => expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledTimes(2));
+
+    fireResult("pay rent and something wrong");
+    fireEvent.press(await findByTestId("listening-cancel"));
+
+    await waitFor(() => expect(titleInput.props.value).toBe("pay rent"));
+  });
+
+  it("stops dictation when the app leaves the foreground, and keeps what was heard", async () => {
+    const handlers: ((s: string) => void)[] = [];
+    jest
+      .spyOn(AppState, "addEventListener")
+      .mockImplementation((_event: string, handler: any) => {
+        handlers.push(handler);
+        return { remove: jest.fn() } as any;
+      });
+
+    const { findByTestId, queryByTestId, findByText } = await startMic();
+    fireResult("book the tickets");
+
+    act(() => {
+      handlers.forEach((h) => h("background"));
+    });
+
+    await waitFor(() => expect(queryByTestId("listening-surface")).toBeNull());
+    const titleInput = await findByTestId("quick-add-input");
+    expect(titleInput.props.value).toBe("book the tickets");
+    expect(await findByText(/stopped when you left the app/i)).toBeTruthy();
+  });
+
+  // Frames 7, 8 and 9 of the first-run study. A scale pulse says something is
+  // happening; it says nothing about whether the device can hear THIS user,
+  // which is the question a person who has just been ignored by a microphone
+  // is actually asking.
+  describe("the waveform", () => {
+    function barHeights(utils: any) {
+      return Array.from({ length: WAVEFORM_BARS }, (_, i) =>
+        StyleSheet.flatten(utils.getByTestId(`listening-wave-bar-${i}`).props.style).height
+      );
+    }
+
+    it("is on screen for the whole session", async () => {
+      const utils = await startMic();
+      expect(await utils.findByTestId("listening-wave")).toBeTruthy();
+    });
+
+    it("grows with the user's own voice", async () => {
+      const utils = await startMic();
+      await utils.findByTestId("listening-wave");
+      const quiet = barHeights(utils);
+
+      fireVolume(8);
+      const loud = barHeights(utils);
+
+      loud.forEach((h, i) => expect(h).toBeGreaterThan(quiet[i]));
+    });
+
+    // The one thing this surface must never do. A waveform that animates on
+    // its own would perform just as convincingly with the mic switched off,
+    // which is the exact lie it exists to rule out.
+    it("stays flat while the recognizer reports silence", async () => {
+      const utils = await startMic();
+      await utils.findByTestId("listening-wave");
+      const before = barHeights(utils);
+
+      fireVolume(-2);
+
+      expect(barHeights(utils)).toEqual(before);
+    });
+
+    it("counts the seconds the mic has been open", async () => {
+      const utils = await startMic();
+      expect((await utils.findByTestId("listening-timer")).props.children).toBe("0:00");
+    });
+  });
+
+  describe("the words still being guessed", () => {
+    it("shows them on the surface, not in the field", async () => {
+      const utils = await startMic();
+      fireResult("call Amma at seven");
+
+      expect((await utils.findByTestId("listening-interim")).props.children).toContain(
+        "call Amma at seven"
+      );
+      expect((await utils.findByTestId("quick-add-input")).props.value).toBe("");
+    });
+
+    it("moves them into the field once the recognizer commits", async () => {
+      const utils = await startMic();
+      fireResult("call Amma at seven");
+      fireResult("call Amma at seven", true);
+
+      expect((await utils.findByTestId("quick-add-input")).props.value).toBe(
+        "call Amma at seven"
+      );
+      expect(utils.queryByTestId("listening-interim")).toBeNull();
+    });
+
+    // Inter carries no Malayalam glyphs, so a dictated Malayalam guess would
+    // render as boxes with the default family.
+    it("renders a Malayalam guess in the Malayalam face", async () => {
+      const utils = await startMic();
+      fireResult("നാളെ വിളിക്കണം");
+
+      const style = StyleSheet.flatten(
+        (await utils.findByTestId("listening-interim")).props.style
+      );
+      expect(style.fontFamily).toBe("NotoSansMalayalam_400Regular");
+    });
+  });
+
+  describe("the pause clock, made visible", () => {
+    it("stays hidden until something has actually been heard", async () => {
+      const utils = await startMic();
+      await utils.findByTestId("listening-surface");
+      expect(utils.queryByTestId("listening-silence")).toBeNull();
+    });
+
+    it("appears once the first word lands", async () => {
+      const utils = await startMic();
+      fireResult("buy milk", true);
+      expect(await utils.findByTestId("listening-silence")).toBeTruthy();
+    });
+  });
+
+  describe("naming the languages the mic takes", () => {
+    it("says so on the first microphone of the install", async () => {
+      const utils = await startMic();
+      const line = await utils.findByTestId("listening-language");
+      expect(line.props.children).toMatch(/English or Malayalam/);
+    });
+
+    it("says it once, and never again", async () => {
+      await AsyncStorage.setItem(MIC_LANGUAGE_LINE_KEY, "1");
+      const utils = await startMic();
+      await utils.findByTestId("listening-surface");
+      expect(utils.queryByTestId("listening-language")).toBeNull();
+    });
+
+    it("records that it was said, so the next install is the next chance", async () => {
+      const utils = await startMic();
+      await utils.findByTestId("listening-language");
+      await waitFor(async () =>
+        expect(await AsyncStorage.getItem(MIC_LANGUAGE_LINE_KEY)).toBe("1")
+      );
+    });
+  });
+
+});
+
+// The first-run "Add your number" modal was removed, and the action-row icon
+// that replaced it names nobody and reads as decoration. This is the permanent,
+// labelled way in that the redesign promised.
+describe("QuickAddInput — the permanent way to remind someone else", () => {
+  beforeEach(() => {
+    jest.spyOn(ContactsService, "loadPickableContacts").mockResolvedValue({
+      permission: "granted",
+      contacts: [{ name: "Priya", phone: "9876543210", contactId: "c1" }],
+    });
+  });
+
+  it("is on screen with no recipient chosen", async () => {
+    const { findByTestId, findByText } = renderComponent();
+    expect(await findByTestId("quick-add-remind-someone")).toBeTruthy();
+    expect(await findByText("Remind someone else")).toBeTruthy();
+  });
+
+  it("opens the contact picker", async () => {
+    const { findByTestId, findByText } = renderComponent();
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
+    expect(await findByText("Priya")).toBeTruthy();
+  });
+
+  it("stays on screen after a recipient is chosen", async () => {
+    const { findByTestId, findByText } = renderComponent();
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
+    fireEvent.press(await findByText("Priya"));
+    await findByTestId("quick-add-recipient-chip");
+    expect(await findByTestId("quick-add-remind-someone")).toBeTruthy();
+  });
+});
+
+// Without a registered number there is no Supabase session, so
+// checkReachability() returns null for every contact and no recipient can ever
+// earn the in-app badge. The offer used to live only on the WhatsApp share
+// screen, which this path never visits - so on a device it never appeared.
+describe("QuickAddInput — the offer to register your own number", () => {
+  beforeEach(() => {
+    jest.spyOn(ContactsService, "loadPickableContacts").mockResolvedValue({
+      permission: "granted",
+      contacts: [{ name: "Priya", phone: "9876543210", contactId: "c1" }],
+    });
+  });
+
+  /** Just the pick. The offer's trigger is naming a person, not saving. */
+  async function pickRecipient(getBy: any) {
+    fireEvent.press(await getBy.findByTestId("quick-add-remind-someone"));
+    fireEvent.press(await getBy.findByText("Priya"));
+  }
+
+  async function saveWithRecipient(getBy: any) {
+    await pickRecipient(getBy);
+    fireEvent.changeText(
+      await getBy.findByTestId("quick-add-input"),
+      "Call Priya tomorrow at 3pm"
+    );
+    fireEvent.press(await getBy.findByTestId("quick-add-save"));
+  }
+
+  it("offers after a reminder is sent to someone else", async () => {
+    const view = renderComponent();
+    await saveWithRecipient(view);
+    expect(await view.findByTestId("register-number-nudge")).toBeTruthy();
+  });
+
+  // add-reminder.tsx has always offered at the pick. The home screen waited
+  // for Save, so the same act asked at two different moments depending on
+  // which screen the user reached the picker from.
+  it("offers at the contact pick, before anything is saved", async () => {
+    const view = renderComponent();
+    await pickRecipient(view);
+
+    expect(await view.findByTestId("register-number-nudge")).toBeTruthy();
+    expect(await AsyncStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("names the person who was reminded", async () => {
+    const view = renderComponent();
+    await saveWithRecipient(view);
+    await view.findByTestId("register-number-nudge");
+    expect(view.getByText(/Priya/)).toBeTruthy();
+  });
+
+  it("stays away from a reminder with no recipient", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Buy milk tomorrow at 3pm");
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+    });
+    expect(queryByTestId("register-number-nudge")).toBeNull();
+  });
+
+  it("stays away once a number is already registered", async () => {
+    await AsyncStorage.setItem(REGISTERED_PHONE_KEY, "+919876543210");
+    const view = renderComponent();
+    await saveWithRecipient(view);
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+    });
+    expect(view.queryByTestId("register-number-nudge")).toBeNull();
+  });
+
+  it("stays away once the cap is spent", async () => {
+    await AsyncStorage.setItem(REGISTER_PROMPT_COUNT_KEY, String(MAX_REGISTER_PROMPTS));
+    const view = renderComponent();
+    await saveWithRecipient(view);
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? "[]");
+      expect(stored).toHaveLength(1);
+    });
+    expect(view.queryByTestId("register-number-nudge")).toBeNull();
+  });
+
+  it("counts the offer when it is shown, not when it is taken", async () => {
+    const view = renderComponent();
+    await saveWithRecipient(view);
+    await view.findByTestId("register-number-nudge");
+
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(REGISTER_PROMPT_COUNT_KEY)).toBe("1")
+    );
+  });
+});
+
+// Frame 2 of the first-run study. The old cold open was an empty list behind
+// four permission asks, which said the app was not ready yet. These say the
+// opposite, and one of them says it in Malayalam.
+describe("QuickAddInput — the cold-open examples", () => {
+  it("shows three examples and the line that explains them", async () => {
+    const { findByTestId } = renderComponent();
+    await findByTestId("starter-examples");
+    expect(await findByTestId("starter-example-0")).toBeTruthy();
+    expect(await findByTestId("starter-example-1")).toBeTruthy();
+    expect(await findByTestId("starter-example-2")).toBeTruthy();
+    expect(await findByTestId("starter-helper")).toBeTruthy();
+  });
+
+  it("offers one example in Malayalam, where the script support is visible", async () => {
+    const { findByText } = renderComponent();
+    expect(
+      await findByText(
+        "നാളെ രാവിലെ പാൽ വാങ്ങണം"
+      )
+    ).toBeTruthy();
+  });
+
+  it("puts a tapped example into the composer", async () => {
+    const { findByTestId } = renderComponent();
+    fireEvent.press(await findByTestId("starter-example-0"));
+    await waitFor(async () =>
+      expect((await findByTestId("quick-add-input")).props.value).toBe("Call Amma at 7 pm")
+    );
+  });
+
+  it("gets out of the way as soon as the user types", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    await findByTestId("starter-examples");
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Buy milk");
+    await waitFor(() => expect(queryByTestId("starter-examples")).toBeNull());
+  });
+
+  it("never returns once there is a reminder to look at instead", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: "r1",
+          title: "Buy milk",
+          datetime: new Date(Date.now() + 86400000).toISOString(),
+          completed: false,
+        },
+      ])
+    );
+    const { findByTestId, queryByTestId } = renderComponent();
+    await findByTestId("quick-add-input");
+    await waitFor(() => expect(queryByTestId("starter-examples")).toBeNull());
+  });
+});
+
+// Frame 3. The parser has already read the title, so naming the person in it
+// costs nothing - and a user who just typed a name is the only user on this
+// screen who can be shown what sending to another person is for.
+describe("QuickAddInput — the send-to-a-person chip", () => {
+  it("offers the person the title names", async () => {
+    const { findByTestId, findByText } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Call Amma at 7 pm");
+    expect(await findByText("Send to Amma instead?")).toBeTruthy();
+  });
+
+  it("stays away from a task that names nobody", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Take medicine at 9 am");
+    await waitFor(() => expect(queryByTestId("send-to-person-chip")).toBeNull());
+  });
+
+  it("opens the contact picker", async () => {
+    const { findByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Tell Priya about the rent");
+    fireEvent.press(await findByTestId("send-to-person-chip"));
+    expect(await findByTestId("contact-picker-cancel")).toBeTruthy();
+  });
+
+  it("goes quiet once a recipient is attached, the question being answered", async () => {
+    jest.spyOn(ContactsService, "loadPickableContacts").mockResolvedValue({
+      permission: "granted",
+      contacts: [{ name: "Amma", phone: "9876543210", contactId: "c1" }],
+    });
+    const { findByTestId, findByText, queryByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Call Amma at 7 pm");
+    fireEvent.press(await findByTestId("send-to-person-chip"));
+    fireEvent.press(await findByText("Amma"));
+    await findByTestId("quick-add-recipient-chip");
+
+    await waitFor(() => expect(queryByTestId("send-to-person-chip")).toBeNull());
+  });
+
+  // A refusal is about this name only. The next reminder may well name
+  // somebody the user does want to send to.
+  it("dismisses for the name it named, not for every name after it", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Call Amma at 7 pm");
+    fireEvent.press(await findByTestId("send-to-person-chip-dismiss"));
+    await waitFor(() => expect(queryByTestId("send-to-person-chip")).toBeNull());
+
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Tell Priya about the rent");
+    expect(await findByTestId("send-to-person-chip")).toBeTruthy();
   });
 });

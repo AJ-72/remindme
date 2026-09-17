@@ -271,3 +271,114 @@ describe("InvitationPreviewScreen", () => {
     });
   });
 });
+
+// Frames I2 and I3 of the first-run study. The invited track reaches the same
+// system dialog as an ordinary install, through a reason this user cares
+// about more: a person is waiting on it.
+describe("InvitationPreviewScreen — the invited track", () => {
+  const Notifications = require("expo-notifications");
+
+  function notificationsAre(granted: boolean, canAskAgain = true) {
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: granted ? "granted" : "denied",
+      canAskAgain,
+      android: { alarm: true },
+    });
+  }
+
+  async function acceptWithSender(name = "Amma") {
+    const rpcMock = jest.fn().mockResolvedValue({ data: name, error: null });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+    jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+    const utils = renderScreen();
+    await utils.findByText(`From ${name}`);
+    fireEvent.press(utils.getByTestId("accept-button"));
+    return utils;
+  }
+
+  afterEach(() => {
+    notificationsAre(true);
+  });
+
+  it("says what the permission is for, naming the sender and the time", async () => {
+    notificationsAre(false);
+    const { findByTestId, findByText } = await acceptWithSender();
+
+    expect(await findByTestId("invite-ring-consent")).toBeTruthy();
+    expect(await findByText(/Amma's reminder can reach you/)).toBeTruthy();
+  });
+
+  // The sentence is what buys the yes. Spending the dialog before it is said
+  // is exactly the cold-launch ask this redesign removed.
+  it("holds the system dialog until the user has read that sentence", async () => {
+    notificationsAre(false);
+    const { findByTestId } = await acceptWithSender();
+    await findByTestId("invite-ring-consent");
+
+    expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+
+    fireEvent.press(await findByTestId("invite-ring-allow"));
+    await waitFor(() => expect(Notifications.requestPermissionsAsync).toHaveBeenCalled());
+  });
+
+  it("accepts the invitation anyway when the ring is refused", async () => {
+    notificationsAre(false);
+    const { findByTestId } = await acceptWithSender();
+    fireEvent.press(await findByTestId("invite-ring-not-now"));
+
+    await waitFor(() =>
+      expect(InvitationService.respondToInvitation).toHaveBeenCalledWith(
+        "inv-1",
+        "accepted",
+        expect.any(String)
+      )
+    );
+  });
+
+  it("says nothing when notifications are already on", async () => {
+    notificationsAre(true);
+    const { queryByTestId } = await acceptWithSender();
+
+    await waitFor(() => expect(InvitationService.respondToInvitation).toHaveBeenCalled());
+    expect(queryByTestId("invite-ring-consent")).toBeNull();
+  });
+
+  // A sentence promising a dialog the OS will never show is worse than
+  // silence: it spends the user's attention on a button that does nothing.
+  it("says nothing once the OS has stopped asking", async () => {
+    notificationsAre(false, false);
+    const { queryByTestId } = await acceptWithSender();
+
+    await waitFor(() => expect(InvitationService.respondToInvitation).toHaveBeenCalled());
+    expect(queryByTestId("invite-ring-consent")).toBeNull();
+  });
+
+  it("records the name ask for the home screen, naming who will read it", async () => {
+    await acceptWithSender("Priya");
+
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(ReminderService.INVITE_NAME_ASK_KEY)).toBe("Priya")
+    );
+  });
+
+  it("asks for no name when the user already has one", async () => {
+    await AsyncStorage.setItem(ReminderService.USER_NAME_KEY, "Anand");
+    await acceptWithSender("Priya");
+
+    await waitFor(() => expect(InvitationService.respondToInvitation).toHaveBeenCalled());
+    expect(await AsyncStorage.getItem(ReminderService.INVITE_NAME_ASK_KEY)).toBeNull();
+  });
+
+  it("asks for no name when the invitation was declined", async () => {
+    const rpcMock = jest.fn().mockResolvedValue({ data: "Priya", error: null });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+    jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+    const { getByTestId, findByText } = renderScreen();
+    await findByText("From Priya");
+
+    fireEvent.press(getByTestId("decline-button"));
+
+    await waitFor(() => expect(InvitationService.respondToInvitation).toHaveBeenCalled());
+    expect(await AsyncStorage.getItem(ReminderService.INVITE_NAME_ASK_KEY)).toBeNull();
+  });
+});

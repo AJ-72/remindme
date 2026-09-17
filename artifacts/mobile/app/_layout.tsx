@@ -12,7 +12,7 @@ import {
   NotoSansMalayalam_700Bold,
 } from "@expo-google-fonts/noto-sans-malayalam";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { router, Stack } from "expo-router";
+import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
 import { AppState, View } from "react-native";
@@ -30,11 +30,6 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
 import {
   checkExactAlarmPermission,
-  hasCompletedPermissionOnboarding,
-  hasCompletedRegistrationOnboarding,
-  markPermissionOnboardingComplete,
-  openExactAlarmSettings,
-  requestNotificationPermissions,
 } from "@/services/ReminderService";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
 import { registerNotificationResponseTask } from "@/tasks/notificationResponseTask";
@@ -94,7 +89,6 @@ export default function RootLayout() {
   });
 
   const [showAlarmBanner, setShowAlarmBanner] = useState(false);
-  const [readyForNamePrompt, setReadyForNamePrompt] = useState(false);
   const alarmChecked = useRef(false);
 
   useEffect(() => {
@@ -122,47 +116,13 @@ export default function RootLayout() {
     });
   }, []);
 
-  // First-launch onboarding: proactively request the notification permission
-  // (rather than waiting for the user's first reminder save) and, on
-  // Android 12+, send them straight to the exact-alarm settings screen if
-  // it isn't already granted. Runs once per install, tracked in AsyncStorage.
-  useEffect(() => {
-    hasCompletedPermissionOnboarding().then(async (completed) => {
-      if (completed) {
-        setReadyForNamePrompt(true);
-        return;
-      }
-      await requestNotificationPermissions();
-      const exactAlarmGranted = await checkExactAlarmPermission();
-      if (exactAlarmGranted === false) {
-        openExactAlarmSettings();
-      }
-      await markPermissionOnboardingComplete();
-      // Only now may the name sheet open. Asking while a system permission
-      // dialog is up would put it behind that dialog, and the tap dismissing
-      // the dialog would skip the name prompt for good.
-      setReadyForNamePrompt(true);
-    });
-  }, []);
-
-  // First-run registration onboarding (B12) - deliberately AFTER the
-  // permission onboarding and name-prompt gate settle (readyForNamePrompt),
-  // same stacking-dialog concern as NameOnboarding above: pushing a modal
-  // route while a system permission dialog is up would bury it. Explicitly
-  // optional (skippable in the screen itself) - this app's core reminder
-  // loop needs no account, so this never blocks reaching the home screen,
-  // it only offers registration once per install.
-  const registrationOnboardingChecked = useRef(false);
-  useEffect(() => {
-    if (!readyForNamePrompt || registrationOnboardingChecked.current) return;
-    registrationOnboardingChecked.current = true;
-    hasCompletedRegistrationOnboarding().then((completed) => {
-      if (!completed) {
-        router.push({ pathname: "/register-number", params: { firstRun: "1" } });
-      }
-    });
-  }, [readyForNamePrompt]);
-
+  // There is deliberately no notification permission request here any more.
+  // A cold-launch dialog asks for something the user cannot yet judge: they
+  // have no reminder, so "Allow notifications" buys them nothing visible and
+  // a refusal costs them nothing they can see. The ask now happens on the
+  // first save, where the answer decides whether that reminder rings - see
+  // ensureNotificationPermission() in ReminderService.
+  //
   // Re-check when user returns from Settings so banner clears automatically
   // once the permission is granted, without requiring an app restart.
   useEffect(() => {
@@ -196,7 +156,7 @@ export default function RootLayout() {
               <KeyboardProvider>
                 <RemindersProvider>
                   <NotificationResponseHandler />
-                  <NameOnboarding enabled={readyForNamePrompt} />
+                  <NameOnboarding enabled />
                   <SharedTextProvider>
                     <View style={{ flex: 1 }}>
                       {showAlarmBanner && (

@@ -313,9 +313,9 @@ describe("RegisterNumberScreen", () => {
     );
   });
 
-  describe("first-run mode (B12)", () => {
+  describe("optional mode (prompted visit)", () => {
     beforeEach(() => {
-      mockSearchParams = { firstRun: "1" };
+      mockSearchParams = { optional: "1" };
     });
 
     it("shows an Optional badge and a Skip button", () => {
@@ -324,20 +324,19 @@ describe("RegisterNumberScreen", () => {
       expect(getByTestId("register-number-skip")).toBeTruthy();
     });
 
-    it("does not show the Optional badge or Skip button outside first-run mode", () => {
+    it("does not show the Optional badge or Skip button on a direct visit", () => {
       mockSearchParams = {};
       const { queryByTestId } = renderScreen();
       expect(queryByTestId("register-number-optional-badge")).toBeNull();
       expect(queryByTestId("register-number-skip")).toBeNull();
     });
 
-    it("marks registration onboarding complete and goes back on Skip", async () => {
+    it("goes back on Skip", async () => {
       const { getByTestId } = renderScreen();
       fireEvent.press(getByTestId("register-number-skip"));
 
       await waitFor(() => expect(mockBack).toHaveBeenCalled());
       expect(mockReplace).not.toHaveBeenCalled();
-      expect(await AsyncStorage.getItem("@registration_onboarding_v1")).toBe("true");
     });
 
     it("falls back to replacing with the home tab when there is nothing to go back to", async () => {
@@ -347,10 +346,9 @@ describe("RegisterNumberScreen", () => {
 
       await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/(tabs)"));
       expect(mockBack).not.toHaveBeenCalled();
-      expect(await AsyncStorage.getItem("@registration_onboarding_v1")).toBe("true");
     });
 
-    it("marks registration onboarding complete on a successful registration", async () => {
+    it("registers normally from a prompted visit", async () => {
       (InvitationService.selfRegister as jest.Mock).mockResolvedValue({
         ok: true,
         appUserId: "user-1",
@@ -361,7 +359,7 @@ describe("RegisterNumberScreen", () => {
       fireEvent.press(getByTestId("register-number-submit"));
 
       await findByText(/you're registered/i);
-      expect(await AsyncStorage.getItem("@registration_onboarding_v1")).toBe("true");
+      expect(await AsyncStorage.getItem("@registered_phone_v1")).toBe("+14155552671");
     });
   });
 

@@ -1,12 +1,29 @@
 import * as Contacts from "expo-contacts";
-import { loadPickableContacts, searchContacts } from "@/services/ContactsService";
+import {
+  getContactsPermissionState,
+  loadPickableContacts,
+  searchContacts,
+} from "@/services/ContactsService";
 
 beforeEach(() => {
   jest.clearAllMocks();
   (Contacts.requestPermissionsAsync as jest.Mock).mockResolvedValue({
     status: Contacts.PermissionStatus.GRANTED,
+    canAskAgain: true,
+  });
+  (Contacts.getPermissionsAsync as jest.Mock).mockResolvedValue({
+    status: Contacts.PermissionStatus.GRANTED,
+    canAskAgain: true,
   });
 });
+
+/** Nothing granted yet, and the OS is still willing to ask. */
+function notYetAsked() {
+  (Contacts.getPermissionsAsync as jest.Mock).mockResolvedValue({
+    status: Contacts.PermissionStatus.DENIED,
+    canAskAgain: true,
+  });
+}
 
 function mockContacts(data: unknown[]) {
   (Contacts.getContactsAsync as jest.Mock).mockResolvedValue({ data });
@@ -14,13 +31,79 @@ function mockContacts(data: unknown[]) {
 
 describe("loadPickableContacts", () => {
   it("returns a denied result without throwing when permission is refused", async () => {
+    notYetAsked();
     (Contacts.requestPermissionsAsync as jest.Mock).mockResolvedValue({
       status: Contacts.PermissionStatus.DENIED,
+      canAskAgain: true,
     });
     const result = await loadPickableContacts();
     expect(result.permission).toBe("denied");
     expect(result.contacts).toEqual([]);
     expect(Contacts.getContactsAsync).not.toHaveBeenCalled();
+  });
+
+  it("never shows the system dialog when asked not to", async () => {
+    notYetAsked();
+    const result = await loadPickableContacts({ request: false });
+    expect(result.permission).toBe("denied");
+    expect(Contacts.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it("reports a permanent refusal as blocked, not denied", async () => {
+    (Contacts.getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: Contacts.PermissionStatus.DENIED,
+      canAskAgain: false,
+    });
+    const result = await loadPickableContacts({ request: true });
+    expect(result.permission).toBe("blocked");
+    // Asking is pointless once the OS has stopped showing its dialog.
+    expect(Contacts.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it("reports blocked when the refusal just now was the permanent one", async () => {
+    notYetAsked();
+    (Contacts.requestPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: Contacts.PermissionStatus.DENIED,
+      canAskAgain: false,
+    });
+    const result = await loadPickableContacts({ request: true });
+    expect(result.permission).toBe("blocked");
+  });
+
+  it("skips the dialog entirely once permission is already granted", async () => {
+    mockContacts([]);
+    await loadPickableContacts({ request: true });
+    expect(Contacts.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe("getContactsPermissionState", () => {
+  it("reads the state without showing a dialog", async () => {
+    notYetAsked();
+    const state = await getContactsPermissionState();
+    expect(state).toEqual({ granted: false, canAskAgain: true });
+    expect(Contacts.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it("treats a missing canAskAgain as askable", async () => {
+    (Contacts.getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: Contacts.PermissionStatus.DENIED,
+    });
+    expect(await getContactsPermissionState()).toEqual({
+      granted: false,
+      canAskAgain: true,
+    });
+  });
+
+  it("reports a permanent refusal", async () => {
+    (Contacts.getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: Contacts.PermissionStatus.DENIED,
+      canAskAgain: false,
+    });
+    expect(await getContactsPermissionState()).toEqual({
+      granted: false,
+      canAskAgain: false,
+    });
   });
 
   it("flattens one entry per phone number", async () => {

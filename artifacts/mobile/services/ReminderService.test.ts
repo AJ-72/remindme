@@ -4,7 +4,14 @@ import { getLocales } from "expo-localization";
 import {
   DEFAULT_ALARM_KEY,
   DICTATION_LANGUAGE_KEY,
-  PERMISSION_ONBOARDING_KEY,
+  NOTIF_PROMPT_COUNT_KEY,
+  MAX_NOTIF_PROMPTS,
+  MAX_REGISTER_PROMPTS,
+  getRegisterPromptCount,
+  incrementRegisterPromptCount,
+  shouldOfferNumberRegistration,
+  setRegisteredPhone,
+  clearRegisteredPhone,
   SNOOZE_CATEGORY_ID,
   SNOOZE_ACTION_ID,
   MARK_DONE_ACTION_ID,
@@ -30,14 +37,16 @@ import {
   getDictationLanguage,
   getSnoozePreset,
   setSnoozePreset,
-  hasCompletedPermissionOnboarding,
+  getNotifPromptCount,
+  incrementNotifPromptCount,
+  ensureNotificationPermission,
+  getNotificationPermissionState,
   loadReminders,
   saveReminders,
   markDoneById,
   markNotifiedById,
   markOpenedById,
   MAX_SNOOZE_HISTORY_ENTRIES,
-  markPermissionOnboardingComplete,
   requestNotificationPermissions,
   rescheduleAllFutureReminders,
   setAlarmForPendingReminders,
@@ -71,6 +80,7 @@ import {
   cancelScheduledNotificationAsync,
   dismissNotificationAsync,
   requestPermissionsAsync,
+  getPermissionsAsync,
   setNotificationCategoryAsync,
   getAllScheduledNotificationsAsync,
 } from "expo-notifications";
@@ -880,24 +890,109 @@ describe("dictation language setting", () => {
   });
 });
 
-describe("permission onboarding", () => {
-  it("hasCompletedPermissionOnboarding is false when unset", async () => {
-    const result = await hasCompletedPermissionOnboarding();
-    expect(result).toBe(false);
+describe("the registration offer", () => {
+  it("offers to a new user who has not been asked", async () => {
+    expect(await shouldOfferNumberRegistration()).toBe(true);
   });
 
-  it("markPermissionOnboardingComplete persists completion under PERMISSION_ONBOARDING_KEY", async () => {
-    await markPermissionOnboardingComplete();
-    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-      PERMISSION_ONBOARDING_KEY,
-      "true"
-    );
+  it("counts each offer", async () => {
+    await incrementRegisterPromptCount();
+    expect(await getRegisterPromptCount()).toBe(1);
+    await incrementRegisterPromptCount();
+    expect(await getRegisterPromptCount()).toBe(2);
   });
 
-  it("hasCompletedPermissionOnboarding reflects a completed onboarding", async () => {
-    await markPermissionOnboardingComplete();
-    const result = await hasCompletedPermissionOnboarding();
-    expect(result).toBe(true);
+  it("stops at the cap, because a refusal repeated twice is an answer", async () => {
+    for (let i = 0; i < MAX_REGISTER_PROMPTS; i++) {
+      await incrementRegisterPromptCount();
+    }
+    expect(await shouldOfferNumberRegistration()).toBe(false);
+  });
+
+  it("never offers once the number is registered, whatever the count says", async () => {
+    await setRegisteredPhone("+919876543210");
+    expect(await shouldOfferNumberRegistration()).toBe(false);
+  });
+
+  it("offers again if the registered number is removed", async () => {
+    await setRegisteredPhone("+919876543210");
+    await clearRegisteredPhone();
+    expect(await shouldOfferNumberRegistration()).toBe(true);
+  });
+});
+
+describe("notification permission ladder", () => {
+  it("getNotifPromptCount is 0 when unset", async () => {
+    expect(await getNotifPromptCount()).toBe(0);
+  });
+
+  it("incrementNotifPromptCount persists the next count", async () => {
+    expect(await incrementNotifPromptCount()).toBe(1);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(NOTIF_PROMPT_COUNT_KEY, "1");
+    expect(await incrementNotifPromptCount()).toBe(2);
+    expect(await getNotifPromptCount()).toBe(2);
+  });
+
+  it("getNotificationPermissionState reports granted and canAskAgain", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: false,
+    });
+    expect(await getNotificationPermissionState()).toEqual({
+      granted: false,
+      canAskAgain: false,
+    });
+  });
+
+  it("getNotificationPermissionState treats a missing canAskAgain as askable", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({ status: "denied" });
+    expect(await getNotificationPermissionState()).toEqual({
+      granted: false,
+      canAskAgain: true,
+    });
+  });
+
+  it("ensureNotificationPermission asks nothing when already granted", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "granted",
+      canAskAgain: true,
+    });
+    expect(await ensureNotificationPermission()).toBe(true);
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(0);
+  });
+
+  it("ensureNotificationPermission asks and counts the ask when it may", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: true,
+    });
+    (requestPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "granted",
+    });
+    expect(await ensureNotificationPermission()).toBe(true);
+    expect(requestPermissionsAsync).toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(1);
+  });
+
+  it("ensureNotificationPermission never asks after a permanent refusal", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: false,
+    });
+    expect(await ensureNotificationPermission()).toBe(false);
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(0);
+  });
+
+  it("ensureNotificationPermission stops asking once the cap is spent", async () => {
+    for (let i = 0; i < MAX_NOTIF_PROMPTS; i++) await incrementNotifPromptCount();
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: true,
+    });
+    expect(await ensureNotificationPermission()).toBe(false);
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
   });
 
   it("requestNotificationPermissions returns true when the OS grants the request", async () => {
@@ -1835,5 +1930,51 @@ describe("quiet hours persistence", () => {
     await setQuietHours({ startMinute: 1320, endMinute: 480 });
     const parsed = JSON.parse(await buildBackupJson());
     expect(parsed.settings.quietHours).toEqual({ startMinute: 1320, endMinute: 480 });
+  });
+});
+
+describe("scheduleNotification and the permission ask", () => {
+  it("never asks for permission for a reminder whose time has already passed", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: "denied",
+      canAskAgain: true,
+    });
+
+    const id = await scheduleNotification(
+      {
+        title: "Already gone",
+        description: "",
+        datetime: new Date(Date.now() - 60_000).toISOString(),
+        alarm: true,
+        exactTiming: true,
+      },
+      "r-past"
+    );
+
+    expect(id).toBeUndefined();
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+    // The prompt budget is for reminders that can still ring.
+    expect(await getNotifPromptCount()).toBe(0);
+  });
+
+  it("asks for a reminder that still has a ring ahead of it", async () => {
+    (getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: "denied",
+      canAskAgain: true,
+    });
+
+    await scheduleNotification(
+      {
+        title: "Still ahead",
+        description: "",
+        datetime: new Date(Date.now() + 3_600_000).toISOString(),
+        alarm: true,
+        exactTiming: true,
+      },
+      "r-future"
+    );
+
+    expect(requestPermissionsAsync).toHaveBeenCalled();
+    expect(await getNotifPromptCount()).toBe(1);
   });
 });

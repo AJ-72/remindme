@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { useNotificationPermission } from "@/hooks/useNotificationPermission";
 import { Reminder, useReminders } from "@/contexts/RemindersContext";
 import { isReceivedReminder, isSendReminder } from "@/services/ReminderService";
 import { formatDatetime } from "@/utils/formatDatetime";
@@ -103,9 +104,15 @@ const staticStyles = StyleSheet.create({
 function ReminderCard({ reminder, onDelete }: Props) {
   const colors = useColors();
   const { toggleComplete } = useReminders();
+  const { granted: notificationsGranted } = useNotificationPermission();
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const overdue = isOverdue(reminder.datetime, reminder.completed);
+  // Only a reminder that still has a ring left to lose earns the warning. A
+  // done or already-passed one cannot be saved by granting permission now,
+  // and labelling it would turn the chip into wallpaper.
+  const willNotRing =
+    !notificationsGranted && !reminder.completed && !overdue;
 
   const handlePress = () => {
     Animated.sequence([
@@ -263,6 +270,26 @@ function ReminderCard({ reminder, onDelete }: Props) {
                 numberOfLines={1}
               >
                 From {reminder.senderName}
+              </Text>
+            </View>
+          )}
+          {willNotRing && (
+            <View
+              testID="will-not-ring-chip"
+              style={[
+                staticStyles.recipientChip,
+                { backgroundColor: colors.warningSurface },
+              ]}
+            >
+              <Feather name="bell-off" size={11} color={colors.warningSurfaceForeground} />
+              <Text
+                style={[
+                  staticStyles.recipientChipText,
+                  { color: colors.warningSurfaceForeground },
+                ]}
+                numberOfLines={1}
+              >
+                Will not ring
               </Text>
             </View>
           )}

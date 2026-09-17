@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   Linking,
   Modal,
   Platform,
@@ -20,6 +21,7 @@ import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
 import {
+  abortListening,
   ensureOfflineModelReady,
   getMicPermissionStatus,
   requestMicPermission,
@@ -29,11 +31,23 @@ import {
 import { checkReachability, isReachabilityStale } from "@/services/RecipientLookupService";
 import { sendInvitation } from "@/services/InvitationService";
 import type { PickableContact } from "@/services/ContactsService";
-import type { ReminderRecipient } from "@/services/ReminderService";
+import {
+  incrementRegisterPromptCount,
+  markMicLanguageLineSeen,
+  markRegisterPromptShown,
+  shouldOfferNumberRegistration,
+  shouldShowMicLanguageLine,
+  type ReminderRecipient,
+} from "@/services/ReminderService";
 import { formatTime12h } from "@/utils/formatDatetime";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import type { ParsedAmbiguity } from "@/utils/malayalamDateParser";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
+import { createDictationTimer, type DictationTimer } from "@/utils/dictationTimer";
+import ListeningSurface from "@/components/ListeningSurface";
+import RegisterNumberNudge from "@/components/RegisterNumberNudge";
+import StarterExamples from "@/components/StarterExamples";
+import { detectPersonInTitle } from "@/utils/personInTitle";
 import { detectVagueOpener } from "@/utils/vagueTask";
 import { getFontFamily } from "@/utils/getFontFamily";
 
@@ -44,6 +58,7 @@ const DateTimePicker: React.ComponentType<any> | null =
     : null;
 
 type PickerMode = "date" | "time" | null;
+
 
 function roundToNextHour(d: Date): Date {
   const result = new Date(d);
@@ -105,7 +120,14 @@ interface Props {
 
 export default function QuickAddInput({ onSaved }: Props) {
   const colors = useColors();
-  const { addReminder, attachInvitationId, defaultAlarmEnabled, dictationLanguage, quietHours } =
+  const {
+    addReminder,
+    attachInvitationId,
+    defaultAlarmEnabled,
+    dictationLanguage,
+    quietHours,
+    reminders,
+  } =
     useReminders();
   const {
     sharedText,
@@ -125,6 +147,14 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [notesVisible, setNotesVisible] = useState(false);
   const [recipient, setRecipient] = useState<ReminderRecipient | undefined>(undefined);
+  // The offer to register the user's OWN number, shown after they have sent a
+  // reminder to somebody else - the first moment being reachable back means
+  // anything. Until a number is registered there is no Supabase session, so
+  // checkReachability() returns null for every contact and no recipient can
+  // ever earn the in-app badge: this offer is the only route to that state.
+  // Holds the recipient's name while the offer is up, so the copy can say who
+  // it was that the user just reminded. Null means no offer on screen.
+  const [offerRegistration, setOfferRegistration] = useState<string | null>(null);
   const [invitationError, setInvitationError] = useState<string | null>(null);
   const [contactPickerVisible, setContactPickerVisible] = useState(false);
   const [quietPrompt, setQuietPrompt] = useState<Date | null>(null);
@@ -136,6 +166,9 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [ambiguity, setAmbiguity] = useState<ParsedAmbiguity | null>(null);
   const [ambiguityPrompt, setAmbiguityPrompt] = useState<ParsedAmbiguity | null>(null);
   const [dismissedVagueText, setDismissedVagueText] = useState<string | null>(null);
+  // Keyed by the name, not by a boolean: refusing to send "Call Amma" to Amma
+  // says nothing about whether the next reminder should go to Priya.
+  const [dismissedPerson, setDismissedPerson] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [listening, setListening] = useState(false);
   const [micNotice, setMicNotice] = useState<string | null>(null);
@@ -143,6 +176,24 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const micPulse = useRef(new Animated.Value(1)).current;
   const micSourceRef = useRef<"live" | "shared" | null>(null);
+  // Only a LIVE mic session gets the listening surface. A shared audio file
+  // transcribing in the background also sets `listening`, but it has no
+  // silence to time and no session the user can stop or cancel.
+  const [liveListening, setLiveListening] = useState(false);
+  // The listening surface's own state: loudness for the waveform, the
+  // uncommitted segment, and the two clocks it draws.
+  const [micLevel, setMicLevel] = useState(0);
+  const [micInterim, setMicInterim] = useState("");
+  const [micStartedAt, setMicStartedAt] = useState<number | null>(null);
+  const [micLastHeardAt, setMicLastHeardAt] = useState<number | null>(null);
+  const [micLanguageLine, setMicLanguageLine] = useState(false);
+  const [heardSpeech, setHeardSpeech] = useState(false);
+  // The same fact as `heardSpeech`, readable from inside the timer callback,
+  // which closes over the state value as it was when the timer was armed.
+  const heardSpeechRef = useRef(false);
+  // What the input held before dictation started. Cancel puts it back.
+  const dictationBaselineRef = useRef("");
+  const dictationTimerRef = useRef<DictationTimer | null>(null);
 
   const [showNoTimeSheet, setShowNoTimeSheet] = useState(false);
   const [suggestedTime, setSuggestedTime] = useState<Date>(roundToNextHour(new Date()));
@@ -395,11 +446,70 @@ export default function QuickAddInput({ onSaved }: Props) {
     micPulse.setValue(1);
   };
 
+  const clearDictationTimer = () => {
+    dictationTimerRef.current?.clear();
+    dictationTimerRef.current = null;
+  };
+
+  /** Put the UI back to "not listening". Safe to call more than once. */
+  const settleAfterListening = () => {
+    clearDictationTimer();
+    micSourceRef.current = null;
+    setListening(false);
+    setLiveListening(false);
+    setHeardSpeech(false);
+    heardSpeechRef.current = false;
+    setMicLevel(0);
+    setMicInterim("");
+    setMicStartedAt(null);
+    setMicLastHeardAt(null);
+    setMicLanguageLine(false);
+    stopMicPulse();
+  };
+
+  /**
+   * End the session and KEEP what was heard.
+   *
+   * `reason` only decides the notice. "silence" is the ordinary end of a
+   * dictation, so it says nothing at all; the other two name something the
+   * user did not choose, so they say what happened.
+   */
+  const stopSpeakMode = (reason: "user" | "silence" | "interrupted" = "user") => {
+    if (micSourceRef.current === "shared") {
+      // A shared audio file is transcribing right now — stopping here would
+      // kill its native listeners and permanently wedge the concurrency
+      // guard (see Finding 2b). Surface a notice instead of stopping it.
+      setMicNotice("Still transcribing the shared audio…");
+      return;
+    }
+    stopListening();
+    settleAfterListening();
+    if (reason === "interrupted") {
+      setMicNotice("Voice input stopped when you left the app. Your words were kept.");
+    } else if (reason === "user") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  };
+
+  /** End the session and THROW AWAY what was heard. */
+  const cancelSpeakMode = () => {
+    if (micSourceRef.current === "shared") {
+      setMicNotice("Still transcribing the shared audio…");
+      return;
+    }
+    abortListening();
+    setInput(dictationBaselineRef.current);
+    settleAfterListening();
+    setMicNotice(null);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+  };
+
   const startSpeakMode = async () => {
     setMicNotice(null);
     const { granted, canAskAgain } = await getMicPermissionStatus();
     if (!granted) {
       if (!canAskAgain) {
+        setMicNotice("Microphone access is off. Turn it on in Settings to dictate.");
         Linking.openSettings();
         return;
       }
@@ -414,45 +524,106 @@ export default function QuickAddInput({ onSaved }: Props) {
       return;
     }
 
+    const baseline = input;
+    dictationBaselineRef.current = baseline;
+
+    // Built per session, so each one closes over the baseline it started from.
+    const timer = createDictationTimer({
+      onSilence: () => {
+        stopSpeakMode("silence");
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      },
+      onNoSpeech: () => {
+        // Nothing was heard, so there is nothing to keep. Cancel rather than
+        // stop, and say why - a mic that closes in silence with no message
+        // reads as a broken button.
+        abortListening();
+        setInput(baseline);
+        settleAfterListening();
+        setMicNotice("Didn't hear anything — try again or type it in.");
+      },
+    });
+    dictationTimerRef.current = timer;
+
+    /** A word reached the recognizer: reset the pause clock and the bar. */
+    const heard = () => {
+      if (!heardSpeechRef.current) {
+        heardSpeechRef.current = true;
+        setHeardSpeech(true);
+      }
+      setMicLastHeardAt(Date.now());
+      timer.heard();
+    };
+
     const { busy } = startListening(
-      input,
+      baseline,
       locale,
-      (fullText) => setInput(fullText),
-      () => {
-        micSourceRef.current = null;
-        setListening(false);
-        stopMicPulse();
+      (fullText) => {
+        setInput(fullText);
+        heard();
       },
       () => {
-        micSourceRef.current = null;
-        setListening(false);
-        stopMicPulse();
+        settleAfterListening();
+      },
+      () => {
+        settleAfterListening();
         setMicNotice("Couldn't hear that — try again or type it in.");
       },
-      modelStatus !== "unavailable"
+      modelStatus !== "unavailable",
+      {
+        // An interim segment is speech too, so it resets the pause clock.
+        // Without this the session would close 2.5s into a long word the
+        // recognizer has not finished committing.
+        onInterim: (segment) => {
+          setMicInterim(segment);
+          if (segment !== "") heard();
+        },
+        onVolume: setMicLevel,
+      }
     );
     if (busy) {
       setMicNotice("Still transcribing the shared audio…");
       return;
     }
     micSourceRef.current = "live";
+    heardSpeechRef.current = false;
+    setHeardSpeech(false);
+    setMicLevel(0);
+    setMicInterim("");
+    setMicLastHeardAt(null);
+    setMicStartedAt(Date.now());
+    void shouldShowMicLanguageLine().then((show) => {
+      if (!show) return;
+      setMicLanguageLine(true);
+      return markMicLanguageLineSeen();
+    });
     setListening(true);
+    setLiveListening(true);
     startMicPulse();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    timer.begin();
   };
 
-  const stopSpeakMode = () => {
-    if (micSourceRef.current === "shared") {
-      // A shared audio file is transcribing right now — stopping here would
-      // kill its native listeners and permanently wedge the concurrency
-      // guard (see Finding 2b). Surface a notice instead of stopping it.
-      setMicNotice("Still transcribing the shared audio…");
-      return;
-    }
-    stopListening();
-    micSourceRef.current = null;
-    setListening(false);
-    stopMicPulse();
-  };
+  // Leaving the app stops dictation. Android hands the microphone to whatever
+  // comes to the front anyway, so a session left running here would keep the
+  // pulse and the surface on screen over a recognizer that is already dead.
+  useEffect(() => {
+    if (!liveListening) return;
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") stopSpeakMode("interrupted");
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveListening]);
+
+  // A screen change while the mic is open must not leave the native session
+  // running with nothing left to receive its results.
+  useEffect(() => {
+    return () => {
+      clearDictationTimer();
+      abortListening();
+    };
+  }, []);
 
   const handleMicPress = () => {
     if (!listening) {
@@ -462,7 +633,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       // notice rather than silently no-op'ing.
       setMicNotice("Still transcribing the shared audio…");
     } else {
-      stopSpeakMode();
+      stopSpeakMode("user");
     }
   };
 
@@ -471,6 +642,17 @@ export default function QuickAddInput({ onSaved }: Props) {
   const vagueCandidate = (parsedTitle || input).trim();
   const showVagueHint =
     !!detectVagueOpener(vagueCandidate) && vagueCandidate !== dismissedVagueText;
+
+  // The parser has already read the title, so naming the person in it costs
+  // nothing more. Suppressed once a recipient is attached: the offer has been
+  // taken, and the chip would then be asking a question already answered.
+  const personInTitle = recipient ? null : detectPersonInTitle(parsedTitle || input);
+  const showPersonChip = personInTitle !== null && personInTitle !== dismissedPerson;
+
+  // Only on a genuinely cold open: no reminder saved yet AND nothing typed.
+  // The block is help, and help that stays on screen over a user who is
+  // already typing is clutter.
+  const showStarters = reminders.length === 0 && input.trim() === "" && !listening;
 
   const canSave = !saving && !!(parsedTitle || input.trim());
 
@@ -795,6 +977,43 @@ export default function QuickAddInput({ onSaved }: Props) {
       color: colors.primary,
       alignSelf: "flex-start",
     },
+    personChipRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      marginTop: 8,
+    },
+    personChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.secondary,
+      borderRadius: 999,
+      paddingHorizontal: 11,
+      paddingVertical: 6,
+    },
+    personChipText: {
+      fontSize: 12.5,
+      color: colors.secondaryForeground,
+    },
+    remindSomeoneBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      marginTop: 10,
+      paddingVertical: 11,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    remindSomeoneText: {
+      fontSize: 13,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.mutedForeground,
+    },
     webPickerWrap: {
       marginBottom: 16,
     },
@@ -855,6 +1074,23 @@ export default function QuickAddInput({ onSaved }: Props) {
               </Text>
             ) : null}
           </>
+        )}
+
+        {/* Dictation is the one input mode with no visible cursor, so the
+            state has to be said out loud: that the mic is open, whether
+            anything has been heard yet, and the two ways out of it. Without
+            this, "stop" and "throw it away" were the same tap on the mic. */}
+        {liveListening && (
+          <ListeningSurface
+            heardSpeech={heardSpeech}
+            level={micLevel}
+            interim={micInterim}
+            startedAt={micStartedAt ?? undefined}
+            lastHeardAt={micLastHeardAt}
+            showLanguageLine={micLanguageLine}
+            onDone={() => stopSpeakMode("user")}
+            onCancel={cancelSpeakMode}
+          />
         )}
 
         <View style={styles.actionRow}>
@@ -933,6 +1169,30 @@ export default function QuickAddInput({ onSaved }: Props) {
         </View>
       </View>
 
+      {showStarters && <StarterExamples onPick={setInput} />}
+
+      {/* A permanent way to aim a reminder at somebody else. It is on screen
+          from install day and is never dismissed, which is what replaced the
+          first-run "Add your number" modal: that was seen once, this is seen
+          every session. The action-row icon stays as the shortcut for a user
+          who already knows where it is. */}
+      <Pressable
+        style={styles.remindSomeoneBtn}
+        onPress={() => setContactPickerVisible(true)}
+        accessibilityRole="button"
+        testID="quick-add-remind-someone"
+      >
+        <Feather name="user-plus" size={14} color={colors.mutedForeground} />
+        <Text style={styles.remindSomeoneText}>Remind someone else</Text>
+      </Pressable>
+
+      {offerRegistration !== null && (
+        <RegisterNumberNudge
+          recipientName={offerRegistration}
+          onDismiss={() => setOfferRegistration(null)}
+        />
+      )}
+
       {/* Shown only when the reminder being composed will actually be silent
           AND that came from the Settings default rather than a deliberate tap.
           Keyed off `alarm` (state) rather than alarmTouchedRef, since a ref
@@ -995,21 +1255,33 @@ export default function QuickAddInput({ onSaved }: Props) {
           setRecipient(picked);
           setContactPickerVisible(false);
           setInvitationError(null);
+          // Raised here rather than at Save, matching add-reminder.tsx: the
+          // study's trigger is the tap that names a person, and the two
+          // screens disagreeing meant the same act offered at two different
+          // moments. Registering is also what creates the Supabase session,
+          // without which checkReachability() below returns null for every
+          // contact - so no recipient earns the in-app badge until this offer
+          // is taken. Counted when SHOWN, not when it is taken.
+          shouldOfferNumberRegistration().then(async (offer) => {
+            if (!offer) return;
+            markRegisterPromptShown();
+            await incrementRegisterPromptCount();
+            setOfferRegistration(picked.name);
+          });
           // Additive Tier 2 check - never blocks or delays showing the picked
           // contact; the existing Tier 1 WhatsApp-link flow keeps working
           // unmodified whether this resolves, fails, or is still in flight.
           const deviceRegion = getLocales()[0]?.regionCode ?? null;
-          console.log("[TEMP-DIAG2] calling checkReachability, phone=", picked.phone, "region=", deviceRegion);
           checkReachability(picked, deviceRegion).then((result) => {
-            console.log("[TEMP-DIAG2] checkReachability resolved:", JSON.stringify(result));
             if (!result) return;
             setRecipient((current) =>
               current && current.phone === picked.phone
                 ? { ...current, appUserId: result.appUserId, lookedUpAt: result.lookedUpAt }
                 : current
             );
-          }).catch((err) => {
-            console.log("[TEMP-DIAG2] checkReachability threw:", String(err));
+          }).catch(() => {
+            // Reachability is additive. A failed lookup leaves the recipient
+            // without the in-app badge and the WhatsApp route still works.
           });
         }}
       />
@@ -1071,6 +1343,40 @@ export default function QuickAddInput({ onSaved }: Props) {
           </>
         )}
       </Animated.View>
+
+      {/* Discovery at the moment of intent. A user who has just typed "Call
+          Amma" is the one user on the home screen who can be shown what
+          sending a reminder to another person is FOR, and the sentence needs
+          no explaining because they wrote the name themselves. */}
+      {showPersonChip && (
+        <View style={styles.personChipRow}>
+          <Pressable
+            style={styles.personChip}
+            onPress={() => setContactPickerVisible(true)}
+            accessibilityRole="button"
+            testID="send-to-person-chip"
+          >
+            <Feather name="send" size={11} color={colors.primary} />
+            <Text
+              style={[
+                styles.personChipText,
+                { fontFamily: getFontFamily(personInTitle, "600SemiBold") },
+              ]}
+            >
+              Send to {personInTitle} instead?
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setDismissedPerson(personInTitle)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss"
+            testID="send-to-person-chip-dismiss"
+          >
+            <Feather name="x" size={13} color={colors.mutedForeground} />
+          </Pressable>
+        </View>
+      )}
 
       <Modal
         visible={ambiguityPrompt !== null}

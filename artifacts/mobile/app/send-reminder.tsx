@@ -20,8 +20,11 @@ import { buildSendOptions } from "@/services/messageLinks";
 import {
   getInviteNudgeCount,
   incrementInviteNudgeCount,
+  incrementRegisterPromptCount,
   isSendReminder,
+  shouldOfferNumberRegistration,
 } from "@/services/ReminderService";
+import RegisterNumberNudge from "@/components/RegisterNumberNudge";
 import { composeMessage, nudgeForSendCount, stripNudge } from "@/utils/inviteNudges";
 import { normalizePhone, toWhatsAppDigits } from "@/utils/phoneNumber";
 import { getFontFamily } from "@/utils/getFontFamily";
@@ -40,6 +43,9 @@ export default function SendReminderScreen() {
   const [nudgeOn, setNudgeOn] = useState(inviteNudgeEnabled);
   const [nudgeLine, setNudgeLine] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // Shown only after a send, and only while the offer is still unspent. See
+  // components/RegisterNumberNudge.tsx for why this is the earned placement.
+  const [offerRegistration, setOfferRegistration] = useState(false);
   const seeded = useRef(false);
 
   const phoneDigits = useMemo(
@@ -112,6 +118,12 @@ export default function SendReminderScreen() {
         await incrementInviteNudgeCount(phoneDigits);
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Counted when the offer is SHOWN, not when it is refused: an offer the
+      // user scrolled past is still an offer they did not take.
+      if (await shouldOfferNumberRegistration()) {
+        await incrementRegisterPromptCount();
+        setOfferRegistration(true);
+      }
     } catch {
       // Opening can fail if no handler exists; the other button stays available.
     } finally {
@@ -340,6 +352,13 @@ export default function SendReminderScreen() {
               Send by SMS
             </Text>
           </Pressable>
+        )}
+
+        {offerRegistration && (
+          <RegisterNumberNudge
+            recipientName={recipient?.name}
+            onDismiss={() => setOfferRegistration(false)}
+          />
         )}
 
         {/* Completion is always explicit: the app cannot observe whether a

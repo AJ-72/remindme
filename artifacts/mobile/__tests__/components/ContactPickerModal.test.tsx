@@ -3,6 +3,15 @@ import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import * as Contacts from "expo-contacts";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { Linking } from "react-native";
+
+/** Nothing granted yet, and the OS is still willing to show its dialog. */
+function notYetAsked() {
+  (Contacts.getPermissionsAsync as jest.Mock).mockResolvedValue({
+    status: Contacts.PermissionStatus.DENIED,
+    canAskAgain: true,
+  });
+}
 
 function renderPicker(props: Partial<React.ComponentProps<typeof ContactPickerModal>> = {}) {
   const onSelect = jest.fn();
@@ -24,6 +33,11 @@ beforeEach(() => {
   jest.clearAllMocks();
   (Contacts.requestPermissionsAsync as jest.Mock).mockResolvedValue({
     status: Contacts.PermissionStatus.GRANTED,
+    canAskAgain: true,
+  });
+  (Contacts.getPermissionsAsync as jest.Mock).mockResolvedValue({
+    status: Contacts.PermissionStatus.GRANTED,
+    canAskAgain: true,
   });
   (Contacts.getContactsAsync as jest.Mock).mockResolvedValue({
     data: [
@@ -71,19 +85,20 @@ describe("ContactPickerModal", () => {
   });
 
   it("explains the denied state instead of rendering an empty list", async () => {
+    notYetAsked();
     (Contacts.requestPermissionsAsync as jest.Mock).mockResolvedValue({
       status: Contacts.PermissionStatus.DENIED,
+      canAskAgain: true,
     });
     const { findByTestId } = renderPicker();
+    fireEvent.press(await findByTestId("contacts-pre-prompt-continue"));
     expect(await findByTestId("contacts-denied")).toBeTruthy();
   });
 
   it("says contacts stay on the device, since that is the permission rationale", async () => {
-    (Contacts.requestPermissionsAsync as jest.Mock).mockResolvedValue({
-      status: Contacts.PermissionStatus.DENIED,
-    });
+    notYetAsked();
     const { findByText } = renderPicker();
-    expect(await findByText(/never leave your phone/i)).toBeTruthy();
+    expect(await findByText(/stay on your phone/i)).toBeTruthy();
   });
 
   it("shows an empty state when the address book has no usable numbers", async () => {
@@ -121,5 +136,139 @@ describe("ContactPickerModal — keyboard", () => {
     const { UNSAFE_root } = renderPicker();
     const { KeyboardAvoidingView } = require("react-native-keyboard-controller");
     expect(UNSAFE_root.findAllByType(KeyboardAvoidingView).length).toBeGreaterThan(0);
+  });
+});
+
+describe("ContactPickerModal — asking for the address book", () => {
+  it("asks in its own words before it lets the OS ask", async () => {
+    notYetAsked();
+    const { findByTestId } = renderPicker();
+
+    expect(await findByTestId("contacts-pre-prompt")).toBeTruthy();
+    // The point of the pre-prompt: the system dialog has not been spent.
+    expect(Contacts.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it("shows the system dialog only once the user agrees to be asked", async () => {
+    notYetAsked();
+    const { findByTestId, findByText } = renderPicker();
+    fireEvent.press(await findByTestId("contacts-pre-prompt-continue"));
+
+    await waitFor(() => expect(Contacts.requestPermissionsAsync).toHaveBeenCalled());
+    expect(await findByText("Priya Menon")).toBeTruthy();
+  });
+
+  it("never pre-prompts when permission is already granted", async () => {
+    const { queryByTestId, findByText } = renderPicker();
+    await findByText("Priya Menon");
+    expect(queryByTestId("contacts-pre-prompt")).toBeNull();
+  });
+
+  it("skips the pre-prompt and offers settings once the OS has stopped asking", async () => {
+    (Contacts.getPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: Contacts.PermissionStatus.DENIED,
+      canAskAgain: false,
+    });
+    const { findByTestId, queryByTestId } = renderPicker();
+
+    expect(await findByTestId("contacts-blocked")).toBeTruthy();
+    expect(queryByTestId("contacts-pre-prompt")).toBeNull();
+
+    const openSettings = jest.spyOn(Linking, "openSettings").mockResolvedValue(undefined);
+    fireEvent.press(await findByTestId("contacts-open-settings"));
+    expect(openSettings).toHaveBeenCalled();
+    openSettings.mockRestore();
+  });
+
+  it("offers a retry, not settings, while the OS will still ask", async () => {
+    notYetAsked();
+    (Contacts.requestPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: Contacts.PermissionStatus.DENIED,
+      canAskAgain: true,
+    });
+    const { findByTestId, queryByTestId } = renderPicker();
+    fireEvent.press(await findByTestId("contacts-pre-prompt-continue"));
+
+    expect(await findByTestId("contacts-denied-retry")).toBeTruthy();
+    expect(queryByTestId("contacts-open-settings")).toBeNull();
+  });
+
+  it("names a failure a failure, not a refusal", async () => {
+    (Contacts.getContactsAsync as jest.Mock).mockRejectedValue(new Error("boom"));
+    const { findByTestId, queryByTestId } = renderPicker();
+
+    expect(await findByTestId("contacts-error")).toBeTruthy();
+    expect(queryByTestId("contacts-denied")).toBeNull();
+  });
+});
+
+describe("ContactPickerModal — typing a number instead", () => {
+  it("offers the manual route from every state that has no list", async () => {
+    notYetAsked();
+    const { findByTestId } = renderPicker();
+    expect(await findByTestId("contacts-use-manual")).toBeTruthy();
+  });
+
+  it("returns the typed name and the number in E.164, country code included", async () => {
+    notYetAsked();
+    const { findByTestId, onSelect } = renderPicker();
+    fireEvent.press(await findByTestId("contacts-use-manual"));
+
+    fireEvent.changeText(await findByTestId("contacts-manual-name"), "Ammu");
+    fireEvent.changeText(await findByTestId("contacts-manual-code"), "+91");
+    fireEvent.changeText(await findByTestId("contacts-manual-phone"), "98765 43210");
+    fireEvent.press(await findByTestId("contacts-manual-submit"));
+
+    expect(onSelect).toHaveBeenCalledWith({ name: "Ammu", phone: "+919876543210" });
+  });
+
+  it("uses the number as the label when no name is typed", async () => {
+    notYetAsked();
+    const { findByTestId, onSelect } = renderPicker();
+    fireEvent.press(await findByTestId("contacts-use-manual"));
+    fireEvent.changeText(await findByTestId("contacts-manual-code"), "+91");
+    fireEvent.changeText(await findByTestId("contacts-manual-phone"), "9123456789");
+    fireEvent.press(await findByTestId("contacts-manual-submit"));
+
+    expect(onSelect).toHaveBeenCalledWith({ name: "+919123456789", phone: "+919123456789" });
+  });
+
+  // The device region is the phone's LOCALE, not its SIM. An en-GB handset on
+  // an Indian SIM used to normalize these same digits to a +44 number, and so
+  // to a phone_hash the recipient does not have. An explicit code cannot.
+  it("refuses to submit with no country code", async () => {
+    notYetAsked();
+    const { findByTestId, onSelect } = renderPicker();
+    fireEvent.press(await findByTestId("contacts-use-manual"));
+    fireEvent.changeText(await findByTestId("contacts-manual-code"), "");
+    fireEvent.changeText(await findByTestId("contacts-manual-phone"), "9123456789");
+
+    expect((await findByTestId("contacts-manual-submit")).props.accessibilityState?.disabled)
+      .toBe(true);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("refuses a number too short to be one", async () => {
+    notYetAsked();
+    const { findByTestId, onSelect } = renderPicker();
+    fireEvent.press(await findByTestId("contacts-use-manual"));
+    fireEvent.changeText(await findByTestId("contacts-manual-phone"), "123");
+
+    // Disabled, so a press never reaches the handler at all - asserting on
+    // the prop rather than on a press, which testing-library forwards to the
+    // nearest enabled ancestor.
+    expect((await findByTestId("contacts-manual-submit")).props.accessibilityState?.disabled)
+      .toBe(true);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("never reads the address book on the manual route", async () => {
+    notYetAsked();
+    const { findByTestId } = renderPicker();
+    fireEvent.press(await findByTestId("contacts-use-manual"));
+    await findByTestId("contacts-manual-phone");
+
+    expect(Contacts.requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(Contacts.getContactsAsync).not.toHaveBeenCalled();
   });
 });

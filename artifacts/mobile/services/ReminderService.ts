@@ -36,9 +36,24 @@ export const DEFAULT_EXACT_TIMING_KEY = "@default_exact_timing_v1";
 export const SHOW_DESCRIPTION_KEY = "@show_description_v1";
 export const DICTATION_LANGUAGE_KEY = "@dictation_language_v1";
 export const VIBRATION_KEY = "@vibration_v1";
-export const PERMISSION_ONBOARDING_KEY = "@permission_onboarding_v1";
-export const REGISTRATION_ONBOARDING_KEY = "@registration_onboarding_v1";
+/**
+ * How many times this install has put the system notification dialog in front
+ * of the user. Capped by MAX_NOTIF_PROMPTS: Android only honours the first
+ * two requests anyway, and a third refusal is an answer, not an accident.
+ */
+export const NOTIF_PROMPT_COUNT_KEY = "@notif_prompt_count_v1";
+export const MAX_NOTIF_PROMPTS = 3;
 export const REGISTERED_PHONE_KEY = "@registered_phone_v1";
+/**
+ * How many times this install has offered to register the user's own phone
+ * number. The offer only appears where it is earned - after the user sends a
+ * reminder to somebody else, which is the first moment being reachable back
+ * means anything - and MAX_REGISTER_PROMPTS stops it becoming a fixture.
+ */
+export const REGISTER_PROMPT_COUNT_KEY = "@register_prompt_count_v1";
+export const MAX_REGISTER_PROMPTS = 2;
+export const MIC_LANGUAGE_LINE_KEY = "@mic_language_line_seen_v1";
+export const INVITE_NAME_ASK_KEY = "@invite_name_ask_v1";
 export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 /**
  * Corrupt reminder payloads are copied here rather than discarded. AsyncStorage
@@ -49,9 +64,9 @@ export const SNOOZE_PRESET_KEY = "@snooze_preset_v1";
 export const QUARANTINE_KEY_PREFIX = "@reminders_corrupt_";
 export const QUIET_HOURS_KEY = "@quiet_hours_v1";
 export const USER_NAME_KEY = "@user_name_v1";
-// Separate from PERMISSION_ONBOARDING_KEY on purpose: one flow completing must
-// not mark the other done, or a user who granted permissions before this
-// feature existed would never be asked their name.
+// Its own key on purpose: no other onboarding flow completing may mark the
+// name prompt done, or a user who granted permissions before this feature
+// existed would never be asked their name.
 export const NAME_PROMPT_KEY = "@name_prompt_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 // NOTE: the value must stay "SNOOZE_10" even though snooze is now
@@ -510,35 +525,133 @@ export async function resolveNotificationBody(
   return "Reminder!";
 }
 
-export async function hasCompletedPermissionOnboarding(): Promise<boolean> {
+export async function getNotifPromptCount(): Promise<number> {
   try {
-    return (await AsyncStorage.getItem(PERMISSION_ONBOARDING_KEY)) !== null;
+    const raw = await AsyncStorage.getItem(NOTIF_PROMPT_COUNT_KEY);
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 0;
   } catch {
-    return false;
+    return 0;
   }
 }
 
-export async function markPermissionOnboardingComplete(): Promise<void> {
-  await AsyncStorage.setItem(PERMISSION_ONBOARDING_KEY, "true");
+export async function incrementNotifPromptCount(): Promise<number> {
+  const next = (await getNotifPromptCount()) + 1;
+  try {
+    await AsyncStorage.setItem(NOTIF_PROMPT_COUNT_KEY, String(next));
+  } catch {}
+  return next;
+}
+
+export async function getRegisterPromptCount(): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(REGISTER_PROMPT_COUNT_KEY);
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function incrementRegisterPromptCount(): Promise<number> {
+  const next = (await getRegisterPromptCount()) + 1;
+  try {
+    await AsyncStorage.setItem(REGISTER_PROMPT_COUNT_KEY, String(next));
+  } catch {}
+  return next;
 }
 
 /**
- * First-run registration onboarding (B12) — a separate, later gate from
- * `hasCompletedPermissionOnboarding` above. Runs once per install, shown
- * only after the permission onboarding finishes, and is skippable: the
- * "remind someone else" feature is optional, so this flag is set on either
- * Skip or a successful registration, never re-shown once seen.
+ * The name ask an invited install owes, and who is waiting to read it.
+ *
+ * An invited install meets the app through somebody else's reminder, so the
+ * first-launch name sheet is exactly the wrong thing to put in front of it -
+ * the invitation is the reason they opened the app. The ask moves to the
+ * home screen behind Accept, where it can name the person who will actually
+ * see the answer, which is the only argument for typing a name at all.
+ *
+ * The value is the sender's display name. It is cleared by answering OR by
+ * skipping: this is one ask, not a standing banner.
  */
-export async function hasCompletedRegistrationOnboarding(): Promise<boolean> {
+export async function getPendingInviteNameAsk(): Promise<string | null> {
   try {
-    return (await AsyncStorage.getItem(REGISTRATION_ONBOARDING_KEY)) !== null;
+    return await AsyncStorage.getItem(INVITE_NAME_ASK_KEY);
   } catch {
+    return null;
+  }
+}
+
+export async function setPendingInviteNameAsk(senderName: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(INVITE_NAME_ASK_KEY, senderName);
+  } catch {
+    // The ask is a courtesy. Losing it costs the user nothing.
+  }
+}
+
+export async function clearPendingInviteNameAsk(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(INVITE_NAME_ASK_KEY);
+  } catch {}
+}
+
+/**
+ * Whether to say, on this mic session, which languages the mic takes.
+ *
+ * The app recognises Malayalam as well as English, and nothing on screen has
+ * ever said so - the setting is in Settings, which is the one place a user
+ * with a reminder to dictate is not looking. The first open microphone is
+ * where that sentence costs nothing and answers a question the user is
+ * already holding, so it is said exactly once per install.
+ */
+export async function shouldShowMicLanguageLine(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(MIC_LANGUAGE_LINE_KEY)) === null;
+  } catch {
+    // Unreadable storage must not cost the user their dictation. Staying
+    // silent repeats nothing; showing it again would.
     return false;
   }
 }
 
-export async function markRegistrationOnboardingComplete(): Promise<void> {
-  await AsyncStorage.setItem(REGISTRATION_ONBOARDING_KEY, "true");
+export async function markMicLanguageLineSeen(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(MIC_LANGUAGE_LINE_KEY, "1");
+  } catch {
+    // Worst case the line appears on one more mic tap.
+  }
+}
+
+/**
+ * Whether to offer registration at all.
+ *
+ * Two reasons not to: the number is already registered, so there is nothing
+ * to ask for; or the offer has been made its full number of times and refused,
+ * which is an answer.
+ */
+export async function shouldOfferNumberRegistration(): Promise<boolean> {
+  if (registerPromptShownThisSession) return false;
+  if (await getRegisteredPhone()) return false;
+  return (await getRegisterPromptCount()) < MAX_REGISTER_PROMPTS;
+}
+
+/**
+ * Two surfaces can reach the same offer in one run of the app - a reminder
+ * aimed at somebody else, and the third reminder saved - and two asks in one
+ * sitting read as nagging however well each one is placed on its own. This
+ * flag is deliberately in memory rather than in AsyncStorage: "this session"
+ * ends when the process does, and a persisted flag would silence the offer
+ * for good the first time it was set.
+ */
+let registerPromptShownThisSession = false;
+
+export function markRegisterPromptShown(): void {
+  registerPromptShownThisSession = true;
+}
+
+/** Test seam. The app itself never needs to un-show an offer. */
+export function resetRegisterPromptSession(): void {
+  registerPromptShownThisSession = false;
 }
 
 /**
@@ -679,6 +792,66 @@ export async function setupSnoozeCategory(preset: SnoozePreset): Promise<void> {
 // treat permission as denied and silently skip scheduling.
 let permissionRequestInFlight: Promise<boolean> | null = null;
 
+/**
+ * What the OS currently thinks, with no dialog shown.
+ *
+ * `canAskAgain === false` is the state nothing in this app used to read: the
+ * user has refused permanently, every further request resolves instantly as
+ * denied, and any button wired to a request silently does nothing. Callers
+ * must send that user to system settings instead.
+ */
+export interface NotificationPermissionState {
+  granted: boolean;
+  canAskAgain: boolean;
+}
+
+export async function getNotificationPermissionState(): Promise<NotificationPermissionState> {
+  if (Platform.OS === "web" || !Notifications) {
+    return { granted: false, canAskAgain: false };
+  }
+  try {
+    const res = await Notifications.getPermissionsAsync();
+    return {
+      granted: res?.status === "granted",
+      // Older expo-notifications versions omit the field. Treat a missing
+      // value as "may ask" - a wrongly suppressed dialog is worse than one
+      // extra request the OS will drop on the floor.
+      canAskAgain: res?.canAskAgain !== false,
+    };
+  } catch {
+    return { granted: false, canAskAgain: false };
+  }
+}
+
+/**
+ * The notification ladder. This is the only function a save path should call.
+ *
+ * Rung 1: already granted - nothing to do.
+ * Rung 2: may still ask, and this install has asked fewer than
+ *         MAX_NOTIF_PROMPTS times - show the system dialog and count it.
+ * Rung 3: refused permanently, or the cap is spent - do not ask. The caller
+ *         surfaces a repair path (openAppSettings) instead of a dialog the
+ *         user will never see.
+ */
+export async function ensureNotificationPermission(): Promise<boolean> {
+  const state = await getNotificationPermissionState();
+  if (state.granted) return true;
+  if (!state.canAskAgain) return false;
+  if ((await getNotifPromptCount()) >= MAX_NOTIF_PROMPTS) return false;
+  await incrementNotifPromptCount();
+  return requestNotificationPermissions();
+}
+
+/**
+ * The app's own page in Android/iOS settings - the only way back for a user
+ * who refused permanently.
+ */
+export function openAppSettings(): void {
+  try {
+    Linking.openSettings();
+  } catch {}
+}
+
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (Platform.OS === "web" || !Notifications) return false;
   if (permissionRequestInFlight) return permissionRequestInFlight;
@@ -720,11 +893,18 @@ export async function scheduleNotification(
 ): Promise<string | undefined> {
   if (!Notifications) return undefined;
   try {
-    const granted = await requestNotificationPermissions();
-    if (!granted) return undefined;
+    // Order matters. A reminder whose time has already passed schedules
+    // nothing, so asking for permission first would spend one of the three
+    // prompts on a reminder that cannot ring either way - the same empty ask
+    // that was removed from cold launch. The banner on the home screen is the
+    // route for that user.
     const trigger = new Date(reminder.datetime);
     const now = new Date();
     if (trigger <= now) return undefined;
+    // The ladder, not a raw request: a user who refused permanently must not
+    // be handed a dialog the OS will never show.
+    const granted = await ensureNotificationPermission();
+    if (!granted) return undefined;
     const alarmOn = reminder.alarm !== false;
     const exactOn = reminder.exactTiming !== false;
     const channelId = channelIdForAlarm(alarmOn, await getVibrationEnabled());

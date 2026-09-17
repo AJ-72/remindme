@@ -94,14 +94,20 @@ export default function BindInviteScreen() {
 
       const claimed = await claimPendingInvitations();
       if (cancelled) return;
-      setState({ phase: "success", claimed });
 
       // For exactly one claimed invitation, skip the intermediate list and
       // go straight to invitation-preview - the list only earns its place
       // when there's more than one row to choose from (see task-16 brief).
+      //
+      // The success state is deliberately NOT set on that path. Setting it
+      // first painted "You're all set" for a frame before the navigation,
+      // which put a congratulation in front of the reminder the user tapped
+      // a link to read. The invitation is the payoff; nothing goes before it.
       if (claimed.length === 1) {
         navigateToInvitationPreview(claimed[0]);
+        return;
       }
+      setState({ phase: "success", claimed });
     }
 
     run();
