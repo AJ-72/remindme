@@ -50,6 +50,41 @@ export async function ensureOfflineModelReady(
   }
 }
 
+/**
+ * Resolves whether a locale's speech recognition is ready to use right now,
+ * and if not, what to do about it — the single place that turns
+ * ensureOfflineModelReady's three-way status into a caller-facing decision.
+ *
+ * Both dictation call sites (live mic in QuickAddInput, shared-audio
+ * transcription in SharedTextContext) need the same three-step resolution —
+ * check the model status, decide onDevice, decide what "still downloading"
+ * means for this attempt — and previously did it independently, which let
+ * them silently disagree: one bailed out on "preparing" with a notice, the
+ * other proceeded anyway. This is the shared seam so they can't drift again.
+ *
+ * `"preparing"` always means "do not attempt on-device recognition THIS
+ * time" (onDevice: false) — the caller then decides whether to fall back to
+ * online recognition (live mic — this is the correct choice, since a live
+ * user is waiting) or bail out and let the user retry (shared-audio
+ * transcription — a stale in-flight download for a locale someone dictated
+ * before is not worth guessing at with online recognition on their behalf).
+ * The `shouldBail` field encodes ONLY the "still downloading" case; ready and
+ * unavailable are both meant to proceed (with, respectively, on-device and
+ * online recognition).
+ */
+export async function resolveDictationReadiness(locale: string): Promise<{
+  status: "ready" | "preparing" | "unavailable";
+  onDevice: boolean;
+  shouldBail: boolean;
+}> {
+  const status = await ensureOfflineModelReady(locale);
+  return {
+    status,
+    onDevice: status === "ready",
+    shouldBail: status === "preparing",
+  };
+}
+
 let activeMode: "live" | "file" | null = null;
 let activeSubscriptions: { remove: () => void }[] = [];
 /**

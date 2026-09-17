@@ -201,4 +201,37 @@ describe("SharedTextContext — native share-intent errors", () => {
       true
     );
   });
+
+  it("falls back to the filename, without calling transcribeAudioFile, while the offline model is still downloading", async () => {
+    // Shared-audio transcription and live mic dictation must agree on what
+    // "preparing" means — see resolveDictationReadiness's doc comment. For a
+    // pre-recorded shared file (no user waiting live), the correct call is to
+    // bail rather than guess with online recognition.
+    jest.spyOn(SpeechService, "isFileTranscriptionSupported").mockReturnValue(true);
+    jest.spyOn(SpeechService, "resolveDictationReadiness").mockResolvedValue({
+      status: "preparing",
+      onDevice: false,
+      shouldBail: true,
+    });
+    const transcribeSpy = jest
+      .spyOn(SpeechService, "transcribeAudioFile")
+      .mockResolvedValue({ text: "should not be reached" });
+    (useShareIntent as jest.Mock).mockReturnValue({
+      isReady: true,
+      hasShareIntent: true,
+      shareIntent: {
+        files: [{ fileName: "AUD-0002.opus", mimeType: "audio/ogg", path: "content://media/AUD-0002.opus" }],
+      },
+      resetShareIntent: jest.fn(),
+      error: null,
+    });
+
+    const { findByTestId } = renderConsumer();
+
+    await waitFor(async () => {
+      expect((await findByTestId("shared-text")).props.children).toBe("AUD-0002.opus");
+    });
+    expect((await findByTestId("notice")).props.children).toMatch(/added the file name instead/i);
+    expect(transcribeSpy).not.toHaveBeenCalled();
+  });
 });

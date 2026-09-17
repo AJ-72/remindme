@@ -65,3 +65,6 @@ Thumbs.db
 # artifacts/mobile/google-services.json.example for the shape and CLAUDE.md
 # for setup steps.
 artifacts/mobile/google-services.json
+
+# Supabase CLI local cache
+supabase/.temp/

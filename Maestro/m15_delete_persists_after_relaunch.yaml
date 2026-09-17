@@ -1,0 +1,47 @@
+# M15: Delete persists after relaunch
+# Deletes a reminder from its detail screen and confirms it's gone - then
+# relaunches the app to prove the delete was actually persisted, not just
+# removed from in-memory state.
+#
+# AUTO: fully scriptable
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Delete persistence check task at 9pm"
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      text: "Delete persistence check task"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Delete persistence check task"
+- extendedWaitUntil:
+    visible:
+      id: "delete-button"
+    timeout: 5000
+- tapOn:
+    id: "delete-button"
+- assertVisible: "Delete Reminder"
+- tapOn:
+    id: "confirm-sheet-confirm"
+- waitForAnimationToEnd
+- assertNotVisible: "Delete persistence check task"
+
+# Relaunch (not clearState - kills and restarts against the same storage)
+# to confirm the delete actually persisted rather than only holding in
+# in-memory context state until the process dies.
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+- assertNotVisible: "Delete persistence check task"

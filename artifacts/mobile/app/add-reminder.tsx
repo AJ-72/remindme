@@ -39,27 +39,16 @@ import { sendInvitation } from "@/services/InvitationService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { formatTime12h } from "@/utils/formatDatetime";
-
-type DateTimePickerEvent = { type: string; nativeEvent: object };
-const DateTimePicker: React.ComponentType<any> | null =
-  Platform.OS !== "web"
-    ? require("@react-native-community/datetimepicker").default
-    : null;
+import {
+  DateTimePicker,
+  toDateInput,
+  toTimeInput,
+  type DateTimePickerEvent,
+} from "@/utils/dateTimePicker";
 
 function roundToNext5(d: Date): Date {
   const ms = 1000 * 60 * 5;
   return new Date(Math.ceil((d.getTime() + 60000) / ms) * ms);
-}
-
-function toDateInput(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function toTimeInput(d: Date) {
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 type PickerMode = "date" | "time" | null;

@@ -54,12 +54,12 @@ import StarterExamples from "@/components/StarterExamples";
 import { detectPersonInTitle } from "@/utils/personInTitle";
 import { detectVagueOpener } from "@/utils/vagueTask";
 import { getFontFamily } from "@/utils/getFontFamily";
-
-type DateTimePickerEvent = { type: string; nativeEvent: object };
-const DateTimePicker: React.ComponentType<any> | null =
-  Platform.OS !== "web"
-    ? require("@react-native-community/datetimepicker").default
-    : null;
+import {
+  DateTimePicker,
+  toDateInput,
+  toTimeInput,
+  type DateTimePickerEvent,
+} from "@/utils/dateTimePicker";
 
 type PickerMode = "date" | "time" | null;
 
@@ -72,22 +72,6 @@ function roundToNextHour(d: Date): Date {
     result.setHours(result.getHours() + 1);
   }
   return result;
-}
-
-function roundToNext5(d: Date): Date {
-  const ms = 1000 * 60 * 5;
-  return new Date(Math.ceil((d.getTime() + 60000) / ms) * ms);
-}
-
-function toDateInput(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function toTimeInput(d: Date): string {
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 function formatDatePill(d: Date): string {
