@@ -4,6 +4,7 @@ import { StyleSheet, Pressable, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { SILENCE_STOP_MS } from "@/utils/dictationTimer";
 import { WAVEFORM_BARS, formatElapsed, waveformHeights } from "@/utils/micLevel";
+import type { DictationLanguage } from "@/services/ReminderService";
 import { getFontFamily } from "@/utils/getFontFamily";
 
 /** How often the clock and the silence bar redraw. */
@@ -11,6 +12,21 @@ const TICK_MS = 100;
 
 /** Past this much of the pause, the surface says it is closing. */
 const STOPPING_AT = 0.5;
+
+/**
+ * Each language written in its own script. A user who reads only Malayalam
+ * gains nothing from the word "Malayalam".
+ */
+const LANGUAGE_NAMES: Record<DictationLanguage, string> = {
+  "en-US": "English",
+  "ml-IN": "മലയാളം",
+};
+
+/** With two languages, "the other one" is the whole of the switch. */
+const OTHER_LANGUAGE: Record<DictationLanguage, DictationLanguage> = {
+  "en-US": "ml-IN",
+  "ml-IN": "en-US",
+};
 
 /** Full height of a waveform bar, in points. */
 const WAVE_HEIGHT = 20;
@@ -30,6 +46,10 @@ interface Props {
   silenceMs?: number;
   /** Say once per install which languages the mic takes. */
   showLanguageLine?: boolean;
+  /** The language the recognizer is running in right now. */
+  language?: DictationLanguage;
+  /** Change that language and start the session again. */
+  onSwitchLanguage?: (lang: DictationLanguage) => void;
   /** End the session and KEEP what was heard. */
   onDone: () => void;
   /** End the session and throw away what was heard. */
@@ -65,6 +85,8 @@ export default function ListeningSurface({
   lastHeardAt = null,
   silenceMs = SILENCE_STOP_MS,
   showLanguageLine = false,
+  language,
+  onSwitchLanguage,
   onDone,
   onCancel,
   testIDPrefix = "listening",
@@ -123,6 +145,21 @@ export default function ListeningSurface({
     },
     silenceFill: { height: "100%", borderRadius: 2, backgroundColor: colors.primary },
     languageLine: { fontSize: 12, color: colors.mutedForeground },
+    languageRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 6,
+    },
+    languageName: { fontSize: 12, color: colors.foreground },
+    switchBtn: {
+      minHeight: 28,
+      justifyContent: "center",
+      paddingHorizontal: 10,
+      borderRadius: 999,
+      backgroundColor: colors.muted,
+    },
+    switchText: { fontSize: 12, color: colors.foreground },
     actionRow: { flexDirection: "row", justifyContent: "flex-end", gap: 4 },
     action: {
       fontSize: 13,
@@ -185,9 +222,50 @@ export default function ListeningSurface({
         </View>
       )}
 
+      {/* The language, at the one moment the user can still act on it. A
+          mic that is listening in the wrong language produces nonsense, and
+          before this the only cure was to stop, leave the screen, find
+          Settings, and start over. */}
+      {language !== undefined && onSwitchLanguage !== undefined && (
+        <View style={styles.languageRow} testID={`${testIDPrefix}-language-row`}>
+          <Text style={styles.languageLine}>Hearing</Text>
+          <Text
+            style={[
+              styles.languageName,
+              { fontFamily: getFontFamily(LANGUAGE_NAMES[language], "600SemiBold") },
+            ]}
+            testID={`${testIDPrefix}-language-name`}
+          >
+            {LANGUAGE_NAMES[language]}
+          </Text>
+          <Pressable
+            style={styles.switchBtn}
+            onPress={() => onSwitchLanguage(OTHER_LANGUAGE[language])}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Switch dictation to ${LANGUAGE_NAMES[OTHER_LANGUAGE[language]]}`}
+            testID={`${testIDPrefix}-language-switch`}
+          >
+            <Text
+              style={[
+                styles.switchText,
+                {
+                  fontFamily: getFontFamily(
+                    LANGUAGE_NAMES[OTHER_LANGUAGE[language]],
+                    "600SemiBold"
+                  ),
+                },
+              ]}
+            >
+              {`Switch to ${LANGUAGE_NAMES[OTHER_LANGUAGE[language]]}`}
+            </Text>
+          </Pressable>
+        </View>
+      )}
+
       {showLanguageLine && (
         <Text style={styles.languageLine} testID={`${testIDPrefix}-language`}>
-          Speak your reminder. English or Malayalam — change it in Settings.
+          Speak your reminder. Tap the language above to change it.
         </Text>
       )}
 

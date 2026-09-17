@@ -33,11 +33,13 @@ import { checkReachability, isReachabilityStale } from "@/services/RecipientLook
 import { sendInvitation } from "@/services/InvitationService";
 import type { PickableContact } from "@/services/ContactsService";
 import {
+  getDictationLanguage,
   incrementRegisterPromptCount,
   markMicLanguageLineSeen,
   markRegisterPromptShown,
   shouldOfferNumberRegistration,
   shouldShowMicLanguageLine,
+  type DictationLanguage,
   type ReminderRecipient,
 } from "@/services/ReminderService";
 import { formatTime12h } from "@/utils/formatDatetime";
@@ -48,6 +50,7 @@ import { contentScript } from "@/utils/analyticsProps";
 import type { ParsedAmbiguity } from "@/utils/malayalamDateParser";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
 import { createDictationTimer, type DictationTimer } from "@/utils/dictationTimer";
+import DictationLanguageChooser from "@/components/DictationLanguageChooser";
 import ListeningSurface from "@/components/ListeningSurface";
 import RegisterNumberNudge from "@/components/RegisterNumberNudge";
 import StarterExamples from "@/components/StarterExamples";
@@ -116,6 +119,7 @@ export default function QuickAddInput({ onSaved }: Props) {
     attachInvitationId,
     defaultAlarmEnabled,
     dictationLanguage,
+    setDictationLanguage,
     quietHours,
     reminders,
   } =
@@ -522,7 +526,7 @@ export default function QuickAddInput({ onSaved }: Props) {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
   };
 
-  const startSpeakMode = async () => {
+  const startSpeakMode = async (localeOverride?: DictationLanguage) => {
     setMicNotice(null);
     const { granted, canAskAgain } = await getMicPermissionStatus();
     if (!granted) {
@@ -535,7 +539,13 @@ export default function QuickAddInput({ onSaved }: Props) {
       if (!nowGranted) return;
     }
 
-    const locale = dictationLanguage;
+    // Read fresh, never from the render-time `dictationLanguage`: a tap on the
+    // language pill followed straight away by a tap on the mic leaves this
+    // closure holding the language the user just rejected, and the mic then
+    // listens in it. `SharedTextContext` reads it the same way, for the same
+    // reason. The override short-circuits the read for the mid-session switch,
+    // which already knows the answer.
+    const locale = localeOverride ?? (await getDictationLanguage());
     const modelStatus = await ensureOfflineModelReady(locale);
     if (modelStatus === "preparing") {
       setMicNotice("Preparing voice recognition — try again in a moment");
@@ -642,6 +652,28 @@ export default function QuickAddInput({ onSaved }: Props) {
       abortListening();
     };
   }, []);
+
+  /**
+   * Change the dictation language, including while the mic is open.
+   *
+   * A user who only finds out the language is wrong once they hear their own
+   * words come back as nonsense needs the fix in front of them, not in
+   * Settings. Switching mid-session throws the partial transcript away on
+   * purpose: it was recognised against the wrong language, so every word of it
+   * is wrong, and keeping it would leave the user editing rubbish.
+   */
+  const handleDictationLanguageChange = async (lang: DictationLanguage) => {
+    if (lang === dictationLanguage) return;
+    const wasLive = micSourceRef.current === "live";
+    if (wasLive) {
+      abortListening();
+      setInput(dictationBaselineRef.current);
+      settleAfterListening();
+    }
+    await setDictationLanguage(lang);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (wasLive) await startSpeakMode(lang);
+  };
 
   const handleMicPress = () => {
     if (!listening) {
@@ -1131,8 +1163,21 @@ export default function QuickAddInput({ onSaved }: Props) {
             startedAt={micStartedAt ?? undefined}
             lastHeardAt={micLastHeardAt}
             showLanguageLine={micLanguageLine}
+            language={dictationLanguage}
+            onSwitchLanguage={handleDictationLanguageChange}
             onDone={() => stopSpeakMode("user")}
             onCancel={cancelSpeakMode}
+          />
+        )}
+
+        {/* Says which language the mic is listening for, before the user
+            speaks rather than after. Hidden while the listening card is up:
+            that card carries its own switch, and two controls for one setting
+            on one screen is a question, not an answer. */}
+        {!liveListening && (
+          <DictationLanguageChooser
+            value={dictationLanguage}
+            onChange={handleDictationLanguageChange}
           />
         )}
 
