@@ -1216,3 +1216,18 @@ entries appear in recents (launchMode is wrong).
 **Note.** The app never replaces the source text — it only reads it. So the
 calling app always gets `RESULT_CANCELED`, and an editable source field must
 stay unchanged.
+
+## D82 — One tap clears the quick-add box · `PENDING`
+
+**Do.** On the home screen, type a reminder with a time in it (for example
+"tomorrow at 5pm meeting"). Open the notes field and type a note. Tap the
+X button at the right of the quick-add field.
+
+**Pass.** The X appears only after the first character. One tap empties the
+title field, empties the notes field, and removes the time pill. The
+keyboard stays available and the field takes new text immediately. A chosen
+recipient chip stays in place.
+
+**Fails if.** The X sits under the keyboard or off the right edge, the X
+overlaps the text of a long multi-line reminder, the time pill stays on
+screen after the tap, or the recipient chip disappears.

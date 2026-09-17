@@ -425,6 +425,23 @@ export default function QuickAddInput({ onSaved }: Props) {
     }
   };
 
+  // Clears everything the user typed in this box, plus the time that was read
+  // out of it. The recipient chip is deliberately left alone: it has its own
+  // remove button, and it is not text the user typed here.
+  const handleClearInput = () => {
+    setInput("");
+    setParsedTitle("");
+    setParsedDate(null);
+    setAmbiguity(null);
+    setAmbiguityPrompt(null);
+    setDescription("");
+    setDismissedVagueText(null);
+    setInvitationError(null);
+    setShowNoTimeSheet(false);
+    setPickerMode(null);
+    setSuggestedTime(roundToNextHour(new Date()));
+  };
+
   const handleChangePress = () => {
     if (Platform.OS === "android") {
       setPickerMode("date");
@@ -747,7 +764,16 @@ export default function QuickAddInput({ onSaved }: Props) {
       marginTop: 4,
       marginLeft: 4,
     },
+    inputRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8,
+    },
+    clearButton: {
+      paddingTop: 1,
+    },
     textInput: {
+      flex: 1,
       fontSize: 15,
       lineHeight: 20,
       color: colors.foreground,
@@ -1023,6 +1049,7 @@ export default function QuickAddInput({ onSaved }: Props) {
   return (
     <View style={styles.wrapper}>
       <View style={styles.bar}>
+        <View style={styles.inputRow}>
         <TextInput
           ref={quickAddInputTourRef}
           style={[styles.textInput, { fontFamily: getFontFamily(input, "400Regular") }]}
@@ -1042,6 +1069,20 @@ export default function QuickAddInput({ onSaved }: Props) {
           editable={!saving}
           testID="quick-add-input"
         />
+        {input.length > 0 || description.length > 0 ? (
+          <Pressable
+            onPress={handleClearInput}
+            hitSlop={10}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Clear input"
+            testID="quick-add-clear"
+            style={styles.clearButton}
+          >
+            <Feather name="x-circle" size={18} color={colors.mutedForeground} />
+          </Pressable>
+        ) : null}
+        </View>
         {recipient && (
           <>
             <View style={styles.recipientChip} testID="quick-add-recipient-chip">
