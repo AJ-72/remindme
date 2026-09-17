@@ -14,6 +14,11 @@ import {
   transcribeAudioFile,
 } from "@/services/SpeechService";
 import { getDictationLanguage } from "@/services/ReminderService";
+import {
+  addProcessTextListener,
+  getInitialProcessText,
+  isProcessTextSupported,
+} from "@/modules/process-text";
 
 interface SharedTextContextType {
   sharedText: string;
@@ -194,6 +199,33 @@ function NativeShareIntentCapture({
   return null;
 }
 
+/**
+ * Feeds Android ACTION_PROCESS_TEXT payloads (text the user selected in another
+ * app and sent here from the floating selection toolbar) into `sharedText`, the
+ * same channel the share sheet uses — so QuickAddInput fills in either way.
+ *
+ * Two delivery paths, both needed:
+ * - cold start: the text rides on the launch intent, read once on mount.
+ * - app already running: MainActivity is singleTask, so the text arrives
+ *   through onNewIntent and reaches us as an event.
+ */
+function ProcessTextCapture({ onText }: { onText: (text: string) => void }) {
+  useEffect(() => {
+    const initial = getInitialProcessText();
+    if (initial) {
+      logDebug(`process-text launch intent: ${initial}`);
+      onText(initial);
+    }
+    const subscription = addProcessTextListener((text) => {
+      logDebug(`process-text new intent: ${text}`);
+      onText(text);
+    });
+    return () => subscription.remove();
+  }, [onText]);
+
+  return null;
+}
+
 export function SharedTextProvider({
   children,
 }: {
@@ -235,6 +267,9 @@ export function SharedTextProvider({
         sharedAudioDebugInfo,
       }}
     >
+      {isProcessTextSupported() ? (
+        <ProcessTextCapture onText={handleText} />
+      ) : null}
       {Platform.OS !== "web" && ShareIntent?.useShareIntent ? (
         <NativeShareIntentCapture
           onText={handleText}
