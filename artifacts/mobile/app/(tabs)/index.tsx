@@ -15,6 +15,7 @@ import ConfirmSheet from "@/components/ConfirmSheet";
 import QuickAddInput from "@/components/QuickAddInput";
 import ReminderCard from "@/components/ReminderCard";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
+import { tabBarContentInset } from "@/constants/tabBar";
 import { useReminders, type Reminder } from "@/contexts/RemindersContext";
 import {
   clearPendingInviteNameAsk,
@@ -176,7 +177,9 @@ export default function HomeScreen() {
     scrollContent: {
       paddingHorizontal: 20,
       paddingTop: 4,
-      paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 20,
+      // The tab bar floats over this list, so the padding must clear the bar
+      // itself, not just the gesture area under it.
+      paddingBottom: tabBarContentInset(insets.bottom),
     },
     sectionLabel: {
       fontSize: 13,
@@ -436,6 +439,7 @@ export default function HomeScreen() {
       <QuickAddInput />
 
       <KeyboardAwareScrollViewCompat
+        testID="home-scroll"
         contentContainerStyle={[styles.scrollContent, !hasAny && { flexGrow: 1 }]}
         refreshControl={
           <RefreshControl

@@ -17,6 +17,7 @@ import {
   type Reminder,
 } from "@/services/ReminderService";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
+import { TAB_BAR_HEIGHT } from "@/constants/tabBar";
 
 jest.mock("expo-haptics");
 jest.mock("expo-router", () => ({
@@ -653,5 +654,21 @@ describe("HomeScreen — the name ask an invited install gets instead", () => {
     expect(StyleSheet.flatten(line.props.style).fontFamily).toBe(
       "NotoSansMalayalam_400Regular"
     );
+  });
+});
+
+// The tab bar is absolutely positioned, so it paints over this list. Without
+// enough bottom padding the last card, or the number offer under it, stays
+// behind the tabs - which is what a user reported on a real device.
+describe("clearance under the tab bar", () => {
+  it("pads the list past the tab bar, not just the gesture area", async () => {
+    const { findByTestId } = renderScreen();
+
+    const scroll = await findByTestId("home-scroll");
+    const padding = StyleSheet.flatten(
+      scroll.props.contentContainerStyle
+    ).paddingBottom;
+
+    expect(padding).toBeGreaterThan(TAB_BAR_HEIGHT);
   });
 });

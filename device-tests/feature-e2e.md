@@ -1091,3 +1091,26 @@ letters, not boxes.
 
 **Fails if.** The panel never appears, returns after being skipped or answered,
 names the wrong person, or shows boxes for a Malayalam name.
+
+---
+
+## D77 — Nothing hides behind the tab bar — `PENDING`
+
+**Why hardware only.** Jest runs in jsdom with no viewport, so it cannot see
+one view painted over another. The tab bar sits on `position: "absolute"`,
+which only a real screen shows.
+
+**Setup.** A device with a gesture bar and a device with hardware keys, if both
+are available. Enough reminders to make the home list scroll.
+
+**Steps.**
+1. Open Home and scroll to the bottom of the list.
+2. Read the last card, and the **Remind someone else?** panel under it.
+3. Open Settings and scroll to the bottom.
+4. Read the last row and any text under it.
+5. Open About and read the version line.
+
+**Pass.** On all three tabs the last item is fully readable above the tab bar,
+with a clear gap. No text or button is cut off, and no item needs an extra pull
+to come into view. Reported as a defect on 2026-09-17: the **Remind someone
+else?** panel was cut off on Home.

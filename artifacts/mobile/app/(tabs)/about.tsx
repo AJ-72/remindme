@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import React from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { tabBarContentInset } from "@/constants/tabBar";
 import { useColors } from "@/hooks/useColors";
 import appConfig from "@/app.json";
 
@@ -30,6 +31,10 @@ export default function AboutScreen() {
       alignItems: "center",
       paddingTop: 60,
       paddingHorizontal: 24,
+      // The tab bar paints over this screen too. The content is short today,
+      // so nothing is hidden, but anything added below the version line would
+      // be - keep the clearance here rather than rediscovering it later.
+      paddingBottom: tabBarContentInset(insets.bottom, 0),
     },
     icon: {
       width: 64,
