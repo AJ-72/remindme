@@ -28,8 +28,11 @@ import NotificationResponseHandler from "@/components/NotificationResponseHandle
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SharedTextProvider } from "@/contexts/SharedTextContext";
+import { TourProvider, useTour } from "@/contexts/TourContext";
+import TourOverlay from "@/components/TourOverlay";
 import {
   checkExactAlarmPermission,
+  hasSeenFeatureTour,
 } from "@/services/ReminderService";
 import { registerRescheduleTask } from "@/tasks/rescheduleTask";
 import { registerNotificationResponseTask } from "@/tasks/notificationResponseTask";
@@ -76,6 +79,27 @@ function RootLayoutNav() {
   );
 }
 
+/**
+ * Bridges NameOnboarding's onSettled callback into TourContext.start().
+ * A separate component because useTour() must be called under TourProvider,
+ * which sits inside RemindersProvider alongside NameOnboarding itself.
+ */
+function FeatureTourAutoStart({ trigger }: { trigger: number }) {
+  const tour = useTour();
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (trigger === 0 || started.current) return;
+    started.current = true;
+    (async () => {
+      const seen = await hasSeenFeatureTour();
+      if (!seen) tour.start();
+    })();
+  }, [trigger, tour]);
+
+  return null;
+}
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
@@ -90,6 +114,10 @@ export default function RootLayout() {
 
   const [showAlarmBanner, setShowAlarmBanner] = useState(false);
   const alarmChecked = useRef(false);
+  // A counter, not a boolean: NameOnboarding's effect can legitimately fire
+  // onSettled more than once across remounts, and FeatureTourAutoStart only
+  // needs to know "settled happened", not how many times.
+  const [nameSettledTick, setNameSettledTick] = useState(0);
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
@@ -155,18 +183,25 @@ export default function RootLayout() {
             <GestureHandlerRootView>
               <KeyboardProvider>
                 <RemindersProvider>
-                  <NotificationResponseHandler />
-                  <NameOnboarding enabled />
-                  <SharedTextProvider>
-                    <View style={{ flex: 1 }}>
-                      {showAlarmBanner && (
-                        <ExactAlarmBanner
-                          onDismiss={() => setShowAlarmBanner(false)}
-                        />
-                      )}
-                      <RootLayoutNav />
-                    </View>
-                  </SharedTextProvider>
+                  <TourProvider>
+                    <NotificationResponseHandler />
+                    <NameOnboarding
+                      enabled
+                      onSettled={() => setNameSettledTick((t) => t + 1)}
+                    />
+                    <FeatureTourAutoStart trigger={nameSettledTick} />
+                    <SharedTextProvider>
+                      <View style={{ flex: 1 }}>
+                        {showAlarmBanner && (
+                          <ExactAlarmBanner
+                            onDismiss={() => setShowAlarmBanner(false)}
+                          />
+                        )}
+                        <RootLayoutNav />
+                      </View>
+                    </SharedTextProvider>
+                    <TourOverlay />
+                  </TourProvider>
                 </RemindersProvider>
               </KeyboardProvider>
             </GestureHandlerRootView>

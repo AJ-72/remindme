@@ -34,6 +34,7 @@ import NameSheet from "@/components/NameSheet";
 import InviteNameAsk from "@/components/InviteNameAsk";
 import NotificationNudge from "@/components/NotificationNudge";
 import RegisterNumberNudge from "@/components/RegisterNumberNudge";
+import { useTourTarget } from "@/contexts/TourContext";
 
 // Distinguishes the two confirm sheets that share pendingDelete* state below:
 // deleting one reminder vs. clearing every completed one at once.
@@ -55,6 +56,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [nameSheetVisible, setNameSheetVisible] = useState(false);
+  const insightsTourRef = useTourTarget("header-insights-button");
 
   const { upcomingGroups, upcomingCount, sending, completed } = useMemo(() => {
     const byDateAsc = (a: Reminder, b: Reminder) =>
@@ -403,6 +405,7 @@ export default function HomeScreen() {
             </View>
           </View>
           <Pressable
+            ref={insightsTourRef}
             style={styles.headerInsightsBtn}
             onPress={() => router.push("/insights")}
             accessibilityRole="button"

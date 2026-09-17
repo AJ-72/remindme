@@ -16,6 +16,16 @@ interface Props {
    * by the tap that dismisses it.
    */
   enabled: boolean;
+  /**
+   * Fires once this component has decided the name prompt is done with -
+   * either it was shown and closed (answered or skipped), or it decided not
+   * to show at all because it was already seen. Deliberately NOT fired on a
+   * bind-invite launch, which skips the name prompt for its own reason (see
+   * below) but should not have the feature tour barge in on it either. The
+   * feature tour hooks into this so it never stacks a second first-launch
+   * sheet on top of this one.
+   */
+  onSettled?: () => void;
 }
 
 /**
@@ -34,7 +44,7 @@ interface Props {
  * set by the bind screen, because that screen mounts alongside this one and
  * a flag would be a race this sheet loses silently.
  */
-export default function NameOnboarding({ enabled }: Props) {
+export default function NameOnboarding({ enabled, onSettled }: Props) {
   const { setUserName } = useReminders();
   const [visible, setVisible] = useState(false);
 
@@ -51,16 +61,23 @@ export default function NameOnboarding({ enabled }: Props) {
       if (cancelled) return;
       if (launchUrl?.includes("bind-invite")) return;
       const seen = await hasSeenNamePrompt();
-      if (!cancelled && !seen) setVisible(true);
+      if (cancelled) return;
+      if (seen) {
+        onSettled?.();
+        return;
+      }
+      setVisible(true);
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
   const close = async () => {
     setVisible(false);
     await markNamePromptSeen();
+    onSettled?.();
   };
 
   return (
