@@ -305,6 +305,42 @@ describe("QuickAddInput", () => {
     expect(stored[0].title).toBe("മീറ്റിംഗ്");
   });
 
+  it("shows no clear button while the input is empty", async () => {
+    const { queryByTestId, findByTestId } = renderComponent();
+    await findByTestId("quick-add-input");
+    expect(queryByTestId("quick-add-clear")).toBeNull();
+  });
+
+  it("clears the typed text and the parsed time when the clear button is pressed", async () => {
+    const { findByTestId, queryByText, queryByTestId } = renderComponent();
+
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.changeText(titleInput, "tomorrow at 5pm meeting");
+    expect(await findByTestId("quick-add-clear")).toBeTruthy();
+    await waitFor(() => expect(queryByText("Tomorrow")).toBeTruthy());
+
+    fireEvent.press(await findByTestId("quick-add-clear"));
+
+    await waitFor(() => expect(queryByText("Tomorrow")).toBeNull());
+    expect(titleInput.props.value).toBe("");
+    expect(queryByTestId("quick-add-clear")).toBeNull();
+  });
+
+  it("clears the notes text too", async () => {
+    const { findByTestId } = renderComponent();
+
+    const titleInput = await findByTestId("quick-add-input");
+    fireEvent.changeText(titleInput, "buy milk");
+    fireEvent.press(await findByTestId("quick-add-notes-toggle"));
+    const notesInput = await findByTestId("quick-add-notes-input");
+    fireEvent.changeText(notesInput, "two litres");
+
+    fireEvent.press(await findByTestId("quick-add-clear"));
+
+    await waitFor(() => expect(titleInput.props.value).toBe(""));
+    expect(notesInput.props.value).toBe("");
+  });
+
   it("renders the notes input with the Malayalam font when notes text is Malayalam", async () => {
     const { findByTestId } = renderComponent();
 
