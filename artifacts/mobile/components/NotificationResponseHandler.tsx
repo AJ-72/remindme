@@ -17,6 +17,8 @@ import {
   markResponseHandled,
 } from "@/services/handledResponses";
 import { handleNotificationResponse } from "@/services/notificationResponseHandler";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 import { checkForInvitations, resolveSenderNames } from "@/services/InvitationService";
 import { navigateToInvitationPreview, navigateToPendingList } from "@/hooks/useInvitationCheck";
 import { collapseInvitationNotifications } from "@/services/invitationNotificationGrouping";
@@ -29,6 +31,28 @@ try {
   Notifications = require("expo-notifications");
 } catch {
   Notifications = null;
+}
+
+/**
+ * Reports that a notification was acted on, and how.
+ *
+ * This is the only place that fact exists. A notification that fires and is
+ * swiped away leaves no trace in the reminder record (see CLAUDE.md,
+ * "Adherence is derived, not logged"), so without this event there is no way
+ * to tell "the alert never arrived" from "the alert arrived and was ignored" -
+ * two problems with opposite fixes.
+ *
+ * The action identifier is a constant from this app's own code, never user
+ * text, so it is safe to send as-is.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function trackResponse(response: any, launch: "cold_start" | "foreground"): void {
+  try {
+    track(EVENTS.NOTIFICATION_OPENED, {
+      launch,
+      action: String(response?.actionIdentifier ?? "unknown"),
+    });
+  } catch {}
 }
 
 export default function NotificationResponseHandler() {
@@ -100,6 +124,7 @@ export default function NotificationResponseHandler() {
     Notifications.getLastNotificationResponseAsync()
       .then(async (response: any) => {
         if (!response) return;
+        trackResponse(response, "cold_start");
         await handleNotificationResponse(response, deps);
         try {
           // clearLastNotificationResponseAsync is the deprecated spelling;
@@ -116,6 +141,7 @@ export default function NotificationResponseHandler() {
     try {
       subscription = Notifications.addNotificationResponseReceivedListener(
         (response: any) => {
+          trackResponse(response, "foreground");
           handleNotificationResponse(response, deps);
         }
       );

@@ -10,6 +10,8 @@ import {
   claimPendingInvitations,
   type ClaimedInvitation,
 } from "@/services/InvitationService";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 import { registerDeviceForPush } from "@/services/DeviceRegistrationService";
 
 /**
@@ -81,6 +83,12 @@ export default function BindInviteScreen() {
       if (cancelled) return;
 
       if (!result.ok) {
+        track(EVENTS.NUMBER_REGISTERED, {
+          method: "invite_link",
+          ok: false,
+          error: String(result.error),
+          claimed: 0,
+        });
         setState({ phase: "error", error: result.error });
         return;
       }
@@ -93,6 +101,12 @@ export default function BindInviteScreen() {
       registerDeviceForPush();
 
       const claimed = await claimPendingInvitations();
+      track(EVENTS.NUMBER_REGISTERED, {
+        method: "invite_link",
+        ok: true,
+        error: null,
+        claimed: claimed.length,
+      });
       if (cancelled) return;
 
       // For exactly one claimed invitation, skip the intermediate list and

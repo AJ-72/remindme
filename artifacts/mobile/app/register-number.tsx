@@ -23,6 +23,8 @@ import {
   syncDisplayName,
   type ClaimedInvitation,
 } from "@/services/InvitationService";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 import {
   clearRegisteredPhone,
   getRegisteredPhone,
@@ -153,6 +155,12 @@ export default function RegisterNumberScreen() {
     setState({ phase: "submitting" });
     const result = await selfRegister(e164);
     if (!result.ok) {
+      track(EVENTS.NUMBER_REGISTERED, {
+        method: "self_register",
+        ok: false,
+        error: String(result.error),
+        claimed: 0,
+      });
       setState({ phase: "error", error: result.error });
       return;
     }
@@ -172,6 +180,17 @@ export default function RegisterNumberScreen() {
     registerDeviceForPush();
 
     const claimed = await claimPendingInvitations();
+    // `claimed` is the number that makes this event worth having: it is how
+    // many reminders somebody had already been sent and could not receive
+    // until this moment. A stranded invitation is the exact bug that was
+    // found live-testing on two devices (see CLAUDE.md), so it is measured
+    // now rather than rediscovered.
+    track(EVENTS.NUMBER_REGISTERED, {
+      method: "self_register",
+      ok: true,
+      error: null,
+      claimed: claimed.length,
+    });
     setState({ phase: "success", claimed });
 
     // For exactly one claimed invitation, skip the intermediate list and go

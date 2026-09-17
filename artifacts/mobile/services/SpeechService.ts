@@ -3,6 +3,8 @@ import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { File, Paths } from "expo-file-system";
 import { logDebug } from "@/services/DebugLogService";
 import { normaliseMicLevel } from "@/utils/micLevel";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 
 export async function getMicPermissionStatus(): Promise<{
   granted: boolean;
@@ -80,6 +82,15 @@ export interface LiveSessionHooks {
   onVolume?: (level: number) => void;
 }
 
+/**
+ * Dictation telemetry. Reported here rather than at the call sites because
+ * both of them (QuickAddInput's mic, and a shared audio payload) route
+ * through this module, and the question - does voice entry actually work for
+ * people, or do they give up on it - is meaningless split in two.
+ *
+ * Only the locale and whether a transcript came back are ever sent. The words
+ * themselves never leave the device through this path.
+ */
 export function startListening(
   baseline: string,
   locale: string,
@@ -91,6 +102,8 @@ export function startListening(
 ): { busy: boolean } {
   if (activeMode !== null) return { busy: true };
   activeMode = "live";
+  track(EVENTS.DICTATION_STARTED, { locale, on_device: onDevice });
+  let heardAnything = false;
 
   // With `continuous: true` the recognizer does not hand back one growing
   // transcript. It closes a segment at each pause, emits it with
@@ -103,6 +116,7 @@ export function startListening(
   let pending = "";
   const join = (...parts: string[]) => parts.filter((p) => p !== "").join(" ").trim();
   const commit = (segment: string) => {
+    if (segment.trim() !== "") heardAnything = true;
     committed = join(committed, segment);
     pending = "";
     hooks?.onInterim?.("");
@@ -125,10 +139,19 @@ export function startListening(
   });
   const endSub = ExpoSpeechRecognitionModule.addListener("end", () => {
     clearActiveSession();
+    // A session that ends having heard nothing is the failure users actually
+    // hit - no error is raised, the mic just closes and the field is empty -
+    // and it is invisible without being counted separately here.
+    track(EVENTS.DICTATION_COMPLETED, { locale, got_text: heardAnything });
     onEnd();
   });
   const errorSub = ExpoSpeechRecognitionModule.addListener("error", (event: any) => {
     clearActiveSession();
+    // event.code is the recognizer's own enum, not user speech.
+    track(EVENTS.DICTATION_FAILED, {
+      locale,
+      code: String(event?.error ?? event?.code ?? "unknown"),
+    });
     onError(event?.message ?? "Speech recognition error");
   });
   activeSubscriptions = [resultSub, endSub, errorSub];

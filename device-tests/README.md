@@ -19,7 +19,7 @@ ships it.**
 | [notifications.md](notifications.md) | Notification actions, channels, dedupe | D2, D3, D4, D15, D16 |
 | [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9, D10, D11, D12, D13, D40, D41, D42, D43, D45, D47, D48, D49, D50, D51, D52, D53, D54, D55, D56, D57, D58, D59, D60, D61, D62, D63, D64, D65, D66, D67, D68, D69, D70, D71, D72, D73, D74, D75, D76, D77, D78, D79 |
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14 |
-| [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete | D17, D18, D21, D23 |
+| [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete, telemetry privacy | D17, D18, D21, D23, D79, D80, D81 |
 | [malayalam-parsing.md](malayalam-parsing.md) | On-device Malayalam input/parsing (numerals, ambiguous readings, AM/PM) | D24, + 2 unnumbered checklists |
 | [remind-others.md](remind-others.md) | M4 Tier 2, app-to-app delivery — all `BLOCKED` on a backend that does not exist yet, except D38 (local-only) | D27-D39, D44, D46 |
 

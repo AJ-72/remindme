@@ -7,6 +7,8 @@ import React, {
   useState,
 } from "react";
 import { Platform } from "react-native";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 import { logDebug } from "@/services/DebugLogService";
 import {
   ensureOfflineModelReady,
@@ -115,6 +117,7 @@ function NativeShareIntentCapture({
 
     if (audioFile && !handledRef.current) {
       handledRef.current = true;
+      track(EVENTS.SHARE_INTENT_RECEIVED, { kind: "audio" });
       logDebug(`audio file detected: ${safeStringify(audioFile)}`);
       onTranscribingChange(true);
       (async () => {
@@ -172,6 +175,9 @@ function NativeShareIntentCapture({
 
     if (text && !handledRef.current) {
       handledRef.current = true;
+      track(EVENTS.SHARE_INTENT_RECEIVED, {
+        kind: shareIntent?.webUrl ? "url" : "text",
+      });
       logDebug(`text/webUrl share detected: ${text}`);
       onText(text.trim());
       resetShareIntent();

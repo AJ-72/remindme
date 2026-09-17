@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -17,6 +17,8 @@ import {
   WEEKDAY_LABELS,
 } from "@/utils/adherenceCopy";
 import { computeAdherenceStats } from "@/utils/adherenceStats";
+import { EVENTS } from "@/constants/analytics";
+import { track, trackScreen } from "@/services/AnalyticsService";
 
 /**
  * "How you're doing" -- the one place the app reports the user's own
@@ -37,6 +39,21 @@ export default function InsightsScreen() {
   // Recomputed only when the reminder list actually changes: the whole list is
   // walked here, and the home screen re-renders on every tick of its clock.
   const stats = useMemo(() => computeAdherenceStats(reminders), [reminders]);
+
+  // Whether this screen is ever opened decides whether it is worth keeping.
+  // `has_rate` matters as much as the view itself: a user who opens it and
+  // finds every figure blanked for want of data has had a wasted trip, and
+  // that is a copy-and-thresholds problem, not a demand problem.
+  useEffect(() => {
+    trackScreen("insights");
+    track(EVENTS.INSIGHTS_VIEWED, {
+      reminders: reminders.length,
+      has_rate: stats.completionRate !== null,
+    });
+    // Once per visit, deliberately: re-firing whenever the stats recompute
+    // would make one visit look like several.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const blocker = hourAdviceBlocker(stats);
   const slip = formatSlip(stats.medianSlipMinutes);

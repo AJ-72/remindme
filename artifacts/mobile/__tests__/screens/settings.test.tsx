@@ -17,6 +17,10 @@ import {
   STORAGE_KEY,
   USER_NAME_KEY,
 } from "@/services/ReminderService";
+import {
+  TELEMETRY_ENABLED_KEY,
+  __resetTelemetryConsentCache,
+} from "@/services/telemetryConsent";
 import darkColors from "@/constants/colors";
 import { ThemeProvider, THEME_PREFERENCE_KEY } from "@/contexts/ThemeContext";
 import { TourProvider } from "@/contexts/TourContext";
@@ -49,6 +53,9 @@ function renderScreen() {
 beforeEach(async () => {
   jest.clearAllMocks();
   await (AsyncStorage as any).clear();
+  // The consent cache is module state, so it outlives the cleared storage and
+  // would carry one test's opt-out into the next.
+  __resetTelemetryConsentCache();
 });
 
 // The Settings toggle is a DEFAULT for new reminders — nothing in the
@@ -348,6 +355,44 @@ describe("SettingsScreen", () => {
 
       expect(queryByTestId("alarm-icon-explainer-settings")).toBeNull();
     });
+  });
+
+  // Telemetry. Default ON with an opt-out, which is a product decision worth
+  // pinning: see services/telemetryConsent.ts for why, and the explainer copy
+  // below is the user-facing half of that bargain.
+  it("shows the telemetry switch on by default", async () => {
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("telemetry-switch");
+    await waitFor(() => expect(switchEl.props.value).toBe(true));
+  });
+
+  it("reflects a stored opt-out", async () => {
+    await AsyncStorage.setItem(TELEMETRY_ENABLED_KEY, JSON.stringify(false));
+    const { findByTestId, findByText } = renderScreen();
+    const switchEl = await findByTestId("telemetry-switch");
+    await waitFor(() => expect(switchEl.props.value).toBe(false));
+    expect(await findByText("Sends nothing")).toBeTruthy();
+  });
+
+  it("opting out persists the choice", async () => {
+    const { findByTestId } = renderScreen();
+    const switchEl = await findByTestId("telemetry-switch");
+
+    fireEvent(switchEl, "valueChange", false);
+
+    await waitFor(() =>
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        TELEMETRY_ENABLED_KEY,
+        JSON.stringify(false)
+      )
+    );
+  });
+
+  it("states plainly that reminder content is never sent", async () => {
+    const { findByText } = renderScreen();
+    expect(
+      await findByText(/What is never sent/)
+    ).toBeTruthy();
   });
 
   // Vibration is independent of sound: the reported bug was that turning off

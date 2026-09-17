@@ -253,3 +253,67 @@ seconds) `dumpsys alarm` showed both pre-existing reminders re-armed:
 Both match their reminder's actual time and alarm setting exactly,
 confirming the fix closes the reinstall-wipe window immediately on launch
 rather than depending on the 15-minute sweep.
+
+---
+
+## D79 — Telemetry opt-out actually stops sending — `PENDING`
+
+Jest proves the wrapper drops events and calls `optOut()`. It cannot prove
+that nothing leaves the device, because there is no network in jsdom.
+
+**Setup.** A build carrying real `EXPO_PUBLIC_POSTHOG_KEY` and
+`EXPO_PUBLIC_SENTRY_DSN` values, pointed at a **throwaway** PostHog project.
+
+**Steps.**
+1. Fresh install. Create a reminder, complete it. Confirm both events land in
+   the PostHog live-events view within a minute.
+2. Settings → Privacy → turn **Help improve this app** off.
+3. Create and complete two more reminders. Open Insights. Force-stop and
+   relaunch the app.
+4. Watch PostHog's live events for five minutes.
+
+**Pass.** Nothing from step 3 appears — including after the relaunch, which is
+when a queued-but-unsent batch would normally flush. The `telemetry_opt_out`
+event from step 2 itself DOES appear: it is captured while consent still
+stands, on purpose.
+
+**Fails if.** Any step-3 event arrives, or `telemetry_opt_out` is missing
+(which would mean the opt-out rate can never be measured).
+
+---
+
+## D80 — Crash reports carry no reminder content — `PENDING`
+
+`scrubEvent()` is unit-tested against synthetic events. What it has never seen
+is a real Sentry event built by the real SDK on a real device, where
+breadcrumbs, request metadata and native frames are added by code this repo
+does not control.
+
+**Steps.**
+1. Create a reminder whose title is Malayalam text, and a second whose title
+   contains a phone number.
+2. Trigger a real crash with both on screen (a debug-only throw is fine).
+3. Open the issue in Sentry.
+
+**Pass.** No reminder title, description, recipient name or phone number
+appears anywhere in the event — message, breadcrumbs, extra, request, or tags.
+Redacted fields read `[redacted]`.
+
+**Fails if.** Any user content is visible. This is a stop-ship: it is the
+promise made to the user in the Settings explainer.
+
+---
+
+## D81 — Crash stack traces de-minify — `PENDING`
+
+The entire argument for choosing Sentry over Crashlytics.
+
+**Setup.** An EAS build with `SENTRY_ORG`, `SENTRY_PROJECT` and
+`SENTRY_AUTH_TOKEN` set, so the plugin uploads source maps.
+
+**Pass.** The issue shows real file names and line numbers from
+`artifacts/mobile`, not `index.android.bundle:1:284910`.
+
+**Fails if.** Frames stay minified — usually a missing `SENTRY_AUTH_TOKEN`, or
+`@sentry/cli` installed as a stub because its build script was not allowed (see
+`onlyBuiltDependencies` in `pnpm-workspace.yaml`).

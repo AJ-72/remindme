@@ -45,6 +45,18 @@ import {
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
 import { syncDisplayName } from "@/services/InvitationService";
+import { EVENTS } from "@/constants/analytics";
+import {
+  applyTelemetryChoice,
+  setPersonProperties,
+  track,
+} from "@/services/AnalyticsService";
+import { getTelemetryEnabled } from "@/services/telemetryConsent";
+import {
+  reminderCountBucket,
+  reminderProps,
+  snoozePresetKey,
+} from "@/utils/analyticsProps";
 import { DEFAULT_QUIET_HOURS, type QuietHours } from "@/utils/quietHours";
 import {
   DEFAULT_SNOOZE_PRESET,
@@ -103,6 +115,13 @@ interface RemindersContextType {
   setInviteNudgeEnabled: (enabled: boolean) => Promise<void>;
   vibrationEnabled: boolean;
   setVibrationEnabled: (enabled: boolean) => Promise<void>;
+  /**
+   * Whether anonymous usage and crash reporting is on. Defaults ON, with the
+   * off switch in Settings — see services/telemetryConsent.ts for why that
+   * default was chosen and what is never collected either way.
+   */
+  telemetryEnabled: boolean;
+  setTelemetryEnabled: (enabled: boolean) => Promise<void>;
   /** When the app stays silent. Applies to alerts it schedules itself. */
   quietHours: QuietHours;
   setQuietHours: (window: QuietHours) => Promise<void>;
@@ -123,6 +142,20 @@ const RemindersContext = createContext<RemindersContextType | null>(null);
 
 initNotifications();
 
+/**
+ * One event for every setting, rather than one event per setting.
+ *
+ * `setting` names which switch moved and `value` its new state, so a single
+ * series answers "what do people actually configure" without twelve
+ * near-identical event names to keep in step with the Settings screen. The
+ * value is always a primitive the user could have chosen from a fixed list -
+ * never free text, so "Your name" is deliberately absent from every call site
+ * below.
+ */
+function trackSetting(setting: string, value: string | number | boolean): void {
+  track(EVENTS.SETTING_CHANGED, { setting, value });
+}
+
 export function RemindersProvider({
   children,
 }: {
@@ -141,6 +174,7 @@ export function RemindersProvider({
   const [userName, setUserNameState] = useState("");
   const [quietHours, setQuietHoursState] = useState<QuietHours>(DEFAULT_QUIET_HOURS);
   const [inviteNudgeEnabled, setInviteNudgeEnabledState] = useState(true);
+  const [telemetryEnabled, setTelemetryEnabledState] = useState(true);
 
   // Shared by the initial mount and by refreshFromStorage, so a restore can
   // never drift out of sync with what the provider loads at startup.
@@ -156,6 +190,7 @@ export function RemindersProvider({
       nudge,
       name,
       quiet,
+      telemetry,
     ] =
       await Promise.all([
         loadReminders(),
@@ -168,6 +203,7 @@ export function RemindersProvider({
         getInviteNudgeEnabled(),
         getUserName(),
         getQuietHours(),
+        getTelemetryEnabled(),
       ]);
     setReminders(loadedReminders);
     setDefaultAlarmEnabledState(defaultAlarm);
@@ -179,6 +215,15 @@ export function RemindersProvider({
     setInviteNudgeEnabledState(nudge);
     setUserNameState(name);
     setQuietHoursState(quiet);
+    setTelemetryEnabledState(telemetry);
+    // A person property, not an event: it describes how this install is
+    // configured right now, which is what every "is this only broken for
+    // Malayalam users?" question needs to split on.
+    setPersonProperties({
+      dictation_language: dictLang,
+      reminder_count: reminderCountBucket(loadedReminders.length),
+      snooze_preset: snoozePresetKey(preset),
+    });
   }, []);
 
   const refreshFromStorage = useCallback(async () => {
@@ -223,11 +268,13 @@ export function RemindersProvider({
   const setDefaultAlarmEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetDefaultAlarmEnabled(enabled);
     setDefaultAlarmEnabledState(enabled);
+    trackSetting("default_alarm", enabled);
   }, []);
 
   const setDefaultExactTimingEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetDefaultExactTimingEnabled(enabled);
     setDefaultExactTimingEnabledState(enabled);
+    trackSetting("default_exact_timing", enabled);
   }, []);
 
   const setAlarmForPending = useCallback(async (alarm: boolean) => {
@@ -238,12 +285,14 @@ export function RemindersProvider({
   const setInviteNudgeEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetInviteNudgeEnabled(enabled);
     setInviteNudgeEnabledState(enabled);
+    trackSetting("invite_nudge", enabled);
   }, []);
 
   const setShowDescriptionInNotifications = useCallback(
     async (enabled: boolean) => {
       await serviceSetShowDescriptionEnabled(enabled);
       setShowDescriptionInNotificationsState(enabled);
+      trackSetting("show_description", enabled);
     },
     []
   );
@@ -251,11 +300,29 @@ export function RemindersProvider({
   const setVibrationEnabled = useCallback(async (enabled: boolean) => {
     await serviceSetVibrationEnabled(enabled);
     setVibrationEnabledState(enabled);
+    trackSetting("vibration", enabled);
+  }, []);
+
+  const setTelemetry = useCallback(async (enabled: boolean) => {
+    // Order matters on the way OUT. The event has to be captured while
+    // consent still stands, or the one number worth having — how many people
+    // turn this off — is the one number that can never be collected.
+    if (!enabled) track(EVENTS.TELEMETRY_OPT_OUT);
+    await applyTelemetryChoice(enabled);
+    setTelemetryEnabledState(enabled);
   }, []);
 
   const setQuietHours = useCallback(async (window: QuietHours) => {
     await serviceSetQuietHours(window);
     setQuietHoursState(window);
+    // The exact start and end are the user's own routine - close to a sleep
+    // schedule - so the window itself is never sent. Only whether they moved
+    // it off the default, which is what says the default is wrong.
+    trackSetting(
+      "quiet_hours",
+      window.startMinute !== DEFAULT_QUIET_HOURS.startMinute ||
+        window.endMinute !== DEFAULT_QUIET_HOURS.endMinute,
+    );
   }, []);
 
   const setUserName = useCallback(async (name: string) => {
@@ -272,6 +339,8 @@ export function RemindersProvider({
   const setDictationLanguage = useCallback(async (lang: DictationLanguage) => {
     await serviceSetDictationLanguage(lang);
     setDictationLanguageState(lang);
+    trackSetting("dictation_language", lang);
+    setPersonProperties({ dictation_language: lang });
   }, []);
 
   const addReminder = useCallback(
@@ -287,6 +356,8 @@ export function RemindersProvider({
           data.exactTiming !== undefined ? data.exactTiming : defaultExactTimingEnabled,
       });
       setReminders(updated);
+      track(EVENTS.REMINDER_CREATED, reminderProps(added));
+      setPersonProperties({ reminder_count: reminderCountBucket(updated.length) });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       return added;
     },
@@ -307,6 +378,7 @@ export function RemindersProvider({
     ) => {
       const updated = await serviceEdit(reminders, id, data);
       setReminders(updated);
+      track(EVENTS.REMINDER_EDITED, reminderProps(data));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     },
     [reminders]
@@ -314,8 +386,15 @@ export function RemindersProvider({
 
   const deleteReminder = useCallback(
     async (id: string) => {
+      const previous = reminders.find((r) => r.id === id);
       const updated = await serviceDelete(reminders, id);
       setReminders(updated);
+      track(EVENTS.REMINDER_DELETED, {
+        count: 1,
+        // Deleting an unfinished reminder is a different signal from clearing
+        // a finished one: the first is abandonment, the second is tidying.
+        was_completed: previous?.completed ?? false,
+      });
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     },
     [reminders]
@@ -326,6 +405,7 @@ export function RemindersProvider({
       if (ids.length === 0) return;
       const updated = await serviceDeleteMany(reminders, ids);
       setReminders(updated);
+      track(EVENTS.REMINDER_DELETED, { count: ids.length, was_completed: false });
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     },
     [reminders]
@@ -333,8 +413,25 @@ export function RemindersProvider({
 
   const toggleComplete = useCallback(
     async (id: string) => {
+      const before = reminders.find((r) => r.id === id);
       const updated = await serviceToggle(reminders, id);
       setReminders(updated);
+      const after = updated.find((r) => r.id === id);
+      // Only the completing direction is an event. Un-completing is a
+      // correction, and counting it as a negative completion would make the
+      // completion rate depend on how often people fix mistakes.
+      if (after?.completed && !before?.completed) {
+        track(
+          EVENTS.REMINDER_COMPLETED,
+          reminderProps(after, {
+            // Minutes late is the adherence question the derived stats in
+            // utils/adherenceStats.ts answer locally; this is the same fact,
+            // bucketed, so it can be compared across installs.
+            on_time: new Date(after.completedAt ?? Date.now()).getTime() <=
+              new Date(after.datetime).getTime(),
+          }),
+        );
+      }
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     },
     [reminders]
@@ -362,8 +459,13 @@ export function RemindersProvider({
 
   const snoozeReminder = useCallback(
     async (id: string, preset?: SnoozePreset) => {
-      const updated = await serviceSnooze(reminders, id, preset ?? snoozePreset);
+      const chosen = preset ?? snoozePreset;
+      const updated = await serviceSnooze(reminders, id, chosen);
       setReminders(updated);
+      const after = updated.find((r) => r.id === id);
+      if (after) {
+        track(EVENTS.REMINDER_SNOOZED, reminderProps(after, { preset: snoozePresetKey(chosen) }));
+      }
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     },
     [reminders, snoozePreset]
@@ -372,6 +474,8 @@ export function RemindersProvider({
   const setSnoozePreset = useCallback(async (preset: SnoozePreset) => {
     await serviceSetSnoozePreset(preset);
     setSnoozePresetState(preset);
+    trackSetting("snooze_preset", snoozePresetKey(preset));
+    setPersonProperties({ snooze_preset: snoozePresetKey(preset) });
     // Re-register so the notification-tray button label matches. Fire-and-
     // forget by design: setupSnoozeCategory swallows its own errors, and a
     // stale label is cosmetic — the action ID and handler still work.
@@ -404,6 +508,8 @@ export function RemindersProvider({
         setInviteNudgeEnabled,
         vibrationEnabled,
         setVibrationEnabled,
+        telemetryEnabled,
+        setTelemetryEnabled: setTelemetry,
         quietHours,
         setQuietHours,
         userName,

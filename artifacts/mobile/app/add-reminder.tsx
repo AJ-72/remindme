@@ -17,6 +17,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useReminders } from "@/contexts/RemindersContext";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
+import { contentScript } from "@/utils/analyticsProps";
 import { useColors } from "@/hooks/useColors";
 import { applySuggestedHour, suggestBetterHour } from "@/utils/adherenceCopy";
 import { computeAdherenceStats } from "@/utils/adherenceStats";
@@ -224,6 +227,16 @@ export default function AddReminderScreen() {
     }
     setSaving(true);
     setInvitationError(null);
+    // Reported at SAVE, once, deliberately. The parse itself runs on every
+    // keystroke (see the effects above), so tracking it where it happens
+    // would send one event per character typed and drown every other series
+    // in the project.
+    track(EVENTS.NL_PARSE_RESULT, {
+      date_parsed: dateWasParsed,
+      script: contentScript(title),
+      editing: isEditing,
+      surface: "add_reminder",
+    });
     try {
       const trimmedDescription = description.trim();
       const datetimeIso = parsedDate.toISOString();

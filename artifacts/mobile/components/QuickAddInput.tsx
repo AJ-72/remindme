@@ -42,6 +42,9 @@ import {
 } from "@/services/ReminderService";
 import { formatTime12h } from "@/utils/formatDatetime";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
+import { contentScript } from "@/utils/analyticsProps";
 import type { ParsedAmbiguity } from "@/utils/malayalamDateParser";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
 import { createDictationTimer, type DictationTimer } from "@/utils/dictationTimer";
@@ -272,6 +275,16 @@ export default function QuickAddInput({ onSaved }: Props) {
   }, [input]);
 
   const doSave = async (dateToUse: Date, titleOverride?: string) => {
+    // Once per save, not once per keystroke - the parse effect above runs on
+    // every character. `ambiguity` records that the parser could not decide
+    // between a numeral being a time and being part of the text, which is the
+    // Malayalam-input case worth watching separately.
+    track(EVENTS.NL_PARSE_RESULT, {
+      date_parsed: parsedDate !== null,
+      script: contentScript(titleOverride ?? parsedTitle ?? input),
+      ambiguous: ambiguity !== null,
+      surface: "quick_add",
+    });
     // Ask, never block. The app defers its OWN alerts out of quiet hours
     // silently, but a time the user chose deliberately is a different thing -
     // refusing to set it is the only genuinely wrong move here.
