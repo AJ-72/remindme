@@ -82,9 +82,40 @@ export function getSupabaseClient(): SupabaseClient {
 let pendingEnsure: Promise<Session> | null = null;
 
 /**
+ * Whether a cached session's user still exists server-side.
+ *
+ * A locally-cached session is not proof of an account: getSession() only
+ * reads storage, so a token whose `auth.users` row was deleted server-side
+ * stays cached and valid-looking forever. That install then has no recovery
+ * path — every call carries a token the server rejects, and autoRefreshToken
+ * can't help because the refresh token is orphaned too. Observed live: after
+ * the Tier 2 test data was wiped, devices sat in a loop of 403 on
+ * /auth/v1/user and 400 on the refresh grant until app storage was cleared
+ * by hand.
+ *
+ * Only an auth rejection counts as "gone". A network failure must leave the
+ * session alone — throwing away a still-valid account because the user was
+ * offline would be a far worse bug than the one this guards against, so the
+ * ambiguous case deliberately resolves to "still valid".
+ */
+async function cachedUserStillExists(): Promise<boolean> {
+  const { error } = await getClient().auth.getUser();
+  if (!error) return true;
+  const status = (error as { status?: number }).status;
+  return status === undefined || (status !== 401 && status !== 403);
+}
+
+/**
  * Establishes a session if one doesn't already exist, via anonymous auth —
  * the one function in this module allowed to touch the network. Call it only
  * when binding actually starts.
+ *
+ * A cached session is revalidated before it's trusted (see
+ * cachedUserStillExists) and replaced if its user no longer exists. That
+ * check lives here, not in getCurrentSession()/hasSession(), precisely so the
+ * module header's "zero network calls until binding begins" guarantee still
+ * holds by construction: this is already the one function allowed to reach
+ * the network, and the others stay local-only reads.
  *
  * Concurrent callers share one in-flight sign-in rather than each racing
  * their own: two callers both finding no session and both calling
@@ -96,7 +127,11 @@ export function ensureSession(): Promise<Session> {
   if (!pendingEnsure) {
     pendingEnsure = (async () => {
       const existing = await getCurrentSession();
-      if (existing) return existing;
+      if (existing && (await cachedUserStillExists())) return existing;
+
+      // signOut() clears the dead tokens from storage first: signInAnonymously()
+      // over a still-cached orphaned session is what left installs stuck.
+      if (existing) await getClient().auth.signOut();
 
       const { data, error } = await getClient().auth.signInAnonymously();
       if (error || !data.session) {
