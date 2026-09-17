@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import NameSheet from "@/components/NameSheet";
+import { tabBarContentInset } from "@/constants/tabBar";
 import { buildAppShareMessage } from "@/utils/appShare";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { useReminders } from "@/contexts/RemindersContext";
@@ -131,7 +132,8 @@ export default function SettingsScreen() {
     content: {
       paddingHorizontal: 20,
       paddingTop: 4,
-      paddingBottom: insets.bottom + 24,
+      // Clears the absolutely positioned tab bar, not only the gesture area.
+      paddingBottom: tabBarContentInset(insets.bottom, 24),
     },
     // Plain-language section headers, so the screen reads as a handful of
     // grouped topics instead of one undifferentiated list of cards.
