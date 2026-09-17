@@ -1,8 +1,14 @@
-import { ConfigPlugin, withAndroidManifest } from "@expo/config-plugins";
-
 /**
- * Adds an ACTION_PROCESS_TEXT intent-filter to MainActivity, so the app appears
- * in the floating text-selection toolbar of every other Android app.
+ * Config plugin: adds an ACTION_PROCESS_TEXT intent-filter to MainActivity, so
+ * the app appears in the floating text-selection toolbar of every other
+ * Android app.
+ *
+ * WHY PLAIN JAVASCRIPT AND NOT TYPESCRIPT: EAS Build runs `expo prebuild` on
+ * the builder, and config plugins are loaded there by a plain Node `require`.
+ * A TypeScript plugin file does not resolve, and the build fails with
+ * "Failed to resolve plugin for module ./plugins/withProcessText. Do you have
+ * node modules installed?" — which points at node_modules and hides the real
+ * cause. Types for the two exports below live in withProcessText.d.ts.
  *
  * Notes on the framework behaviour:
  * - The label belongs on the *intent-filter*, not on the activity: Android
@@ -15,15 +21,17 @@ import { ConfigPlugin, withAndroidManifest } from "@expo/config-plugins";
  * - The filter must declare `text/plain`; Android only offers activities that
  *   accept that mime type.
  */
-export const PROCESS_TEXT_LABEL = "Remind Me";
+const { withAndroidManifest } = require("@expo/config-plugins");
+
+const PROCESS_TEXT_LABEL = "Remind Me";
 
 // Exported separately from the plugin so a unit test can call it on a parsed
 // manifest without building a full Expo config. It mutates in place.
-export function addProcessTextIntentFilter(manifest: any): void {
+function addProcessTextIntentFilter(manifest) {
   const application = manifest?.manifest?.application?.[0];
   if (!application) return;
 
-  const activities: any[] = (application.activity ?? []) as any[];
+  const activities = application.activity ?? [];
   const mainActivity =
     activities.find(
       (a) =>
@@ -36,11 +44,11 @@ export function addProcessTextIntentFilter(manifest: any): void {
   if (!mainActivity["intent-filter"]) {
     mainActivity["intent-filter"] = [];
   }
-  const intentFilters: any[] = mainActivity["intent-filter"];
+  const intentFilters = mainActivity["intent-filter"];
 
   const alreadyPresent = intentFilters.some((f) =>
     (f.action ?? []).some(
-      (a: any) => a.$?.["android:name"] === "android.intent.action.PROCESS_TEXT"
+      (a) => a.$?.["android:name"] === "android.intent.action.PROCESS_TEXT"
     )
   );
   if (alreadyPresent) return;
@@ -53,10 +61,13 @@ export function addProcessTextIntentFilter(manifest: any): void {
   });
 }
 
-const withProcessText: ConfigPlugin = (config) =>
+const withProcessText = (config) =>
   withAndroidManifest(config, (mod) => {
     addProcessTextIntentFilter(mod.modResults);
     return mod;
   });
 
-export default withProcessText;
+module.exports = withProcessText;
+module.exports.default = withProcessText;
+module.exports.PROCESS_TEXT_LABEL = PROCESS_TEXT_LABEL;
+module.exports.addProcessTextIntentFilter = addProcessTextIntentFilter;
