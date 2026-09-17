@@ -1,0 +1,4 @@
+project_id = "remindme-tier2"
+
+[functions]
+verify_jwt = true

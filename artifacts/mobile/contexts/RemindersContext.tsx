@@ -13,6 +13,7 @@ import {
   type NotificationData,
   type DictationLanguage,
   addReminder as serviceAdd,
+  attachInvitationId as serviceAttachInvitationId,
   deleteReminder as serviceDelete,
   deleteReminders as serviceDeleteMany,
   editReminder as serviceEdit,
@@ -40,8 +41,10 @@ import {
   setVibrationEnabled as serviceSetVibrationEnabled,
   setupSnoozeCategory,
   snoozeReminder as serviceSnooze,
+  markOpenedById as serviceMarkOpened,
   toggleComplete as serviceToggle,
 } from "@/services/ReminderService";
+import { syncDisplayName } from "@/services/InvitationService";
 import { DEFAULT_QUIET_HOURS, type QuietHours } from "@/utils/quietHours";
 import {
   DEFAULT_SNOOZE_PRESET,
@@ -59,7 +62,14 @@ interface RemindersContextType {
   reminders: Reminder[];
   addReminder: (
     data: Omit<Reminder, "id" | "completed" | "notificationId">
-  ) => Promise<void>;
+  ) => Promise<Reminder>;
+  /**
+   * Tags a just-added send-reminder with the server invitation id it maps
+   * to, once send-invitation confirms it - see Reminder.invitationId's
+   * header. A no-op call this context makes only from QuickAddInput.tsx,
+   * after addReminder's own local save has already completed.
+   */
+  attachInvitationId: (id: string, invitationId: string) => Promise<void>;
   editReminder: (
     id: string,
     data: Omit<Reminder, "id" | "completed" | "notificationId">
@@ -67,6 +77,7 @@ interface RemindersContextType {
   deleteReminder: (id: string) => Promise<void>;
   deleteReminders: (ids: string[]) => Promise<void>;
   toggleComplete: (id: string) => Promise<void>;
+  markOpened: (id: string) => Promise<void>;
   snoozeReminder: (id: string, preset?: SnoozePreset) => Promise<void>;
   snoozePreset: SnoozePreset;
   setSnoozePreset: (preset: SnoozePreset) => Promise<void>;
@@ -252,6 +263,10 @@ export function RemindersProvider({
     // Store the trimmed form, matching what the service persisted, so the
     // greeting never renders a stray space the next render would drop anyway.
     setUserNameState(name.trim());
+    // B11: fire-and-forget, best-effort - a sync failure or a not-yet-bound
+    // user (syncDisplayName no-ops with no session) must never block the
+    // name itself from saving locally, which is why this isn't awaited.
+    syncDisplayName(name);
   }, []);
 
   const setDictationLanguage = useCallback(async (lang: DictationLanguage) => {
@@ -266,16 +281,24 @@ export function RemindersProvider({
       // so the only per-reminder choice is the detail-screen override, which
       // sets the field explicitly and is preserved by the `!== undefined`
       // check below.
-      const { reminders: updated } = await serviceAdd(reminders, {
+      const { reminders: updated, added } = await serviceAdd(reminders, {
         ...data,
         exactTiming:
           data.exactTiming !== undefined ? data.exactTiming : defaultExactTimingEnabled,
       });
       setReminders(updated);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      return added;
     },
     [reminders, defaultExactTimingEnabled]
   );
+
+  const attachInvitationId = useCallback(async (id: string, invitationId: string) => {
+    await serviceAttachInvitationId(id, invitationId);
+    setReminders((current) =>
+      current.map((r) => (r.id === id ? { ...r, invitationId } : r))
+    );
+  }, []);
 
   const editReminder = useCallback(
     async (
@@ -317,6 +340,26 @@ export function RemindersProvider({
     [reminders]
   );
 
+  /**
+   * Stamps that the user looked at this reminder's detail screen - adherence
+   * instrumentation, not a user-visible action, so no haptic and no toast.
+   * Local-only: mirrors state into `reminders` so a later read (e.g. this
+   * same session's insights screen) sees it without a reload, but never
+   * throws if `id` no longer exists - a race with a delete in another tab of
+   * the UI must not crash the screen that is simply being closed.
+   */
+  const markOpened = useCallback(
+    async (id: string) => {
+      await serviceMarkOpened(id);
+      setReminders((prev) =>
+        prev.map((r) =>
+          r.id === id ? { ...r, openedAt: new Date().toISOString() } : r
+        )
+      );
+    },
+    []
+  );
+
   const snoozeReminder = useCallback(
     async (id: string, preset?: SnoozePreset) => {
       const updated = await serviceSnooze(reminders, id, preset ?? snoozePreset);
@@ -340,10 +383,12 @@ export function RemindersProvider({
       value={{
         reminders,
         addReminder,
+        attachInvitationId,
         editReminder,
         deleteReminder,
         deleteReminders,
         toggleComplete,
+        markOpened,
         snoozeReminder,
         snoozePreset,
         setSnoozePreset,

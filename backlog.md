@@ -42,6 +42,7 @@ Ordered cheapest-first within the tier.
 | B4 | 17 | Manglish support (regional language typed in English) | M | `OPEN` | Support for reminders typed in English letters but Malayalam words/grammar. Not started; no research done yet. |
 | B5 | 18 | Rename `SNOOZE_ACTION_ID` tech debt | M | `OPEN` | String is `"SNOOZE_10"` but snooze durations are now user-configurable (5/15/30/60 min/tomorrow) — misleading name, left as-is deliberately because it's embedded in the `categoryIdentifier` of notifications already scheduled on devices. Needs a migration story (e.g. register both old and new action IDs for one release, then drop the old one). |
 | B6 | 2 | Image support in shared/dictated input | M | `OPEN` | Audio half done (mic + WhatsApp voice-note forwarding, Android only — see B7). Image support not started. Part of the [M5](#m5-forward-to-remind) "forward-to-remind" area. |
+| B9 | — | Recipient phone lookup silently misses on ambiguous numbers | M | `OPEN` | Found live-testing 2026-09-11 (two-device Tier 2 test — see `system_learnings.md`): a contact saved as local digits with no leading `+`, on a device whose system region doesn't match the number's real country, gets misnormalized to a different E.164/`phone_hash` than the same person's own registration — `normalizeForIdentity()` (`artifacts/mobile/utils/phoneNumber.ts`) currently just returns `ambiguous: true` and hopes both sides agree, with no repair. Symptom is a bare "not reachable" badge (no error, no hint) — indistinguishable from the recipient genuinely not having the app, which is the exact failure mode `recipientReachability.ts`'s own doc comment already calls out as the harmful one. Workaround today: type the number with an explicit leading `+` and full country code (bypasses region-guessing entirely, `normalizeForIdentity`'s `hasPlus` branch) — but this is a manual burden most contacts won't have, and most users won't think to do. **Fix should be in normalization, not in asking users to type numbers correctly**: on an ambiguous miss, retry against a small set of plausible alternate regions (e.g. the app's own configured default region if set, or a short fixed list of likely candidates) before giving up, rather than guessing once from device locale and stopping. Needs a design pass, not a one-line fix — touches `normalizeForIdentity`, the `lookup` Edge Function's hash matching (currently exact-match on one hash), and possibly storing more than one normalization candidate's hash per lookup call. |
 | M2 | — | Recurring reminders ("every day at 8", "every Monday") | L | `OPEN` | See [Major features](#major-features) below — highest-value missing feature, needs its own spec. |
 | M9 | — | Smart re-nudge (re-alert ladder) | L | `OPEN` | See [Major features](#major-features) below — prerequisite (real `snoozeCount` data) is now met; ready to spec. |
 | M3 | — | Location-based reminders | L | `OPEN` | See [Major features](#major-features) below. |
@@ -53,20 +54,30 @@ Ordered cheapest-first within the tier.
 | # | Legacy # | Item | Effort | Status | Notes |
 | --- | --- | --- | --- | --- | --- |
 | B7 | 2 | Ship next native build with current audio-transcription fixes | S (build only) | `BLOCKED` | Voice-to-text via mic + WhatsApp-audio forwarding is code-complete (Android only). Needs a native/EAS build to reach devices — see CLAUDE.md's Android build instructions. |
-| B8 | — | M4 Tier 1 device sign-off | M | `BLOCKED` | M4 Tier 1 ("remind someone else", send-only) is fully built (14 tasks, 567 tests green) but **not device-verified** — needs a native build (`expo-contacts` has no OTA path) then a full pass of [device-tests/feature-e2e.md#d9](device-tests/feature-e2e.md#d9). See [M4](#m4-remind-someone-else) below. |
+| B8 | — | M4 Tier 1 device sign-off | S | `PARTIAL` | The **core loop passed on device 2026-08-30** — contact picked, message sent by WhatsApp and SMS. What remains is D9's edge-case list (App-Links install order, not-on-WhatsApp numbers, other OEM messaging apps, permission denied→re-granted, 1000+ contacts, cold-start tap), each worth its own run: [device-tests/feature-e2e.md#d9](device-tests/feature-e2e.md#d9). No longer blocks shipping Tier 1. |
 
 ---
 
 ## Tier 2 — needs the backend built (shared prerequisite)
 
-**The backend is empty scaffolding today** — see CLAUDE.md. Each of these
-needs device→server sync, an identity model, and auth; whoever builds that
-first pays for all three. None should be scoped as "wire up the existing
-API" — see each item's notes in [Major features](#major-features).
+**There is a schema now, and still nothing behind it** — see CLAUDE.md.
+`lib/db` defines five tables with RLS policies and tests (landed 2026-09-01 for
+M4 Tier 2), but there is no Supabase project, no Edge Functions, and the app
+talks to none of it. Each of these still needs device→server sync, an identity
+model, and auth; whoever builds that first pays for all three. None should be
+scoped as "wire up the existing API" — see each item's notes in
+[Major features](#major-features).
 
 | # | Legacy # | Item | Effort | Status | Notes |
 | --- | --- | --- | --- | --- | --- |
-| M4-T2 | — | Remind someone else, Tier 2 (app-to-app + acknowledgement) | L | `DEFERRED` | See [M4](#m4-remind-someone-else). |
+| M4-T2 | — | Remind someone else, Tier 2 (app-to-app + acknowledgement) | L | `IN PROGRESS` | Schema + RLS landed; needs a Supabase project and the Edge Functions. This is the item paying for the backend the other three inherit. See [M4](#m4-remind-someone-else). |
+| B10 | — | Persist registered phone number; block silent re-registration | S | `DONE` 2026-09-11 | Found live-testing 2026-09-11. `register-number.tsx` lets a user submit `self_register()` again over an already-bound number with no warning/guard — should read the persisted registration state first and require an explicit delete/unregister step before allowing a new number. Touches `register-number.tsx`, whatever local flag currently marks "already registered" (audit — may not currently persist reliably, part of the bug), and needs a matching "forget this number" affordance in Settings → You. Landed: `getRegisteredPhone`/`setRegisteredPhone`/`clearRegisteredPhone` in `ReminderService.ts`; `register-number.tsx` shows an "already registered" phase with a "Remove this number" step before allowing a new number. |
+| B11 | — | Tier 2 push notification for a new reminder doesn't show the sender's name | S | `DONE` 2026-09-11 | `send-invitation`/the push payload built in `_shared/expoPush.ts` needs the sender's display name (or phone) included in the notification title/body, not just generic copy — recipient currently can't tell who it's from before opening the app. Check what identity data is available server-side at send time (`users` table) vs. needs adding. Landed: `handleSendInvitation` (`supabase/functions/send-invitation/index.ts`) now reads the caller's own `users.display_name` and titles the push "{name} sent you a reminder" (falls back to "Someone"); `InvitationService.syncDisplayName()` (mobile) writes the local "Your name" setting to `users.display_name` directly (client-writable per existing RLS/column grants), called from `setUserName()` and from a successful `register-number.tsx` registration. |
+| B12 | — | Optional registration screen on first install | M | `DONE` 2026-09-11 | A first-run screen offering Tier 2 registration, explicit that it's **optional** (skippable) but required specifically for "remind someone else" to work in either direction. Needs to fit around the existing first-launch permission onboarding in `app/_layout.tsx` without adding a second forced gate — copy needs to make clear this isn't required for the app's core (local, no-account) reminder functionality. Landed: reused `register-number.tsx` with a `firstRun` param (Optional badge, "Skip for now" button, first-run-specific copy) rather than a separate screen; `_layout.tsx` pushes it once, gated behind `hasCompletedRegistrationOnboarding()`, after the existing permission-onboarding/name-prompt gates settle. |
+| B13 | — | Home screen: sort by date, and visually distinguish own vs. others'-sent reminders | M | `DONE` 2026-09-11 | Two changes to `(tabs)/index.tsx`: (a) sort the reminder list chronologically (earliest first) instead of whatever grouping/order it currently uses; (b) fold "reminders sent by someone else" into the same list/sort rather than a separate section, but make `ReminderCard.tsx` visually mark provenance (e.g. a sender-name badge/accent) so a glance distinguishes "my reminder" from "so-and-so reminded me". Depends on B11's sender-identity data being available to reuse for the badge label. Landed: `Reminder.senderName`/`senderId` fields, threaded through `invitation-preview.tsx`'s `addReminder` call; `ReminderCard.tsx` renders a distinct "From {name}" chip via `isReceivedReminder()`. Sort/grouping into "Upcoming" was already earliest-first by date (`byDateAsc` in `(tabs)/index.tsx`) and already merged (received reminders were never split into their own section) — confirmed, not changed. |
+| B14 | — | B11's fix never reached the live `send-invitation` Edge Function | S | `DONE` 2026-09-11 | Found 2026-09-11: `handleSendInvitation`'s code (repo, commit `5ce5677`) already builds `"{name} sent you a reminder"` from `senderId`'s `display_name` and tags `data.type: "invitation"`, but `mcp__Supabase__get_edge_function` on the live `remindme-tier2` project showed the deployed function was still the pre-B11 version — generic `"New reminder"` title, no `senderId` param, no `data.type` tag at all. **No mobile app rebuild/redeploy needed for this** — `send-invitation` is server-only; the app just calls it over HTTPS and has no client-side copy of the push title logic, so the fix takes effect on the next invitation sent with zero client changes. Landed: redeployed via `mcp__Supabase__deploy_edge_function` (no `SUPABASE_ACCESS_TOKEN` in this session's env, used the documented MCP fallback), version 2 → 3, re-verified via `get_edge_function` that live source now matches the repo exactly. **Audit of the other 4 functions (2026-09-11): clean, no drift** — `lookup` (v3), `claim-invitations` (v2), `respond-invitation` (v2), and `expire-invitations-cron` (v2) all matched their repo source byte-for-byte. Only `send-invitation` had gone stale. Nothing currently catches this class of drift automatically — worth a periodic re-check after any Edge Function merge until something does. |
+| B15 | — | Multiple pending invitations: grouped notification + a "Pending reminders" list screen | M | `DONE` 2026-09-11 | Previously: N pending invitations meant N separate full-detail pushes, each requiring its own tap → `invitation-preview.tsx` → Accept/Decline round trip. **Resolved plumbing question**: no new RPC/schema/Edge Function was needed — `claim_invitations()` already returns every pending invitation for the caller in one flat list (no per-sender grouping at the API layer, just a list), so the gap was entirely client-side: `checkForInvitations()` only ever navigated for exactly length 1, silently dropping 2+ on the floor after marking them delivered. Landed: `checkForInvitations()` (`InvitationService.ts`) takes an optional `navigateToList` callback, invoked with the full claimed list when length > 1; new `app/pending-invitations.tsx` renders one row per invitation (mixed senders included — same UI regardless of origin), sender names resolved via a new batched `resolveSenderNames()` (one `Promise.all` over de-duped ids, not N sequential RPCs), each row with inline Accept/Decline, screen self-closes once every row resolves. `useInvitationCheck.ts` and `NotificationResponseHandler.tsx` both wired to the new callback. **Push-grouping scope decision**: true OS-level Android tray collapsing needs a raw FCM group/tag Expo's push API doesn't expose (`_shared/expoPush.ts`'s `PushMessage` only carries title/body/data) — bypassing Expo Push for invitations only was considered and deferred as separate, larger infrastructure. Landed instead: a client-side workaround (`services/invitationNotificationGrouping.ts`) that runs only while the app is alive to see a push arrive (`addNotificationReceivedListener` scope) — dismisses individually-presented invitation notifications and posts one locally-built summary ("{name} + N more reminders waiting") carrying the same `data.type: "invitation"` tag. A killed app can't run this; `useInvitationCheck()`'s mount-time check (now routing to the list screen for 2+) covers that case instead. 965/965 tests passing (up from 942), full workspace typecheck clean. |
+| B16 | — | Auto-accept from trusted contacts, with visibility into what was added | — | `DEFERRED` | Raised 2026-09-11, deliberately not scoped yet: depends on a not-yet-built "trusted contacts" / auto-accept setting (who counts as trusted, where it's configured, whether it's per-sender or global) that doesn't exist. Once that setting exists, the agreed notification behavior (approved 2026-09-11, to apply then) is: an auto-accepted reminder skips the accept/decline push entirely — it's silently added to the recipient's list (home screen sender chip from B13 already marks provenance) — but still fires a low-priority, non-actionable confirmation notification ("{name} added: {title}") so the recipient notices without having to act. Tapping that notification opens `reminder-detail.tsx` (view/edit/delete, since it's already on their list), never accept/decline. Do not build the notification behavior in isolation before the trusted-contacts setting itself is designed — file this note alongside that future item instead. |
 | M7 | — | Group reminders with RSVP | L | `OPEN` (needs spec) | Shares M4 Tier 2's backend. See [M7](#m7-group-reminders-with-rsvp) — the strategic reframe of Tier 2's read from the 2026-08-09 adoption assessment. |
 | M8 | — | MCP server for the app | L, or S for read-only variant | `DEFERRED` | See [M8](#m8-mcp-server) — a cheap read-only variant (query an exported backup JSON) exists and doesn't need the backend, but privacy trade-offs need a decision first. |
 | M6 | — | Remind a contact from natural language | M (after M4 T1 ships) | `DEFERRED` | Builds on M4 Tier 1's contact picker — resolves recipients from free text instead. See [M6](#m6-remind-a-contact-from-natural-language). |
@@ -120,8 +131,8 @@ deepen those two things over ones that widen the app's surface.**
 | [M1](#m1-dark-mode) | Dark mode | `DONE` 2026-08-10 | — |
 | [M2](#m2-recurring-reminders) | Recurring reminders | `OPEN` | L |
 | [M3](#m3-location-based-reminders) | Location-based reminders | `OPEN` | L |
-| [M4](#m4-remind-someone-else) Tier 1 | Remind someone else (send-only) | `BUILT`, not device-verified (B8) | — |
-| [M4](#m4-remind-someone-else) Tier 2 | Remind someone else (app-to-app + ack) | `DEFERRED` | L |
+| [M4](#m4-remind-someone-else) Tier 1 | Remind someone else (send-only) | `DONE` 2026-08-30 (core loop on device) | — |
+| [M4](#m4-remind-someone-else) Tier 2 | Remind someone else (app-to-app + ack) | `IN PROGRESS` (schema landed) | L |
 | [M5](#m5-forward-to-remind) | Forward-to-remind (share intents) | `IN PROGRESS` | M |
 | [M6](#m6-remind-a-contact-from-natural-language) | Remind a contact from natural language | `DEFERRED` | M |
 | [M7](#m7-group-reminders-with-rsvp) | Group reminders with RSVP | `OPEN` (needs spec) | L |
@@ -175,8 +186,14 @@ triggers can combine ("at 6pm only if I'm home").
 Remind another person/contact, or a group. Split into two tiers after a
 design interview on 2026-08-09:
 
-**Tier 1 — `BUILT` 2026-08-17, `BLOCKED` on device sign-off (B8).** All 14
-tasks done; 567 tests green, typecheck clean. Ships a `recipient?` on
+**Tier 1 — `BUILT` 2026-08-17, core loop `PASS` on device 2026-08-30.** The
+user picked a contact from the phone's contacts and sent the pre-filled
+message by **both WhatsApp and SMS** on their own OEM device, so Tier 1
+counts as shipped. The edge cases listed under D9 (hostile App-Links install
+order, not-on-WhatsApp numbers, other OEM messaging apps, permission
+denied→re-granted, 1000+ contacts, cold-start tap) remain outstanding and are
+each worth their own run. All 14
+tasks done; suite now 830 tests green, typecheck clean. Ships a `recipient?` on
 `Reminder` (+ `isSendReminder`), send-time phone normalization
 (`utils/phoneNumber.ts`), three-stage capped invite nudges
 (`utils/inviteNudges.ts`), `services/messageLinks.ts` (wa.me + `sms:`), a
@@ -192,16 +209,54 @@ all copy: this is "remind me to message someone", not "remind someone
 else"** — the recipient's phone never rings. Device checklist:
 [device-tests/feature-e2e.md#d9](device-tests/feature-e2e.md#d9).
 
-**Tier 2 — `DEFERRED`, needs its own design and the backend (Tier 2 of
-[dependency table](#tier-2--needs-the-backend-built-shared-prerequisite)
-above).** True app-to-app delivery with acknowledgement flowing back, for
-recipients who install the app. Needs push tokens, an account/identity
-model, auth, and a deployed server — none exist today (verified 2026-08-09:
-API server has exactly one endpoint, `lib/db` defines zero tables). This is
-the feature that would finally wire up the API server and `lib/db` — see
-CLAUDE.md. Tier 1's data model deliberately keeps `recipient` an *object* so
-`appUserId`/`deliveryStatus`/`acknowledgedAt` can be added as purely
-additive optional fields later.
+**Tier 2 — `DESIGNED` 2026-08-30, schema landed 2026-09-01, still not
+reachable by the app.** Spec:
+[`docs/superpowers/specs/2026-08-30-remind-someone-else-tier2-design.md`](docs/superpowers/specs/2026-08-30-remind-someone-else-tier2-design.md).
+Plan:
+[`docs/superpowers/plans/2026-08-30-remind-someone-else-tier2.md`](docs/superpowers/plans/2026-08-30-remind-someone-else-tier2.md)
+— 11 phases; phases 0-5 are the walking skeleton and nothing is visible until
+phase 5.
+
+The design headline: **the server is a store-and-forward mailbox, not a
+runtime.** The reminder is transferred at accept time and fires from the
+recipient's own `expo-notifications` schedule, so the backend can be down all
+night and nobody misses a reminder — and every punctuality property won in
+D19-D23 and D26 is inherited rather than re-fought.
+
+Identity separates *having an account* (a device key) from *binding a phone
+number* (what makes you discoverable). Binding needs proof of number control
+on a two-rung ladder: possession of a Tier 1 invite link (free, silent, and
+the reason the older-parent case never sees a verification screen), else an
+OTP at ~₹0.20 once per number. **This reverses the original no-OTP
+decision** — an adversarial review
+([`docs/reviews/tier2-adversarial-review.md`](docs/reviews/tier2-adversarial-review.md),
+14 findings, 3 P0) showed it allowed permanent number squatting.
+Re-verifying rebinds the existing account within **45 days** (the Indian
+carrier recycling floor, and WhatsApp's own number); past that it is a fresh
+account. Discoverability, global mute and account existence are three
+separate settings. Consent is **accept-first**; blocking is honest,
+per-person and reversible; snoozes are **never** reported to the sender
+(caregiving, not surveillance).
+
+Backend is **Supabase** (`ap-south-1`, ~$25/mo from the first real user — the
+free tier's pause would silently drop invitations), reached only through Edge
+Functions ([`docs/adr/0001`](docs/adr/0001-client-talks-to-edge-functions-not-postgrest.md)).
+**Tier 1 becomes permanent infrastructure**, used three ways: bootstrap,
+fallback, and recovery.
+
+*Landed so far:* three pure client modules (`normalizeForIdentity`,
+`invitationStatus`, `recipientReachability`), and `lib/db`'s five tables
+(`users`, `devices`, `blocks`, `invitations`, `link_codes`) with RLS policies,
+column privileges and 41 tests against a real Postgres via PGlite. **None of
+it is reachable by the app** — there is no Supabase project and no Edge
+Functions yet.
+
+*Still needed from a human:* a Supabase project, and one real older-adult user
+walked through onboarding (rung 1 of the ladder is currently an untested
+theory).
+
+Device checks D27-D37 are written and `BLOCKED` on the backend existing:
+[device-tests/remind-others.md](device-tests/remind-others.md).
 
 ### M5. Forward-to-remind
 

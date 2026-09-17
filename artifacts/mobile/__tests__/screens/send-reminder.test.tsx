@@ -12,6 +12,9 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import {
   INVITE_NUDGE_COUNT_KEY,
   INVITE_NUDGE_ENABLED_KEY,
+  MAX_REGISTER_PROMPTS,
+  REGISTERED_PHONE_KEY,
+  REGISTER_PROMPT_COUNT_KEY,
   STORAGE_KEY,
   USER_NAME_KEY,
   type Reminder,
@@ -302,5 +305,76 @@ describe("SendReminderScreen — edit access", () => {
       pathname: "/add-reminder",
       params: { id: "s1" },
     });
+  });
+});
+
+describe("SendReminderScreen — offering to register the user's own number", () => {
+  async function seed() {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeSendReminder()]));
+  }
+
+  it("makes no offer before anything is sent", async () => {
+    await seed();
+    const { findByTestId, queryByTestId } = renderScreen();
+    await findByTestId("message-input");
+    expect(queryByTestId("register-number-nudge")).toBeNull();
+  });
+
+  it("offers after a send, naming the person just reminded", async () => {
+    await seed();
+    const { findByTestId, findByText } = renderScreen();
+    fireEvent.press(await findByTestId("send-whatsapp"));
+
+    expect(await findByTestId("register-number-nudge")).toBeTruthy();
+    expect(await findByText(/Priya can send you a reminder in the app/)).toBeTruthy();
+  });
+
+  it("opens the registration screen from the offer", async () => {
+    await seed();
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("send-whatsapp"));
+    fireEvent.press(await findByTestId("register-number-nudge-add"));
+
+    expect(router.push).toHaveBeenCalledWith("/register-number");
+  });
+
+  it("counts the offer when it is shown, so it cannot repeat forever", async () => {
+    await seed();
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("send-whatsapp"));
+    await findByTestId("register-number-nudge");
+
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem(REGISTER_PROMPT_COUNT_KEY)).toBe("1")
+    );
+  });
+
+  it("stops offering once the cap is spent", async () => {
+    await seed();
+    await AsyncStorage.setItem(REGISTER_PROMPT_COUNT_KEY, String(MAX_REGISTER_PROMPTS));
+    const { findByTestId, queryByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("send-whatsapp"));
+
+    await waitFor(() => expect(Linking.openURL).toHaveBeenCalled());
+    expect(queryByTestId("register-number-nudge")).toBeNull();
+  });
+
+  it("never offers to a user whose number is already registered", async () => {
+    await seed();
+    await AsyncStorage.setItem(REGISTERED_PHONE_KEY, "+919876543210");
+    const { findByTestId, queryByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("send-whatsapp"));
+
+    await waitFor(() => expect(Linking.openURL).toHaveBeenCalled());
+    expect(queryByTestId("register-number-nudge")).toBeNull();
+  });
+
+  it("goes away when dismissed", async () => {
+    await seed();
+    const { findByTestId, queryByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("send-whatsapp"));
+    fireEvent.press(await findByTestId("register-number-nudge-later"));
+
+    await waitFor(() => expect(queryByTestId("register-number-nudge")).toBeNull());
   });
 });

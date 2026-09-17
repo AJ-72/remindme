@@ -8,7 +8,35 @@ export interface PickableContact {
   phone: string;
 }
 
-export type ContactsPermission = "granted" | "denied" | "error";
+/**
+ * `denied` and `blocked` used to be the same value, which is what made the
+ * picker's dead end a dead end: a user who refused once can be asked again,
+ * a user who refused permanently cannot, and only the second one needs to be
+ * sent to system settings. `error` is a third thing again - the address book
+ * failed, nobody refused anything - and it earns different words.
+ */
+export type ContactsPermission = "granted" | "denied" | "blocked" | "error";
+
+export interface ContactsPermissionState {
+  granted: boolean;
+  /** False once the OS will no longer show its dialog for this app. */
+  canAskAgain: boolean;
+}
+
+/** What the OS thinks right now, with no dialog shown. */
+export async function getContactsPermissionState(): Promise<ContactsPermissionState> {
+  try {
+    const res = await Contacts.getPermissionsAsync();
+    return {
+      granted: res?.status === Contacts.PermissionStatus.GRANTED,
+      // A missing field means an older expo-contacts. Treat it as askable:
+      // a wrongly suppressed dialog is worse than one the OS quietly drops.
+      canAskAgain: (res as { canAskAgain?: boolean })?.canAskAgain !== false,
+    };
+  } catch {
+    return { granted: false, canAskAgain: false };
+  }
+}
 
 export interface LoadContactsResult {
   permission: ContactsPermission;
@@ -23,15 +51,37 @@ function digitsOf(s: string): string {
 /**
  * Load contacts as a flat, pickable list.
  *
- * Never throws: a denied permission or a native failure returns an empty list
+ * Never throws: a refused permission or a native failure returns an empty list
  * with a permission marker, so the picker can render an explanatory state
  * rather than crashing the screen that hosts it.
+ *
+ * `request` decides whether the OS dialog may appear. The picker passes false
+ * on open - the system dialog is the second step, after the app has said what
+ * it wants the contacts for - and true once the user agrees to be asked.
  */
-export async function loadPickableContacts(): Promise<LoadContactsResult> {
+export async function loadPickableContacts(
+  options: { request?: boolean } = {}
+): Promise<LoadContactsResult> {
+  const request = options.request ?? true;
   try {
-    const { status } = await Contacts.requestPermissionsAsync();
-    if (status !== Contacts.PermissionStatus.GRANTED) {
-      return { permission: "denied", contacts: [] };
+    const before = await getContactsPermissionState();
+    if (!before.granted) {
+      if (!request || !before.canAskAgain) {
+        return {
+          permission: before.canAskAgain ? "denied" : "blocked",
+          contacts: [],
+        };
+      }
+      const res = await Contacts.requestPermissionsAsync();
+      if (res?.status !== Contacts.PermissionStatus.GRANTED) {
+        return {
+          permission:
+            (res as { canAskAgain?: boolean })?.canAskAgain === false
+              ? "blocked"
+              : "denied",
+          contacts: [],
+        };
+      }
     }
 
     const { data } = await Contacts.getContactsAsync({

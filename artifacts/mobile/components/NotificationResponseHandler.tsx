@@ -2,11 +2,13 @@ import { router } from "expo-router";
 import React, { useEffect, useRef } from "react";
 
 import {
+  applyRecipientTimeChangeByInvitationId,
   cancelNotification,
   cancelScheduledForReminder,
   getSnoozePreset,
   loadReminderById,
   markDoneById,
+  markNotifiedById,
   scheduleSnoozeNotification,
   updateSnoozeById,
 } from "@/services/ReminderService";
@@ -15,6 +17,10 @@ import {
   markResponseHandled,
 } from "@/services/handledResponses";
 import { handleNotificationResponse } from "@/services/notificationResponseHandler";
+import { checkForInvitations, resolveSenderNames } from "@/services/InvitationService";
+import { navigateToInvitationPreview, navigateToPendingList } from "@/hooks/useInvitationCheck";
+import { collapseInvitationNotifications } from "@/services/invitationNotificationGrouping";
+import { setLastClaimAt, setPushPending } from "@/services/invitationClaimThrottle";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -55,6 +61,35 @@ export default function NotificationResponseHandler() {
           params: options.openSnoozeSheet ? { id, openSnooze: "1" } : { id },
         });
       },
+      // Tapped while the app is foregrounded (or the tap just launched it and
+      // this listener is already live) - a navigator exists here, unlike the
+      // headless task's own deps, so this can go straight to the invitation
+      // instead of waiting for the next useInvitationCheck() foreground pass.
+      onInvitationPush: async () => {
+        const outcome = await checkForInvitations(
+          navigateToInvitationPreview,
+          navigateToPendingList
+        );
+        // Only a reached server starts a cooldown; a failed tap-claim must
+        // leave the polling window open so the next foreground retries.
+        if (outcome.ok) {
+          await setLastClaimAt(Date.now());
+          await setPushPending(false);
+        }
+        return outcome;
+      },
+      applyRecipientTimeChange: (data: {
+        invitationId: string;
+        toDatetime: string;
+        fromDatetime: string;
+        recipientName: string;
+      }) =>
+        applyRecipientTimeChangeByInvitationId(
+          data.invitationId,
+          data.toDatetime,
+          data.fromDatetime,
+          data.recipientName
+        ),
     };
 
     // NOT a queue drain: this keeps resolving with the same response on every
@@ -88,9 +123,86 @@ export default function NotificationResponseHandler() {
       // ignore — listener may not be available in all environments
     }
 
+    // Separate from the response listener above: that one only fires on a
+    // TAP. An invitation push that arrives while the app is already open
+    // needs to be picked up without waiting for the user to tap the tray -
+    // this is the foreground-received case from
+    // hooks/useInvitationCheck.ts's own header (mount/foreground-resume
+    // covers launch and backgrounded-then-resumed; this covers "already
+    // looking at the app when the push lands").
+    let receivedSubscription: { remove: () => void } | null = null;
+    try {
+      receivedSubscription = Notifications.addNotificationReceivedListener(
+        async (notification: any) => {
+          const data = notification?.request?.content?.data;
+
+          // Applied immediately, not deferred to a tap: this is the
+          // sender's OWN reminder being corrected to match what the
+          // receiver actually chose - the local alert must not fire at the
+          // stale time just because the sender never tapped the tray.
+          if (data?.type === "invitation_time_changed" && typeof data.invitationId === "string") {
+            await applyRecipientTimeChangeByInvitationId(
+              data.invitationId,
+              data.toDatetime,
+              data.fromDatetime,
+              data.recipientName
+            );
+            return;
+          }
+
+          // A reminder's own scheduled notification carries reminderId, not
+          // an invitation's `type`. Stamped here rather than in the tap
+          // listener above: "delivered" and "the user acted on it" are
+          // different facts, and this only needs the first - see
+          // Reminder.notifiedAt for the real limitation (this listener only
+          // runs while the app process is alive).
+          if (data?.reminderId) {
+            await markNotifiedById(data.reminderId);
+          }
+
+          if (data?.type !== "invitation") return;
+
+          // Set BEFORE claiming, not after. If this claim fails (offline, an
+          // expired session) the flag survives, so the next launch claims
+          // regardless of the cooldown rather than losing a push that the
+          // device demonstrably received.
+          await setPushPending(true);
+
+          const outcome = await checkForInvitations(
+            navigateToInvitationPreview,
+            navigateToPendingList
+          );
+
+          if (outcome.ok) {
+            await setLastClaimAt(Date.now());
+            await setPushPending(false);
+          }
+          const claimed = outcome.claimed;
+
+          // B15: a push just landed while the app was alive to see it - if
+          // that leaves 2+ invitations pending, collapse the individual
+          // tray notifications into one summary rather than letting them
+          // stack. Single-pending stays exactly as today (server-sent,
+          // already sender-named per B11) - collapsing would just replace
+          // a good notification with a worse one.
+          const latest = claimed[claimed.length - 1];
+          if (claimed.length > 1 && latest) {
+            const names = await resolveSenderNames([latest.senderId]);
+            const latestSenderName = names[latest.senderId] ?? "Someone";
+            collapseInvitationNotifications(claimed.length, latestSenderName);
+          }
+        }
+      );
+    } catch {
+      // ignore — listener may not be available in all environments
+    }
+
     return () => {
       try {
         subscription?.remove();
+      } catch {}
+      try {
+        receivedSubscription?.remove();
       } catch {}
     };
   }, []);

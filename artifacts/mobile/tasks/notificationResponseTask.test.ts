@@ -14,6 +14,8 @@ import {
   type Reminder,
 } from "@/services/ReminderService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as InvitationService from "@/services/InvitationService";
+import { getPushPending } from "@/services/invitationClaimThrottle";
 
 jest.mock("expo-task-manager");
 
@@ -51,6 +53,39 @@ beforeEach(async () => {
 // These run in a headless JS context woken by TaskManager: there is no
 // navigator and no React tree, so the deps must not assume either.
 describe("buildBackgroundResponseDeps", () => {
+  // The headless context has no navigator, and claim_invitations() CONSUMES
+  // the row. Claiming here handed the invitation to the account and then had
+  // nowhere to show it: the tap opened the app to the home screen and the
+  // invitation was nowhere. The headless path must arm the flag and stop.
+  describe("an invitation push", () => {
+    it("arms pushPending instead of claiming", async () => {
+      const claimSpy = jest.spyOn(InvitationService, "checkForInvitations");
+      await buildBackgroundResponseDeps().onInvitationPush();
+
+      expect(await getPushPending()).toBe(true);
+      expect(claimSpy).not.toHaveBeenCalled();
+    });
+
+    it("leaves the invitation unclaimed all the way through a headless tap", async () => {
+      const claimSpy = jest.spyOn(InvitationService, "checkForInvitations");
+      await handleNotificationResponse(
+        {
+          actionIdentifier: "expo.modules.notifications.actions.DEFAULT",
+          notification: {
+            request: {
+              identifier: "notif-inv-1",
+              content: { data: { type: "invitation", invitationId: "inv-1" } },
+            },
+          },
+        },
+        buildBackgroundResponseDeps()
+      );
+
+      expect(claimSpy).not.toHaveBeenCalled();
+      expect(await getPushPending()).toBe(true);
+    });
+  });
+
   it("marks a reminder done from a headless tray action", async () => {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
 

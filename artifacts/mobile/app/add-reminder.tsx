@@ -1,7 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { getLocales } from "expo-localization";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -17,10 +18,21 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
+import { applySuggestedHour, suggestBetterHour } from "@/utils/adherenceCopy";
+import { computeAdherenceStats } from "@/utils/adherenceStats";
 import ContactPickerModal from "@/components/ContactPickerModal";
+import ListeningSurface from "@/components/ListeningSurface";
+import RegisterNumberNudge from "@/components/RegisterNumberNudge";
 import { useDictation } from "@/hooks/useDictation";
 import type { PickableContact } from "@/services/ContactsService";
-import type { ReminderRecipient } from "@/services/ReminderService";
+import {
+  incrementRegisterPromptCount,
+  markRegisterPromptShown,
+  shouldOfferNumberRegistration,
+  type ReminderRecipient,
+} from "@/services/ReminderService";
+import { checkReachability, isReachabilityStale } from "@/services/RecipientLookupService";
+import { sendInvitation } from "@/services/InvitationService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { formatTime12h } from "@/utils/formatDatetime";
@@ -52,8 +64,14 @@ type PickerMode = "date" | "time" | null;
 export default function AddReminderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { reminders, loading, addReminder, editReminder, defaultAlarmEnabled } =
-    useReminders();
+  const {
+    reminders,
+    loading,
+    addReminder,
+    attachInvitationId,
+    editReminder,
+    defaultAlarmEnabled,
+  } = useReminders();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const isEditing = !!id;
 
@@ -61,10 +79,19 @@ export default function AddReminderScreen() {
 
   // Who this reminder is about, if anyone. Undefined means an ordinary
   // personal reminder - the key must never be written as undefined.
+  // The offer to register the user's OWN number. Fired on the pick rather
+  // than on the save, because this screen navigates away the moment it saves -
+  // a nudge rendered there would unmount before it could be read. Holds the
+  // recipient's name, or null when no offer is on screen.
+  const [offerRegistration, setOfferRegistration] = useState<string | null>(null);
   const [recipient, setRecipient] = useState<ReminderRecipient | undefined>(
     undefined
   );
   const [pickerVisible, setPickerVisible] = useState(false);
+  // Low-key, additive Tier 2 status - never blocks the existing WhatsApp/
+  // local-reminder save (see handleSave). Intentionally minimal UI, expected
+  // to iterate; see report.
+  const [invitationError, setInvitationError] = useState<string | null>(null);
 
   // Natural language input (add mode only)
   const [input, setInput] = useState("");
@@ -81,6 +108,13 @@ export default function AddReminderScreen() {
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [alarm, setAlarm] = useState<boolean>(defaultAlarmEnabled);
   const [saving, setSaving] = useState(false);
+  /**
+   * Dismissal is per-visit, not persisted. A suggestion the user waved off
+   * for THIS reminder must not come back while they are still editing it,
+   * but a standing "never again" would silently kill the feature after one
+   * impatient tap.
+   */
+  const [suggestionDismissed, setSuggestionDismissed] = useState(false);
   const inputRef = useRef<TextInput>(null);
   // Auto-grow height for the description box, driven by onContentSizeChange
   // rather than a fixed minHeight — a fixed height either wastes space for a
@@ -158,6 +192,30 @@ export default function AddReminderScreen() {
     }
   };
 
+  // Walks the whole reminder list, so it is memoised against the list rather
+  // than recomputed on every keystroke in the title field.
+  const adherence = useMemo(() => computeAdherenceStats(reminders), [reminders]);
+
+  /**
+   * A better hour for this reminder, or null -- which is the common case by
+   * design (see suggestBetterHour). Recomputed as the user moves the time, so
+   * picking the strong hour by hand makes the banner go away on its own.
+   */
+  const timeSuggestion = useMemo(
+    () =>
+      suggestionDismissed ? null : suggestBetterHour(adherence, parsedDate.getHours()),
+    [adherence, parsedDate, suggestionDismissed]
+  );
+
+  const acceptTimeSuggestion = () => {
+    if (!timeSuggestion) return;
+    setParsedDate(applySuggestedHour(parsedDate, timeSuggestion.hour));
+    // The date no longer came from the typed text, so the "auto" badge would
+    // now be claiming something untrue.
+    setDateWasParsed(false);
+    setSuggestionDismissed(true);
+  };
+
   const handleSave = async () => {
     const title = isEditing ? editTitle : parsedTitle || input.trim();
     if (!title.trim()) {
@@ -165,21 +223,48 @@ export default function AddReminderScreen() {
       return;
     }
     setSaving(true);
+    setInvitationError(null);
     try {
+      const trimmedDescription = description.trim();
+      const datetimeIso = parsedDate.toISOString();
       const payload = {
         title: title.trim(),
-        description: description.trim(),
-        datetime: parsedDate.toISOString(),
+        description: trimmedDescription,
+        datetime: datetimeIso,
         alarm,
         // Spread rather than `recipient` so an unset value omits the key
         // entirely - `'recipient' in obj` is true even when it holds undefined.
         ...(recipient ? { recipient } : {}),
       };
+      let localId = id;
       if (isEditing && id) {
         await editReminder(id, payload);
       } else {
-        await addReminder(payload);
+        const added = await addReminder(payload);
+        localId = added.id;
       }
+
+      // Additive Tier 2 send - never blocks the Tier 1 save above, which has
+      // already completed by this point. A failure here degrades silently to
+      // the existing WhatsApp-link flow; only a low-key inline notice shows.
+      if (recipient?.appUserId && !isReachabilityStale(recipient.lookedUpAt)) {
+        const result = await sendInvitation(
+          recipient.appUserId,
+          title.trim(),
+          trimmedDescription,
+          datetimeIso
+        );
+        if (!result.ok) {
+          setInvitationError("Couldn't send in-app — you can still message via WhatsApp.");
+        } else if (localId) {
+          // Lets a later invitation_time_changed push find this exact local
+          // reminder (see Reminder.invitationId's header) - same wiring as
+          // QuickAddInput.tsx#performSave, duplicated here because this
+          // screen has its own independent save path.
+          await attachInvitationId(localId, result.invitationId);
+        }
+      }
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
     } catch {
@@ -349,6 +434,40 @@ export default function AddReminderScreen() {
       letterSpacing: 0.8,
       marginBottom: 10,
       paddingHorizontal: 4,
+    },
+    suggestCard: {
+      flexDirection: "row",
+      gap: 12,
+      backgroundColor: colors.warningSurface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 14,
+      marginTop: 12,
+    },
+    suggestText: {
+      fontSize: 13,
+      fontFamily: "Inter_400Regular",
+      color: colors.warningSurfaceForeground,
+      lineHeight: 19,
+    },
+    suggestActions: { flexDirection: "row", gap: 10, marginTop: 10 },
+    suggestBtn: {
+      paddingVertical: 7,
+      paddingHorizontal: 14,
+      borderRadius: colors.radiusCapsule,
+      backgroundColor: colors.primary,
+    },
+    suggestBtnText: {
+      fontSize: 13,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primaryForeground,
+    },
+    suggestDismiss: { paddingVertical: 7, paddingHorizontal: 8 },
+    suggestDismissText: {
+      fontSize: 13,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.warningSurfaceForeground,
     },
     previewCard: {
       backgroundColor: colors.card,
@@ -540,6 +659,19 @@ export default function AddReminderScreen() {
                   />
                 </Pressable>
               </View>
+              {editDictation.listening && (
+                <ListeningSurface
+                  heardSpeech={editDictation.heardSpeech}
+                  level={editDictation.level}
+                  interim={editDictation.interim}
+                  startedAt={editDictation.startedAt ?? undefined}
+                  lastHeardAt={editDictation.lastHeardAt}
+                  showLanguageLine={editDictation.showLanguageLine}
+                  onDone={editDictation.stop}
+                  onCancel={editDictation.cancel}
+                  testIDPrefix="edit-listening"
+                />
+              )}
               {!!editDictation.notice && (
                 <Text style={styles.micNoticeText}>{editDictation.notice}</Text>
               )}
@@ -585,6 +717,19 @@ export default function AddReminderScreen() {
                   }
                 />
               </Pressable>
+              {newDictation.listening && (
+                <ListeningSurface
+                  heardSpeech={newDictation.heardSpeech}
+                  level={newDictation.level}
+                  interim={newDictation.interim}
+                  startedAt={newDictation.startedAt ?? undefined}
+                  lastHeardAt={newDictation.lastHeardAt}
+                  showLanguageLine={newDictation.showLanguageLine}
+                  onDone={newDictation.stop}
+                  onCancel={newDictation.cancel}
+                  testIDPrefix="new-listening"
+                />
+              )}
               {!!newDictation.notice && (
                 <Text style={styles.micNoticeText}>{newDictation.notice}</Text>
               )}
@@ -757,6 +902,37 @@ export default function AddReminderScreen() {
               )}
             </View>
           </View>
+
+          {/* Timing nudge. Sits under the time the user just chose, states the
+              evidence for the swap, and never applies anything on its own --
+              an app that quietly moves a reminder is one the user stops
+              trusting with the times they care about. */}
+          {timeSuggestion && (
+            <View style={styles.suggestCard} testID="time-suggestion">
+              <Feather name="clock" size={18} color={colors.warningSurfaceForeground} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.suggestText} testID="time-suggestion-text">
+                  {timeSuggestion.text}
+                </Text>
+                <View style={styles.suggestActions}>
+                  <Pressable
+                    style={styles.suggestBtn}
+                    onPress={acceptTimeSuggestion}
+                    testID="time-suggestion-accept"
+                  >
+                    <Text style={styles.suggestBtnText}>Move it</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.suggestDismiss}
+                    onPress={() => setSuggestionDismissed(true)}
+                    testID="time-suggestion-dismiss"
+                  >
+                    <Text style={styles.suggestDismissText}>Keep mine</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          )}
           {/* Alarm toggle — label/sublabel text kept identical to the Settings
               screen's "Alarm sound" row (same setting, same wording, so it
               doesn't read as a different control here). */}
@@ -812,6 +988,14 @@ export default function AddReminderScreen() {
                       {recipient.name}
                     </Text>
                     <Text style={styles.recipientHint}>{recipient.phone}</Text>
+                    {recipient.appUserId ? (
+                      <View style={[styles.parsedBadge, { alignSelf: "flex-start", marginTop: 6 }]}>
+                        <Feather name="zap" size={10} color={colors.primary} />
+                        <Text style={styles.parsedBadgeText} testID="recipient-in-app-badge">
+                          Has the app — will also send in-app
+                        </Text>
+                      </View>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -834,6 +1018,17 @@ export default function AddReminderScreen() {
                 </Pressable>
               ) : null}
             </Pressable>
+            {invitationError ? (
+              <Text style={styles.micNoticeText} testID="invitation-error">
+                {invitationError}
+              </Text>
+            ) : null}
+            {offerRegistration !== null && (
+              <RegisterNumberNudge
+                recipientName={offerRegistration}
+                onDismiss={() => setOfferRegistration(null)}
+              />
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -844,8 +1039,37 @@ export default function AddReminderScreen() {
         onSelect={(c: PickableContact) => {
           // Name is a SNAPSHOT - never re-resolved from contacts, so a deleted
           // contact or a revoked permission cannot break an existing reminder.
-          setRecipient({ name: c.name, phone: c.phone, contactId: c.contactId });
+          const picked: ReminderRecipient = {
+            name: c.name,
+            phone: c.phone,
+            contactId: c.contactId,
+          };
+          setRecipient(picked);
           setPickerVisible(false);
+          setInvitationError(null);
+          // Registering the user's own number is what creates the Supabase
+          // session, and without a session checkReachability() below returns
+          // null for every contact - so no recipient can ever earn the in-app
+          // badge until this offer is taken. Counted when SHOWN, not when
+          // refused.
+          shouldOfferNumberRegistration().then(async (offer) => {
+            if (!offer) return;
+            markRegisterPromptShown();
+            await incrementRegisterPromptCount();
+            setOfferRegistration(picked.name);
+          });
+          // Additive Tier 2 check - never blocks or delays showing the picked
+          // contact; the existing Tier 1 WhatsApp-link flow keeps working
+          // unmodified whether this resolves, fails, or is still in flight.
+          const deviceRegion = getLocales()[0]?.regionCode ?? null;
+          checkReachability(picked, deviceRegion).then((result) => {
+            if (!result) return;
+            setRecipient((current) =>
+              current && current.phone === picked.phone
+                ? { ...current, appUserId: result.appUserId, lookedUpAt: result.lookedUpAt }
+                : current
+            );
+          });
         }}
       />
 

@@ -56,6 +56,8 @@ function makeDeps() {
       datetime: new Date("2026-08-07T08:30:00").toISOString(),
       completed: false,
     }),
+    onInvitationPush: jest.fn().mockResolvedValue(undefined),
+    applyRecipientTimeChange: jest.fn().mockResolvedValue("r1"),
   };
 }
 
@@ -363,5 +365,107 @@ describe("routing a body tap by reminder kind", () => {
     await handleNotificationResponse(makeResponse(SNOOZE_MORE_ACTION_ID), deps);
     expect(deps.navigateToDetail).toHaveBeenCalledWith("r1", { openSnoozeSheet: true });
     expect(deps.navigateToSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleNotificationResponse — invitation push", () => {
+  function makeInvitationResponse(
+    actionIdentifier: string,
+    overrides: { identifier?: string } = {}
+  ): NotificationResponseLike {
+    return {
+      actionIdentifier,
+      notification: {
+        request: {
+          identifier: overrides.identifier ?? "notif-invite-1",
+          content: {
+            data: { type: "invitation", invitationId: "inv-1" },
+          },
+        },
+      },
+    };
+  }
+
+  it("checks for invitations on a body tap, without touching any local-reminder logic", async () => {
+    const deps = makeDeps();
+    await handleNotificationResponse(makeInvitationResponse(DEFAULT_ACTION_IDENTIFIER), deps);
+    expect(deps.onInvitationPush).toHaveBeenCalledTimes(1);
+    expect(deps.navigateToDetail).not.toHaveBeenCalled();
+    expect(deps.navigateToSend).not.toHaveBeenCalled();
+    expect(deps.markDoneById).not.toHaveBeenCalled();
+  });
+
+  it("does not navigate itself - it delegates the whole reaction to the dep", async () => {
+    // This function never navigates for an invitation. WHAT the reaction is
+    // belongs to whoever built the deps: the foreground builder claims and
+    // navigates, the headless builder only arms pushPending because claiming
+    // with no navigator consumes the row and leaves nothing to present
+    // (see notificationResponseTask.ts).
+    const deps = makeDeps();
+    await handleNotificationResponse(makeInvitationResponse(DEFAULT_ACTION_IDENTIFIER), deps);
+    expect(deps.navigateToDetail).not.toHaveBeenCalled();
+  });
+
+  it("dedupes a replayed invitation response the same way as a local-reminder one", async () => {
+    const deps = makeDeps();
+    const response = makeInvitationResponse(DEFAULT_ACTION_IDENTIFIER);
+    await handleNotificationResponse(response, deps);
+    await handleNotificationResponse(response, deps);
+    expect(deps.onInvitationPush).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("invitation_time_changed push (respond-invitation's sender-facing push)", () => {
+  function makeTimeChangedResponse(
+    actionIdentifier: string,
+    overrides: { identifier?: string } = {}
+  ): NotificationResponseLike {
+    return {
+      actionIdentifier,
+      notification: {
+        request: {
+          identifier: overrides.identifier ?? "notif-time-changed-1",
+          content: {
+            data: {
+              type: "invitation_time_changed",
+              invitationId: "inv-1",
+              toDatetime: "2026-09-10T08:00:00.000Z",
+              fromDatetime: "2026-09-09T23:00:00.000Z",
+              recipientName: "Amma",
+            },
+          },
+        },
+      },
+    };
+  }
+
+  it("applies the change and navigates to the updated local reminder's detail screen", async () => {
+    const deps = makeDeps();
+    deps.applyRecipientTimeChange.mockResolvedValue("r1");
+    await handleNotificationResponse(makeTimeChangedResponse(DEFAULT_ACTION_IDENTIFIER), deps);
+
+    expect(deps.applyRecipientTimeChange).toHaveBeenCalledWith({
+      type: "invitation_time_changed",
+      invitationId: "inv-1",
+      toDatetime: "2026-09-10T08:00:00.000Z",
+      fromDatetime: "2026-09-09T23:00:00.000Z",
+      recipientName: "Amma",
+    });
+    expect(deps.navigateToDetail).toHaveBeenCalledWith("r1", { openSnoozeSheet: false });
+  });
+
+  it("does not navigate when the local reminder is already gone", async () => {
+    const deps = makeDeps();
+    deps.applyRecipientTimeChange.mockResolvedValue(undefined);
+    await handleNotificationResponse(makeTimeChangedResponse(DEFAULT_ACTION_IDENTIFIER), deps);
+    expect(deps.navigateToDetail).not.toHaveBeenCalled();
+  });
+
+  it("dedupes a replayed response", async () => {
+    const deps = makeDeps();
+    const response = makeTimeChangedResponse(DEFAULT_ACTION_IDENTIFIER);
+    await handleNotificationResponse(response, deps);
+    await handleNotificationResponse(response, deps);
+    expect(deps.applyRecipientTimeChange).toHaveBeenCalledTimes(1);
   });
 });

@@ -51,9 +51,73 @@ const CALLING_CODES: Record<string, string> = {
   MX: "52",
 };
 
+const REGION_NAMES: Record<string, string> = {
+  IN: "India",
+  US: "United States",
+  CA: "Canada",
+  GB: "United Kingdom",
+  AE: "United Arab Emirates",
+  SA: "Saudi Arabia",
+  QA: "Qatar",
+  KW: "Kuwait",
+  OM: "Oman",
+  BH: "Bahrain",
+  SG: "Singapore",
+  MY: "Malaysia",
+  AU: "Australia",
+  NZ: "New Zealand",
+  DE: "Germany",
+  FR: "France",
+  IT: "Italy",
+  ES: "Spain",
+  NL: "Netherlands",
+  IE: "Ireland",
+  CH: "Switzerland",
+  SE: "Sweden",
+  NO: "Norway",
+  DK: "Denmark",
+  ZA: "South Africa",
+  NG: "Nigeria",
+  KE: "Kenya",
+  LK: "Sri Lanka",
+  NP: "Nepal",
+  BD: "Bangladesh",
+  PK: "Pakistan",
+  JP: "Japan",
+  KR: "South Korea",
+  CN: "China",
+  HK: "Hong Kong",
+  PH: "Philippines",
+  ID: "Indonesia",
+  TH: "Thailand",
+  VN: "Vietnam",
+  BR: "Brazil",
+  MX: "Mexico",
+};
+
 export function callingCodeForRegion(region?: string | null): string | null {
   if (!region) return null;
   return CALLING_CODES[region.toUpperCase()] ?? null;
+}
+
+export interface CountryOption {
+  region: string;
+  name: string;
+  callingCode: string;
+}
+
+/**
+ * Every region with a known calling code, for a country-code picker UI.
+ * Sorted by name so the list reads naturally regardless of insertion order.
+ */
+export function listCountries(): CountryOption[] {
+  return Object.keys(CALLING_CODES)
+    .map((region) => ({
+      region,
+      name: REGION_NAMES[region] ?? region,
+      callingCode: CALLING_CODES[region],
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function deviceCallingCode(): string | null {
@@ -117,4 +181,71 @@ export function toWhatsAppDigits(normalized: string | null): string | null {
   if (!normalized) return null;
   const digits = normalized.replace(/\D/g, "");
   return digits || null;
+}
+
+/**
+ * A number normalized for IDENTITY - the string that gets hashed to find
+ * someone. Distinct from normalizePhone, which exists to build a wa.me link on
+ * the sender's own device and may guess freely because a wrong guess just falls
+ * back to SMS.
+ *
+ * Identity cannot guess freely. Both devices must derive the SAME string or the
+ * hashes never match, and the failure is silent and permanent: the recipient
+ * simply appears never to have installed the app.
+ */
+export interface PhoneIdentity {
+  /** E.164, or null when the input could not be resolved at all. */
+  e164: string | null;
+  /**
+   * True when a region had to be applied to resolve the number, meaning a
+   * device in a different region would have produced something else. The
+   * lookup is best-effort and a miss must not be cached as durable.
+   */
+  ambiguous: boolean;
+}
+
+/**
+ * Region is an EXPLICIT parameter, never read from the device. That is the
+ * whole point: normalizePhone reads getLocales() ambiently, which is correct
+ * for a wa.me link and wrong for identity.
+ */
+export function normalizeForIdentity(
+  raw: string | null | undefined,
+  region: string | null | undefined,
+  // True when `region` came from the user explicitly picking a country code
+  // (e.g. a registration-screen picker), not from guessing the device
+  // locale. An explicit pick removes the ambiguity entirely - a device in a
+  // different region would still resolve the same way, since the region
+  // isn't being guessed - so the result is safe to cache as durable.
+  regionExplicit = false
+): PhoneIdentity {
+  const trimmed = (raw ?? "").trim();
+  const hasPlus = trimmed.startsWith("+") || /^\(\s*\+/.test(trimmed);
+  const digits = trimmed.replace(/\D/g, "");
+
+  // Explicit international form: region is irrelevant, so both devices agree.
+  if (hasPlus && digits.length >= 8) {
+    return { e164: `+${digits}`, ambiguous: false };
+  }
+
+  // 00 is the other unambiguous international prefix.
+  if (digits.startsWith("00") && digits.slice(2).length >= 8) {
+    return { e164: `+${digits.slice(2)}`, ambiguous: false };
+  }
+
+  // Everything below needs a region to resolve. Unless that region was
+  // explicitly chosen, this is precisely what makes it ambiguous - a device
+  // in another region would answer differently.
+  const cc = callingCodeForRegion(region);
+  if (cc) {
+    // National trunk prefix: 0 followed by exactly 10 digits.
+    if (digits.startsWith("0") && digits.length === 11) {
+      return { e164: `+${cc}${digits.slice(1)}`, ambiguous: !regionExplicit };
+    }
+    if (digits.length === 10) {
+      return { e164: `+${cc}${digits}`, ambiguous: !regionExplicit };
+    }
+  }
+
+  return { e164: null, ambiguous: false };
 }

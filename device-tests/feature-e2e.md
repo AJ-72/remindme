@@ -5,11 +5,15 @@
 | ID | Scenario | Status | Last run | Auto? |
 | --- | --- | --- | --- | --- |
 | [D12](#d12) | Vague-task hint | `PASS` | 2026-08-29 | AUTO |
-| [D9](#d9) | Remind-someone-else Tier 1 | `PARTIAL` | 2026-08-29 | SEMI |
+| [D9](#d9) | Remind-someone-else Tier 1 | `PARTIAL` (core loop `PASS`) | 2026-08-30 | SEMI |
 | [D10](#d10) | Name capture and personalization | `PARTIAL` | 2026-08-24 | SEMI |
 | [D6](#d6) | Malayalam dictation end to end | `PENDING` | — | MANUAL |
 | [D11](#d11) | Quiet hours incl. midnight wrap | `PARTIAL` | 2026-09-04 | AUTO (partial) |
 | [D13](#d13) | "Why tasks slip" explainer | `PENDING` | — | SEMI |
+| [D40](#d40) | "How you're doing" adherence screen | `PENDING` | — | SEMI |
+| [D41](#d41) | Better-time suggestion on save | `PENDING` | — | SEMI |
+| [D42](#d42) | Postponed-task intervention panel | `PENDING` | — | SEMI |
+| [D43](#d43) | notifiedAt / openedAt stamping survives a cold-start race | `PENDING` | — | SEMI |
 
 ---
 
@@ -60,12 +64,19 @@ neither test title carries a parseable time — see the flow's own comments);
 
 Blocks backlog **B8** (M4 Tier 1 device sign-off).
 
-**Passing** (2026-08-24, user's OEM device): the send screen opens with the
-message pre-filled, the signature and invite line render, and WhatsApp
-receives the pre-filled text.
+**Core loop `PASS`** (2026-08-30, user's OEM device): a contact was picked
+from the phone's contacts and the pre-filled message sent by **both WhatsApp
+and SMS**. With the 2026-08-24 run (send screen opens pre-filled, signature
+and invite line render), that is the happy path end to end, and M4 Tier 1
+counts as shipped rather than pending.
+
+What is left below is the set of paths a happy-path run cannot reach. Each is
+worth its own run; step 1 of the unproven list is the one that would silently
+degrade every WhatsApp send on a whole class of devices.
 
 **Still outstanding** (needs a native build — `expo-contacts` has no OTA
-path).
+path). The full-loop steps below are retained because the cold-start tap and
+the notification body text were not part of the 2026-08-30 run.
 
 **Setup.** EAS build. Contacts permission not yet granted, so step 1
 exercises the prompt. Have a contact who **is** on WhatsApp and one who is
@@ -274,9 +285,875 @@ whole page then scrolls sideways), the article cannot be scrolled to its
 end, or body text drops to near-invisible contrast in one theme — the usual
 cause is a hardcoded colour that only suits the other.
 
-## D28 — System-wide "Remind Me" text-selection menu · `PENDING`
+---
 
-*Added 2026-09-10.* `ACTION_PROCESS_TEXT` is pure system integration: the
+<a id="d40"></a>
+## D40 — "How you're doing" adherence screen · `PENDING`
+
+*Added 2026-09-15.* Every number on this screen is derived from the reminder
+records themselves, so Jest proves the arithmetic. What Jest cannot see is a
+screen of stacked cards on a real viewport, the weekday bar row at a narrow
+width, and Malayalam reminder titles in the stuck list — Inter carries no
+Malayalam glyphs, so a missed `getFontFamily` call renders as boxes and only
+shows up on a device.
+
+**Setup.** A device with a real history: at least 10 reminders that have come
+due, a mix of finished and missed, spread over more than one hour of the day.
+Include at least one reminder with a Malayalam title, postponed 3+ times.
+
+**Steps.**
+1. From the home screen header, tap the bar-chart icon (`header-insights-button`), left of the name avatar. Also confirm Settings → **How you're doing** still opens the same screen.
+2. Read every card top to bottom. Scroll to the end.
+3. Rotate to landscape, then back.
+4. Switch the theme (light → dark → system) with the screen open.
+5. Tap a task in the "keeps moving" list.
+6. Tap **Why tasks slip** at the bottom.
+7. Clear all reminders, then reopen the screen.
+
+**Pass.**
+- Step 2: no clipped text, no card overlapping the tab bar or the notch, and
+  the weekday bars sit on one row with all seven labels legible.
+- Step 2: the Malayalam title in the stuck list renders as script, not boxes.
+- Step 4: every card is readable in both themes — the warning-surface panels
+  are the ones to watch, they are the least-used colour pair in the app.
+- Step 5 opens that reminder's detail screen.
+- Step 7 shows the "Nothing has come due yet" state, with no percentage and
+  no bar chart, rather than a row of zeroes.
+
+**Fails if.** Any percentage appears that the user cannot reconcile with
+their own list, the bars wrap to a second row, or Malayalam renders as boxes.
+
+---
+
+<a id="d41"></a>
+## D41 — Better-time suggestion on save · `PENDING`
+
+*Added 2026-09-15.* Deliberately a rare banner: it needs the chosen hour to be
+measurably worse than a well-sampled strong hour. The device risk is not the
+logic (Jest covers that) but placement — it appears between the parsed
+preview and the alarm toggle, on a screen that already scrolls, with the
+keyboard possibly up.
+
+**Setup.** A device whose history gives a clear strong hour (e.g. several
+finished 8 AM reminders) and a clear weak one (several missed 10 PM ones).
+
+**Steps.**
+1. Add a reminder for 10 PM. Watch for the banner as the time resolves.
+2. With the keyboard open, scroll the screen. Check the banner is reachable.
+3. Press **Move it**. Read the Time row.
+4. Press **Save**, then reopen the reminder.
+5. Add another 10 PM reminder. Press **Keep mine**, then **Save**.
+6. Add a reminder at an hour with no history at all.
+
+**Pass.**
+- Step 1: the banner names both hours and both percentages.
+- Step 2: the banner is not stuck under the keyboard or off-screen.
+- Step 3: the Time row changes to the suggested hour and the "auto" badge
+  is gone.
+- Step 4: the saved reminder is at the suggested hour, and the notification
+  is re-armed for the NEW time — check the tray at that time, not just the UI.
+- Step 5: the reminder saves at 10 PM, unchanged.
+- Step 6: no banner. Silence on an unmeasured hour is the intended behaviour.
+
+**Fails if.** The time changes without the user pressing **Move it**, or the
+old notification still fires after an accepted move.
+
+---
+
+<a id="d42"></a>
+## D42 — Postponed-task intervention panel · `PENDING`
+
+*Added 2026-09-15.* Appears on the detail screen at the third postponement.
+Replaces a line of Settings copy that used to promise alerts go quiet on their
+own — nothing implemented that, and this check exists partly to confirm the
+promise and the behaviour now agree.
+
+**Setup.** One reminder. A history that names a strong hour (see D41).
+
+**Steps.**
+1. Snooze the reminder twice from the tray. Open its detail screen.
+2. Snooze a third time. Reopen the detail screen.
+3. Press **Make it smaller**.
+4. Back on the detail screen, press **Try 8 AM–9 AM**.
+5. Wait for the new time and watch the tray.
+6. Settings → Smart Alerts. Read the closing paragraph.
+
+**Pass.**
+- Step 1: no panel at two postponements.
+- Step 2: the panel appears and says "You have moved this 3 times".
+- Step 3 opens the edit screen with the title editable.
+- Step 4: the reminder moves to the strong hour and stays open — it must not
+  be marked done.
+- Step 5: the alert actually fires at the new time. The panel changes the
+  schedule, so a stale notification here is a real bug.
+- Step 6: the paragraph describes the panel above and does **not** claim
+  alerts stop by themselves.
+
+**Fails if.** The panel ticks the task off, the moved reminder never fires, or
+Settings still promises behaviour the app does not have.
+
+<a id="d47"></a>
+## D47 — Registration "Skip for now" actually dismisses the screen · `PENDING`
+Jest's `expo-router` mock hardcodes `canGoBack()` to `true`, so the real
+router's behavior on first launch (no back stack under the pushed
+`register-number` screen) can only be proven on a device.
+
+**Setup.** Fresh install, or `@registration_onboarding_v1` cleared from
+AsyncStorage so first-run onboarding fires again.
+
+**Steps.**
+1. Launch the app, let permission onboarding settle, and wait for the
+   "Add your number" screen to appear.
+2. Tap **Skip for now**.
+3. Repeat from a fresh install, this time tapping the **X** close button
+   instead.
+
+**Pass.** Both dismiss the screen back to the home tab immediately, and
+relaunching the app does not show the registration screen again.
+
+**Fails if.** Either button leaves the same screen on-screen (the bug this
+fixed — a bare `router.back()` no-ops when there's nothing under this
+screen in the stack).
+
+<a id="d45"></a>
+## D45 — Country-code picker on registration · `PENDING`
+Malayalam-supporting app, real NRI user base — the device-region guess in
+`normalizeForIdentity` is wrong whenever a phone's system region doesn't
+match its SIM/carrier country (see `system_learnings.md`'s 2026-09-11
+entry). The picker's whole purpose is letting a real device with a
+mismatched region still register correctly, so it needs a device with an
+actually mismatched region to prove, not just Jest's mocked one.
+
+**Setup.** A device whose system locale region differs from its SIM/carrier
+country (or Settings → change system region temporarily).
+
+**Steps.**
+1. Open registration. Confirm the calling code shown matches the device's
+   guessed region.
+2. Tap the calling-code button, pick a different country from the list.
+3. Enter a national number for that country and register.
+
+**Pass.** The calling code button updates immediately on picking a country.
+The number sent to `selfRegister` uses the explicitly picked country's
+calling code, not the device's guessed one — confirm via the account this
+creates actually being reachable by lookup from a sender who expects that
+country's number.
+
+**Fails if.** The picker's selection doesn't change what gets submitted, or
+the device's guessed region silently wins anyway.
+
+---
+
+<a id="d43"></a>
+## D43 — notifiedAt / openedAt stamping survives a cold-start race · `PENDING`
+
+*Added 2026-09-16.* Jest proved the fix with two mocked functions racing each
+other (`services/ReminderService.test.ts`, "concurrent writes do not clobber
+each other"). What it cannot prove is the real trigger: a genuinely killed
+app, a real tap, real `AsyncStorage` I/O timing on a real device. The mocked
+version passing does not mean the real one does — this is exactly the class
+of bug (two async storage writers overlapping) that a real device's slower,
+less deterministic I/O could still expose in a shape the mock can't.
+
+**Setup.** One reminder due a few minutes out, with its notification alarm on.
+Force-stop the app (`adb shell am force-stop com.curios.remindme`), not just
+background it — the bug is specific to a fully killed process.
+
+**Steps.**
+1. Wait for the notification to arrive in the tray with the app killed.
+2. Tap it. This cold-starts the app straight into `reminder-detail` while
+   `RemindersProvider`'s own mount-time reschedule sweep is also running.
+3. Force-stop and repeat steps 1-2 four or five times in a row.
+4. After each run, use `adb shell run-as com.curios.remindme` (or the
+   Settings → backup export, which reads the same storage) to inspect the
+   reminder's raw stored JSON.
+
+**Pass.** Every run leaves `openedAt` set (the screen was opened) — and
+`notifiedAt`, only if the app process was still alive when the tap-triggered
+launch reached the received listener (see `Reminder.notifiedAt`'s own
+real-limitation note — `notifiedAt` can legitimately be absent on a true
+cold-start tap; `openedAt` is the one that must never be lost).
+
+**Fails if.** `openedAt` is missing on some runs but not others — that
+pattern (present sometimes, absent other times, same steps every time) is
+exactly the signature of the lost-update race the write lock was meant to
+close, and would mean the fix doesn't hold on real device I/O timing even
+though it holds against the mock.
+
+---
+
+## D48 — First run no longer leaves the app for exact-alarm settings — `PENDING`
+
+**Why hardware only.** Jest has no system settings screen and no launcher, so
+the old auto-jump to Android's exact-alarm settings and its absence look
+identical to the suite. The whole point of this change is what the user sees
+in the first ten seconds of a real install, which is exactly what jsdom
+cannot render.
+
+**Setup.** A fresh install on Android 12+ (uninstall first, or
+`adb shell pm clear com.curios.remindme` — the flags are in `AsyncStorage`,
+so a plain reinstall over existing data proves nothing).
+
+**Steps.**
+1. Launch the app for the first time.
+2. Watch what happens, without touching anything.
+
+**Pass.** The name sheet opens, with the home screen behind it. No system
+dialog of any kind appears: no notification permission dialog, and no
+exact-alarm settings screen. The `register-number` modal never appears.
+`ExactAlarmBanner` is visible at the top of the home screen if the permission
+is missing, and its button still reaches the settings screen when tapped.
+
+**Fails if.** The device leaves the app for a system settings screen at any
+point without a tap, or a notification permission dialog appears before the
+first save (that ask now belongs to D50), or the "Add your number" modal
+appears on top of the name sheet, or the name sheet never opens at all.
+
+## D49 — A skipped name is still skipped after a relaunch — `PENDING`
+
+**Why hardware only.** The flag survives in real `AsyncStorage` across a real
+process death, which the in-memory mock cannot demonstrate.
+
+**Setup.** Continue from D48, or a fresh install.
+
+**Steps.**
+1. On the name sheet, tap Skip.
+2. Force-stop the app (`adb shell am force-stop com.curios.remindme`).
+3. Launch it again.
+
+**Pass.** The home screen opens directly. No name sheet, no permission
+dialog, no number modal. The header keeps its tap-to-add-name affordance.
+
+**Fails if.** Any first-run surface reappears — that would mean the flag did
+not persist, and every cold start would nag a user who already declined.
+
+## D50 — The notification ask arrives on the first save — `PENDING`
+
+**Why hardware only.** Jest cannot show an Android permission dialog, so it
+cannot prove where in the flow the dialog lands, nor that the reminder saved
+in the same action still rings.
+
+**Setup.** A fresh install (`adb shell pm clear com.curios.remindme`).
+
+**Steps.**
+1. Launch the app and answer or skip the name sheet.
+2. Type a reminder for two minutes from now and save it.
+3. Grant the notification permission when the dialog appears.
+4. Lock the device and wait for the reminder time.
+
+**Pass.** The permission dialog appears at step 2, not before. The reminder
+saves and appears in the list. It rings at the set time.
+
+**Fails if.** No dialog appears at the first save, or the dialog appears but
+the reminder is missing from the list afterwards, or the reminder is listed
+but never rings — the last one means the save raced the grant and scheduled
+nothing.
+
+## D51 — A refused permission shows a live repair path — `PENDING`
+
+**Why hardware only.** `canAskAgain` is set by the real Android package
+manager after real refusals; the mock cannot reach the state where the OS
+silently drops a request.
+
+**Setup.** A fresh install.
+
+**Steps.**
+1. Save a reminder and refuse the notification dialog.
+2. Look at the home screen and at the saved reminder's card.
+3. Tap **Turn on** in the banner and refuse again.
+4. Repeat until Android stops showing the dialog (two refusals on most
+   builds), then tap **Turn on** once more.
+5. Grant the permission in the settings screen and return to the app.
+
+**Pass.** The banner reads "Notifications are off. Your reminders will not
+ring." and the future reminder's card carries a **Will not ring** chip. At
+step 4 the app opens its own page in system settings instead of doing
+nothing. On return the banner and the chip both disappear without a
+relaunch.
+
+**Fails if.** Tapping **Turn on** produces no visible change at any point —
+that is the exact dead-button failure this ladder exists to remove — or the
+banner stays after permission is granted.
+
+## D52 — The nudge names a ring the user already lost — `PENDING`
+
+**Why hardware only.** It needs a reminder whose time truly passes on a real
+clock, with the permission truly off.
+
+**Setup.** Continue from D51 with the permission still refused.
+
+**Steps.**
+1. Save a reminder for one minute from now.
+2. Wait two minutes with the app closed.
+3. Open the app.
+
+**Pass.** The banner reads "A reminder passed without ringing. Notifications
+are off." The overdue reminder's card carries no **Will not ring** chip.
+
+**Fails if.** The banner keeps the generic wording, or the overdue card
+shows the chip — granting permission cannot rescue that ring, so the chip
+there would be a label the user can do nothing about.
+
+## D53 — Dictation ends itself after a pause — `PENDING`
+
+**Why hardware only.** Jest has no microphone and no recognizer. The pause
+clock only means something against real speech, real partial results and a
+real device's recognition delay.
+
+**Setup.** Grant the microphone permission. Open the home screen.
+
+**Steps.**
+1. Tap the mic.
+2. Say "buy milk tomorrow at six", then stop speaking and do nothing.
+3. Watch the input field and the listening panel.
+
+**Pass.** The panel appears the moment the mic opens and reads "Listening —
+say your reminder". It changes to "stop speaking when you're done" as soon
+as words appear. About two and a half seconds after the last word, the panel
+disappears by itself, the pulse stops, and the text stays in the field.
+
+**Fails if.** The mic stays open after the pause, or the text disappears
+when the session ends, or the panel never appears.
+
+## D54 — Cancel throws the words away, Done keeps them — `PENDING`
+
+**Why hardware only.** It needs a real recognizer, whose last partial result
+can arrive after the tap.
+
+**Setup.** Continue from D53.
+
+**Steps.**
+1. Type "pay rent" into the field.
+2. Tap the mic and say "and call the bank".
+3. Tap **Cancel**.
+4. Tap the mic again, say "and call the bank", and tap **Done**.
+
+**Pass.** After step 3 the field reads exactly "pay rent" and nothing is
+added a moment later. After step 4 the field holds both phrases. Each tap
+gives a short vibration.
+
+**Fails if.** Cancel leaves the dictated words behind, or a late result
+lands in the field a second after Cancel, or Cancel empties a field that
+already held typed text.
+
+## D55 — An open mic that hears nothing says so — `PENDING`
+
+**Why hardware only.** Silence on a real microphone is not silence in Jest:
+some devices emit empty results, some emit nothing at all.
+
+**Setup.** A quiet room.
+
+**Steps.**
+1. Tap the mic and say nothing for about eight seconds.
+
+**Pass.** After about six seconds the panel disappears and the app says
+"Didn't hear anything — try again or type it in."
+
+**Fails if.** The mic stays open, or it closes with no message at all.
+
+## D56 — Leaving the app stops dictation — `PENDING`
+
+**Why hardware only.** Android gives the microphone to whatever comes to the
+front. Only a real device shows what the app is left holding.
+
+**Setup.** Grant the microphone permission.
+
+**Steps.**
+1. Tap the mic and say "book the tickets".
+2. Press Home, or take an incoming call.
+3. Return to the app.
+
+**Pass.** The panel is gone, the pulse has stopped, and "book the tickets"
+is still in the field. The app says the voice input stopped when you left.
+
+**Fails if.** The pulse is still running on return, or the mic is still
+held, or the words are lost.
+
+## D57 — The contacts ask explains itself before the OS asks — `PENDING`
+
+**Why hardware only.** Android gives an app one contacts dialog and then
+stops. Only a real device can show that the dialog was not spent, and that
+the app behaves when it is gone.
+
+**Setup.** A fresh install. Do not grant contacts.
+
+**Steps.**
+1. Tap the person icon beside the mic.
+2. Read what appears, then tap **Type a number instead** and close the sheet.
+3. Open the sheet again and tap **Choose from contacts**. Refuse the system
+   dialog.
+4. Tap **Allow contacts** and refuse again, until Android stops asking.
+5. Open the sheet once more.
+
+**Pass.** At step 2 the system dialog never appears. At step 4 the sheet
+offers **Allow contacts**, not settings. At step 5 the sheet reads
+"Contacts are turned off" and offers **Open settings**, which opens the app's
+own page. Every one of these states also offers **Type a number instead**.
+
+**Fails if.** The system dialog appears before step 3, or **Allow contacts**
+does nothing once Android has stopped asking, or any state leaves the user
+with no way forward.
+
+## D58 — A reminder for someone, with no address book — `PENDING`
+
+**Why hardware only.** It has to prove that a real send works from a number
+that never came from the contacts list.
+
+**Setup.** Contacts refused, from D57.
+
+**Steps.**
+1. Type "call about the invoice tomorrow at 10".
+2. Tap the person icon, then **Type a number instead**.
+3. Type a name and a real number you can message, then **Use this number**.
+4. Save, open the reminder's card, and send by WhatsApp or SMS.
+
+**Pass.** The chip names the person typed in. The message opens with the
+right text and the right number. The reminder behaves like any other.
+
+**Fails if.** The number is rejected, the chip shows the raw digits when a
+name was typed, or the send opens with the wrong number.
+
+## D59 — The number offer arrives after a send, and stops — `PENDING`
+
+**Why hardware only.** The offer follows a real handoff to WhatsApp or SMS,
+which Jest cannot perform.
+
+**Setup.** A fresh install with no registered number.
+
+**Steps.**
+1. Create and send a reminder to somebody.
+2. Return to the app and look below the send buttons.
+3. Tap **Not now**.
+4. Send a second reminder, and a third.
+
+**Pass.** No offer appears before the first send. After it, the offer names
+the person just reminded. It appears once more on the second send, and never
+again on the third.
+
+**Fails if.** The offer appears before any send, or keeps appearing after
+two refusals, or appears at all for a user whose number is registered.
+
+## D60 — The name sheet stays above the keyboard — `PENDING`
+
+**Why hardware only.** jsdom has no soft keyboard, so a field it covers
+renders identically to one it does not.
+
+**Setup.** A fresh install, first launch.
+
+**Steps.**
+1. Wait for the name sheet.
+2. Tap the name field.
+3. Type a name, and watch the field while typing.
+
+**Pass.** The field, the Continue button and the Skip link all stay visible
+above the keyboard. Every character typed is readable.
+
+**Fails if.** The keyboard covers the field, the button, or the link.
+
+## D61 — The notification banner's button is never dead — `PENDING`
+
+**Why hardware only.** Only a real OS keeps `canAskAgain`, and only system
+settings can revoke a permission that was already granted.
+
+**Setup.** A reminder saved with notifications granted.
+
+**Steps.**
+1. Turn notifications off for this app in Android settings.
+2. Return to the app and read the banner's button.
+3. Tap it.
+4. Turn the permission back on, and come back to the app.
+
+**Pass.** The button reads **Open settings**, not Turn on. The tap opens this
+app's settings page. The banner and every card clear on return, with no
+relaunch.
+
+**Fails if.** The button reads Turn on, or the tap does nothing at all. This
+is the reported defect.
+
+## D62 — Dictation keeps every sentence across a pause — `PENDING`
+
+**Why hardware only.** Only a real recognizer closes a segment at a pause and
+starts the next one from empty. That is the behaviour that used to erase the
+field.
+
+**Setup.** Any screen with a mic.
+
+**Steps.**
+1. Tap the mic and say "buy milk".
+2. Pause for about one second, and say "and bread".
+3. Stop speaking and let the session close itself.
+
+**Pass.** The field reads "buy milk and bread". Nothing is erased at the
+pause. The session closes about 2.5 seconds after the last word, and keeps
+the text.
+
+**Fails if.** The field clears at the pause, or holds only the last sentence,
+or the text changes after the session closes.
+
+## D63 — The add/edit sheet dictates like the home bar — `PENDING`
+
+**Why hardware only.** Same recognizer behaviour as D62, on the second
+screen that has a mic.
+
+**Setup.** Open **Add reminder**, then open an existing reminder to edit.
+
+**Steps.**
+1. Tap the mic on the new-reminder field and speak two sentences with a pause.
+2. Let it close itself.
+3. Repeat, and press **Cancel** instead.
+4. Repeat on the edit screen's title field.
+
+**Pass.** The listening panel appears on both screens, with Done and Cancel.
+The pause keeps both sentences. Cancel puts back the text as it was.
+
+**Fails if.** Either screen shows no panel, loses a sentence, or leaves the
+mic open with no way to stop it.
+
+## D64 — Remind someone else is always reachable — `PENDING`
+
+**Why hardware only.** A control that is present but off-screen, or behind
+the keyboard, passes in Jest and fails on a phone.
+
+**Setup.** A fresh install.
+
+**Steps.**
+1. Look below the input bar on the home screen.
+2. Tap **Remind someone else**.
+3. Choose a contact, and look at the button again.
+
+**Pass.** The labelled button is visible from install day, opens the picker,
+and stays on screen after a recipient is chosen.
+
+**Fails if.** The button is missing, covered by the keyboard, or disappears
+once a recipient is attached.
+
+## D65 — A typed number carries its country code — `PENDING`
+
+**Why hardware only.** The defect it prevents comes from the device locale
+disagreeing with the SIM, which jsdom cannot have.
+
+**Setup.** A device whose system region differs from its SIM country, if you
+have one.
+
+**Steps.**
+1. Tap **Remind someone else**, then **Type a number instead**.
+2. Read the country-code field before typing.
+3. Clear the country code and try to submit.
+4. Put a code back, type a real number, and send.
+
+**Pass.** The code field is filled from the device region. Submit is refused
+with no code. The message opens with the full international number.
+
+**Fails if.** The code is missing, ignored, or doubled in the sent number.
+
+## D66 — The number offer reaches the people who need it — `PENDING`
+
+**Why hardware only.** The offer is what creates the Supabase session, so
+only a device can show whether the bolt badge comes back afterwards.
+
+**Setup.** A fresh install with no registered number, and a second device
+that has the app with a registered number.
+
+**Steps.**
+1. Choose the second device's contact as a recipient on the add/edit screen.
+2. Read what appears under the recipient row.
+3. Take the offer and register your number.
+4. Choose the same contact again.
+
+**Pass.** The offer appears at the pick, names the person, and appears at
+most twice per install. After registering, the recipient chip carries the
+bolt badge.
+
+**Fails if.** No offer appears, or the badge never returns after registering.
+This is the reported defect.
+
+## D67 — The cold open shows examples, not an empty list — `PENDING`
+
+**Why hardware only.** Jest has no viewport. The three chips wrap onto a
+second row on a narrow phone, and the Malayalam chip needs the bundled Noto
+font to render at all — a missing glyph shows as boxes, which the suite
+cannot see.
+
+**Setup.** A fresh install, or Settings → Apps → Reminders → Clear storage.
+
+**Steps.**
+1. Open the app and save the name sheet, or skip it.
+2. Read the three example chips and the line below them.
+3. Tap the Malayalam chip.
+4. Save the reminder, then look at the composer again.
+
+**Pass.** Three chips are on screen, none clipped. The Malayalam chip shows
+Malayalam letters, not boxes. A tap fills the composer and the date pills
+appear. The block is gone once the first reminder is saved.
+
+**Fails if.** A chip is cut off, the Malayalam renders as boxes, or the block
+stays on screen over a saved reminder.
+
+## D68 — The send-to-a-person chip reads the name — `PENDING`
+
+**Why hardware only.** The chip depends on the live parser and on the
+keyboard: it appears under the composer, which is where the soft keyboard
+opens.
+
+**Setup.** Any install. No recipient chosen.
+
+**Steps.**
+1. Type `Call Amma at 7 pm` and read below the date pills.
+2. Type `Take medicine at 9 am` instead.
+3. Type a Malayalam line naming a person, for example
+   `പ്രിയയോട് പറയണം`.
+4. Tap the chip, then choose a contact.
+5. Type `Call Amma at 7 pm` again and dismiss the chip with the ×.
+
+**Pass.** The chip says *Send to Amma instead?* and stays above the keyboard.
+It stays away from the medicine line. It names the Malayalam person in
+Malayalam letters. Tapping it opens the contact picker. The chip goes after a
+recipient is attached, and after a dismissal it does not come back for that
+name.
+
+**Fails if.** The chip names a thing rather than a person, hides behind the
+keyboard, or returns after it is dismissed.
+
+## D69 — The number offer arrives on the third reminder — `PENDING`
+
+**Why hardware only.** The offer is capped across installs, so only real
+storage across real app restarts proves the cap holds.
+
+**Setup.** A fresh install with no registered number.
+
+**Steps.**
+1. Save two reminders and read the bottom of the list.
+2. Save a third and read the bottom of the list again.
+3. Tap **No thanks**, then close and reopen the app.
+4. Repeat until the offer has been shown twice, then save more reminders.
+
+**Pass.** Nothing appears after two reminders. After the third, the offer
+appears under the list, reading *Remind someone else?*. **Add my number**
+opens the registration screen. After two refusals the offer never returns.
+
+**Fails if.** The offer appears early, appears twice in one run of the app,
+or keeps returning after the second refusal.
+
+## D70 — The waveform answers the user's own voice — `PENDING`
+
+**Why hardware only.** Jest has no microphone. It can prove the bars are wired
+to `volumechange` and nothing else; only a person speaking can prove the
+recogniser emits those events on this device at all. Android drives them from
+`onRmsChanged`, which some OEM speech services report sparsely or not at all.
+
+**Setup.** A debug build on a real device, in a quiet room.
+
+**Steps.**
+1. Tap the mic on the home screen and stay silent for three seconds.
+2. Say "call Amma at seven" in a normal voice.
+3. Say the same words loudly, then almost whisper them.
+4. Cover the microphone with a finger and speak.
+5. Repeat all of the above in the add-reminder sheet, on both fields.
+
+**Pass.** The bars sit flat and low while the room is quiet. They rise as soon
+as speech starts and follow its loudness: a loud voice makes a visibly taller
+wave than a whisper. A covered microphone keeps the bars flat.
+
+**Fails if.** The bars never move, move on their own while the room is silent,
+or move identically whatever the volume. A flat wave during clear speech means
+this device sends no volume events — record the device and Android version,
+because the surface then needs a fallback.
+
+## D71 — The guessed words read as guesses — `PENDING`
+
+**Why hardware only.** Only a real recogniser decides when a segment becomes
+final. jsdom fires whatever the test tells it to.
+
+**Setup.** A debug build. Dictation language English, then Malayalam.
+
+**Steps.**
+1. Tap the mic and say a long sentence without pausing.
+2. Watch the grey line under the waveform while speaking.
+3. Pause and watch what happens to the field.
+4. Switch the dictation language to Malayalam and dictate a Malayalam reminder.
+5. Tap **Done** in the middle of a word.
+
+**Pass.** The words appear in grey under the waveform first, and move into the
+field when the recogniser settles on them. The field never shows a half-guessed
+word in the same colour as a settled one. The Malayalam guess renders as
+Malayalam letters, not boxes. **Done** keeps the half-spoken segment.
+
+**Fails if.** The grey line stays empty during speech, the field fills with
+guesses, Malayalam shows as boxes, or **Done** loses the last words.
+
+## D72 — The pause bar tells the truth about the clock — `PENDING`
+
+**Why hardware only.** The bar is drawn from wall-clock time against a real
+recogniser's result timing. A fake clock proves the arithmetic, not the fit.
+
+**Setup.** A debug build.
+
+**Steps.**
+1. Tap the mic and say two words, then stop speaking and watch the bar.
+2. Before the bar fills, say another word.
+3. Let the bar fill completely without speaking.
+4. Tap the mic and say nothing at all for ten seconds.
+
+**Pass.** The bar appears only after the first word. It fills over about two
+and a half seconds. A new word sends it back to empty. The label changes to
+*Stopping…* about halfway. The session ends as the bar completes, and the words
+are kept. With nothing said at all, no bar appears and the session closes at
+about six seconds with *Didn't hear anything*.
+
+**Fails if.** The bar appears before any speech, does not reset on a new word,
+or finishes at a visibly different moment from the session itself.
+
+## D73 — The mic says which languages it takes, once — `PENDING`
+
+**Why hardware only.** The line is once per install, so only real storage
+across real app restarts proves it stays gone.
+
+**Setup.** A fresh install.
+
+**Steps.**
+1. Tap the mic and read the line under the waveform.
+2. Cancel, tap the mic again, and read the same place.
+3. Close the app fully, reopen it, and tap the mic.
+4. Open the add-reminder sheet and tap the mic on both fields.
+
+**Pass.** The first microphone of the install says *Speak your reminder.
+English or Malayalam — change it in Settings.* No later microphone says it
+again, in any field, in any run of the app.
+
+**Fails if.** The line returns on a second tap or after a restart, or never
+appears at all on a fresh install.
+
+## D74 — An invited install never sees onboarding — `PENDING`
+
+**Why hardware only.** The launch URL only exists when the OS opens the app
+from a real link. Jest can fake `getInitialURL`; it cannot prove Android hands
+this app that URL at cold start, which is the whole claim.
+
+**Setup.** A device with the app **not installed**. A real invite link sent
+from a second device.
+
+**Steps.**
+1. Install the app but do not open it from the launcher.
+2. Tap the invite link in the message.
+3. Watch every screen between the tap and the reminder.
+4. Read the screen when it settles.
+
+**Pass.** The link opens the app straight onto the invitation. No name sheet
+appears at any point. No "You're all set" screen appears before the
+invitation. The sender's name and the reminder time are on screen.
+
+**Fails if.** The name sheet renders over the bind screen, a success screen
+flashes before the invitation, or the app lands on the empty home list.
+
+## D75 — The ring ask carries the sender's stake — `PENDING`
+
+**Why hardware only.** Only a real device shows the Android permission dialog,
+and only a real install has an unspent one.
+
+**Setup.** A fresh install reached by an invite link. Notifications not yet
+granted.
+
+**Steps.**
+1. Tap **Accept** on the invitation.
+2. Read the panel before any system dialog appears.
+3. Tap **Allow** and answer the Android dialog.
+4. Repeat on a second fresh install, tapping **Not now** instead.
+5. Repeat on an install where notifications are already on.
+
+**Pass.** The panel appears before the Android dialog and names the sender and
+the time. **Allow** opens the Android dialog. **Not now** accepts the
+invitation anyway and the reminder appears on the home list. With notifications
+already on, no panel appears and Accept goes straight through.
+
+**Fails if.** The Android dialog opens before the sentence is read, the panel
+names the wrong person or time, or **Not now** loses the reminder.
+
+## D76 — The invited name ask lands on the home screen — `PENDING`
+
+**Why hardware only.** The ask is written at accept and read on a screen that
+stayed mounted underneath. Only a real accept, on a real device, proves the
+home screen notices.
+
+**Setup.** A fresh install reached by an invite link, with no name set.
+
+**Steps.**
+1. Accept the invitation and watch the home screen.
+2. Read the panel under the reminder list.
+3. Tap **Skip**, then close and reopen the app.
+4. Repeat on a second install and tap **Add name** instead.
+5. Repeat with a sender whose name is in Malayalam.
+
+**Pass.** The panel appears under the list after Accept, reading *<Sender> sees
+that someone accepted. Add your name so they see who.* **Skip** removes it for
+good, including after a restart. **Add name** opens the name sheet and the
+header greeting changes at once. A Malayalam sender name renders as Malayalam
+letters, not boxes.
+
+**Fails if.** The panel never appears, returns after being skipped or answered,
+names the wrong person, or shows boxes for a Malayalam name.
+
+---
+
+## D77 — Nothing hides behind the tab bar — `PENDING`
+
+**Why hardware only.** Jest runs in jsdom with no viewport, so it cannot see
+one view painted over another. The tab bar sits on `position: "absolute"`,
+which only a real screen shows.
+
+**Setup.** A device with a gesture bar and a device with hardware keys, if both
+are available. Enough reminders to make the home list scroll.
+
+**Steps.**
+1. Open Home and scroll to the bottom of the list.
+2. Read the last card, and the **Remind someone else?** panel under it.
+3. Open Settings and scroll to the bottom.
+4. Read the last row and any text under it.
+5. Open About and read the version line.
+
+**Pass.** On all three tabs the last item is fully readable above the tab bar,
+with a clear gap. No text or button is cut off, and no item needs an extra pull
+to come into view. Reported as a defect on 2026-09-17: the **Remind someone
+else?** panel was cut off on Home.
+
+---
+
+## D78 — First-launch feature tour (coach marks) — `PENDING`
+
+**Why hardware only.** Jest cannot measure real screen coordinates
+(`measureInWindow`), so the spotlight cutout position, whether the tooltip
+card clips off-screen, and whether the SVG mask actually dims the rest of the
+screen are all unverified by the passing unit/context tests in
+`contexts/TourContext.test.tsx`.
+
+**Setup.** A fresh install (clear app data, or a new device), no reminders yet.
+
+**Steps.**
+1. Complete first launch through the name prompt (answer or skip it).
+2. Confirm the tour starts on its own, spotlighting the quick-add field first.
+3. Step through every card with **Next**, confirming each spotlight lands on
+   the right control: quick-add field, mic button, (no spotlight) snooze
+   card, Insights icon, Remind-someone-else button, then Smart Alerts on the
+   Settings screen (the tour should navigate there on its own for this step).
+4. Tap **Skip** partway through on a fresh reinstall; confirm the overlay
+   closes immediately and does not reappear on the next cold start.
+5. From Settings → More → **Feature tour**, replay the tour on demand and
+   confirm it still runs correctly on a device that has already seen it.
+6. Try a small device and confirm the tooltip card never renders off-screen
+   or overlapping the spotlighted control.
+
+**Pass.** The tour appears once automatically on first launch, every
+spotlight aligns with the real control it names, Skip and Next both work at
+every step, the on-demand replay from Settings works after the tour has
+already been seen, and the tooltip card stays fully on-screen at each step.
+
+**Fails if.** The tour never appears on first launch, appears again on a
+later cold start after being finished/skipped, a spotlight is misaligned or
+missing on a control that does exist, the tour gets stuck navigating to
+Settings for the Smart Alerts step, or the tooltip card clips off-screen.
+
+## D79 — System-wide "Remind Me" text-selection menu · `PENDING`
+
+*Added 2026-09-17.* `ACTION_PROCESS_TEXT` is pure system integration: the
 menu entry, the launch intent and the singleTask re-use path all live in the
 OS. Jest only proves that text put on the `sharedText` channel reaches
 QuickAddInput. Needs a **native build** (dev client or release) — a Metro

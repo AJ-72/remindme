@@ -29,6 +29,7 @@ import { Platform } from "react-native";
 import * as TaskManager from "expo-task-manager";
 
 import {
+  applyRecipientTimeChangeByInvitationId,
   cancelNotification,
   cancelScheduledForReminder,
   getSnoozePreset,
@@ -46,6 +47,7 @@ import {
   type NotificationResponseHandlerDeps,
   type NotificationResponseLike,
 } from "@/services/notificationResponseHandler";
+import { setPushPending } from "@/services/invitationClaimThrottle";
 
 // eslint-disable-next-line
 let Notifications: any = null;
@@ -88,6 +90,40 @@ export function buildBackgroundResponseDeps(): NotificationResponseHandlerDeps {
     // taking down the task before the storage write.
     navigateToDetail: () => {},
     navigateToSend: () => {},
+    // THE HEADLESS PATH MUST NOT CLAIM. It arms a flag and stops.
+    //
+    // claim_invitations() CONSUMES the row: it sets recipient_id, and its own
+    // `recipient_id is null` guard means a second call returns nothing. This
+    // context has no navigator, so claiming here handed the invitation to the
+    // recipient's account and then dropped it on the floor - the tap launched
+    // the app, useInvitationCheck claimed an empty list, and the user watched
+    // their notification open the home screen with no invitation anywhere.
+    // The cold-start replay could not rescue it either: markResponseHandled()
+    // above has already fired, so getLastNotificationResponseAsync()'s pass
+    // through handleNotificationResponse() dedupes straight out.
+    //
+    // Arming pushPending instead leaves the row unclaimed for the one context
+    // that can actually present it. An invitation push carries no custom
+    // actions, so every tap is the default open-the-app action; the app
+    // launches, useInvitationCheck claims with the cooldown bypassed, and
+    // navigates with a real navigator. If that launch somehow never happens,
+    // nothing is lost - the invitation simply stays pending server-side and
+    // the next app open collects it.
+    onInvitationPush: async () => {
+      await setPushPending(true);
+    },
+    // Applying the change itself does NOT need a navigator - only routing
+    // to it afterward does, and navigateToDetail above is already the
+    // inert no-op for that. Still worth doing headlessly: the local
+    // reminder's time/notification should be corrected even if the app
+    // never gets foregrounded from this tap.
+    applyRecipientTimeChange: (data) =>
+      applyRecipientTimeChangeByInvitationId(
+        data.invitationId,
+        data.toDatetime,
+        data.fromDatetime,
+        data.recipientName
+      ),
   };
 }
 

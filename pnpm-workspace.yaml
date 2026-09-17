@@ -115,7 +115,12 @@ overrides:
   "esbuild>@esbuild/sunos-x64": "-"
   "esbuild>@esbuild/win32-arm64": "-"
   "esbuild>@esbuild/win32-ia32": "-"
-  "esbuild>@esbuild/win32-x64": "-"
+  # win32-x64 (NOT excluded, unlike its siblings above): local Windows dev
+  # runs vitest natively (no Docker/WSL for this repo's test suites), and
+  # esbuild is vitest's transform — excluding this made every vitest
+  # invocation fail with "Cannot find module @esbuild/win32-x64" on Windows.
+  # See rollup>@rollup/rollup-win32-x64-msvc below for the matching case;
+  # both found and fixed 2026-09-08 while adding lib/db's verify:rls check.
   "esbuild>@esbuild/aix-ppc64": '-'
   "esbuild>@esbuild/android-arm": '-'
   "esbuild>@esbuild/android-arm64": '-'
@@ -164,7 +169,9 @@ overrides:
   "rollup>@rollup/rollup-win32-arm64-msvc": "-"
   "rollup>@rollup/rollup-win32-ia32-msvc": "-"
   "rollup>@rollup/rollup-win32-x64-gnu": "-"
-  "rollup>@rollup/rollup-win32-x64-msvc": "-"
+  # win32-x64-msvc (NOT excluded, unlike its siblings above): see the
+  # matching esbuild>@esbuild/win32-x64 comment above — vitest needs
+  # rollup's native binary too, on Windows specifically.
   "@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64": "-"
   "@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64": "-"
   "@expo/ngrok-bin>@expo/ngrok-bin-freebsd-ia32": "-"

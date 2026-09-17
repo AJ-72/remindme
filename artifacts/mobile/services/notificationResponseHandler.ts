@@ -47,6 +47,35 @@ export interface NotificationResponseHandlerDeps {
   navigateToSend: (id: string) => void;
   getSnoozePreset: () => Promise<SnoozePreset>;
   loadReminderById: (id: string) => Promise<Reminder | undefined>;
+  /**
+   * Reacts to a tapped invitation push (see send-invitation/index.ts's
+   * data.type:"invitation" tag). Deliberately takes no navigate callback: the
+   * two callers react in different ways and only they know which is possible.
+   *
+   * - Foreground (NotificationResponseHandler.tsx) HAS a navigator, so it
+   *   claims and goes straight to the invitation.
+   * - Headless (notificationResponseTask.ts) has none, so it must NOT claim -
+   *   claiming consumes the row and there would be nothing left for the app
+   *   to show. It arms a flag and lets the launch do the work.
+   *
+   * Named for the event, not for claiming, because half the implementations
+   * deliberately do not claim.
+   */
+  onInvitationPush: () => Promise<unknown>;
+  /**
+   * Reacts to a tapped invitation_time_changed push (see
+   * respond-invitation/index.ts). Unlike onInvitationPush above, this
+   * DOES need to navigate on tap - the local reminder to update already
+   * exists on this device (it's the sender's own), there is nothing to
+   * "go check for" first. Returns the updated reminder's local id (or
+   * undefined if it's gone) so the handler can route straight to it.
+   */
+  applyRecipientTimeChange: (data: {
+    invitationId: string;
+    toDatetime: string;
+    fromDatetime: string;
+    recipientName: string;
+  }) => Promise<string | undefined>;
 }
 
 function isNotificationData(value: unknown): value is NotificationData {
@@ -54,6 +83,31 @@ function isNotificationData(value: unknown): value is NotificationData {
     !!value &&
     typeof value === "object" &&
     typeof (value as NotificationData).reminderId === "string"
+  );
+}
+
+function isInvitationData(value: unknown): value is { type: "invitation" } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { type?: unknown }).type === "invitation"
+  );
+}
+
+interface TimeChangedData {
+  type: "invitation_time_changed";
+  invitationId: string;
+  toDatetime: string;
+  fromDatetime: string;
+  recipientName: string;
+}
+
+function isTimeChangedData(value: unknown): value is TimeChangedData {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { type?: unknown }).type === "invitation_time_changed" &&
+    typeof (value as { invitationId?: unknown }).invitationId === "string"
   );
 }
 
@@ -79,6 +133,35 @@ export async function handleNotificationResponse(
   if (await deps.hasHandledResponse(responseKey)) return;
 
   const data = response.notification.request.content.data;
+
+  // Invitation pushes carry no reminderId - they're server-originated, not
+  // a locally-scheduled reminder - so they must branch off before
+  // isNotificationData's reminderId check, which would otherwise just
+  // silently drop them. No action-identifier distinction: this push has no
+  // custom actions, so any tap (the default action) means "open it".
+  if (isInvitationData(data)) {
+    await deps.markResponseHandled(responseKey);
+    // What "react to this push" means is the INJECTED dep's job, not this
+    // function's: only the caller knows whether a navigator exists, and so
+    // whether claiming here would consume the row with nothing able to show
+    // it. This module stays free of storage side effects either way.
+    await deps.onInvitationPush();
+    return;
+  }
+
+  // Same "no reminderId, must branch before isNotificationData" reasoning
+  // as the invitation branch above - this is the sender's own device
+  // reacting to the receiver's choice, not a locally-scheduled reminder
+  // firing.
+  if (isTimeChangedData(data)) {
+    await deps.markResponseHandled(responseKey);
+    const localId = await deps.applyRecipientTimeChange(data);
+    if (localId) {
+      deps.navigateToDetail(localId, { openSnoozeSheet: false });
+    }
+    return;
+  }
+
   if (!isNotificationData(data)) return;
 
   await deps.markResponseHandled(responseKey);
