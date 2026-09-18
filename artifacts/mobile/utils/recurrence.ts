@@ -264,3 +264,187 @@ export function describeRecurrence(rule: RecurrenceRule, anchor?: Date): string 
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// parseRecurrencePhrase: detects an English recurrence phrase inside free text.
+// ---------------------------------------------------------------------------
+
+const WEEKDAY_NAMES: { name: string; abbrev: string; index: number }[] = [
+  { name: "sunday", abbrev: "sun", index: 0 },
+  { name: "monday", abbrev: "mon", index: 1 },
+  { name: "tuesday", abbrev: "tue", index: 2 },
+  { name: "wednesday", abbrev: "wed", index: 3 },
+  { name: "thursday", abbrev: "thu", index: 4 },
+  { name: "friday", abbrev: "fri", index: 5 },
+  { name: "saturday", abbrev: "sat", index: 6 },
+];
+
+/** One alternation term per weekday, longest form first so the regex engine
+ * prefers "wednesday" over a would-be "wed" prefix match, plus the plural
+ * ("mondays") which stands in for "every monday" on its own. */
+function weekdayAlternation(): string {
+  const terms: string[] = [];
+  for (const w of WEEKDAY_NAMES) {
+    terms.push(w.name, w.abbrev);
+  }
+  return terms.join("|");
+}
+
+const WEEKDAY_TERM = weekdayAlternation();
+
+function weekdayIndexFromTerm(term: string): number | undefined {
+  const lower = term.toLowerCase();
+  const found = WEEKDAY_NAMES.find((w) => w.name === lower || w.abbrev === lower);
+  return found?.index;
+}
+
+interface PhraseMatcher {
+  regex: RegExp;
+  build: (m: RegExpMatchArray) => RecurrenceRule | null;
+}
+
+// Order matters: more specific patterns (multi-weekday lists, "every N
+// units", "every other unit", "monthly on the Nth") must be tried before the
+// generic single-word ones, since `parseRecurrencePhrase` returns the first
+// match found scanning matchers top-to-bottom for the earliest/longest hit.
+const MATCHERS: PhraseMatcher[] = [
+  // every weekday / every weekend (must precede the single-weekday matcher,
+  // since "weekday"/"weekend" would otherwise fall through unmatched anyway,
+  // but keeping them first documents the priority explicitly).
+  {
+    regex: /\bevery\s+weekday\b/i,
+    build: () => ({ freq: "weekly", interval: 1, byWeekday: [1, 2, 3, 4, 5] }),
+  },
+  {
+    regex: /\bevery\s+weekend\b/i,
+    build: () => ({ freq: "weekly", interval: 1, byWeekday: [0, 6] }),
+  },
+
+  // every other day|week|month|year -> interval 2
+  {
+    regex: /\bevery\s+other\s+(day|week|month|year)\b/i,
+    build: (m) => {
+      const unit = m[1].toLowerCase();
+      const freq =
+        unit === "day" ? "daily" : unit === "week" ? "weekly" : unit === "month" ? "monthly" : "yearly";
+      return { freq, interval: 2 };
+    },
+  },
+
+  // every N days|weeks|months|years (N must be followed by a unit; a bare
+  // number like "3 times" is NOT consumed here since "times" isn't a unit).
+  {
+    regex: /\bevery\s+(\d+)\s+(days|weeks|months|years)\b/i,
+    build: (m) => {
+      const interval = parseInt(m[1], 10);
+      if (!Number.isFinite(interval) || interval < 1) return null;
+      const unit = m[2].toLowerCase();
+      const freq =
+        unit === "days" ? "daily" : unit === "weeks" ? "weekly" : unit === "months" ? "monthly" : "yearly";
+      return { freq, interval };
+    },
+  },
+
+  // multi-weekday lists: "every Monday and Thursday", "every Mon, Wed, Fri"
+  {
+    regex: new RegExp(
+      `\\bevery\\s+(?:${WEEKDAY_TERM})(?:\\s*(?:,|and)\\s*(?:${WEEKDAY_TERM}))+\\b`,
+      "i"
+    ),
+    build: (m) => {
+      const found = m[0].match(new RegExp(WEEKDAY_TERM, "gi")) ?? [];
+      const days = Array.from(
+        new Set(found.map((t) => weekdayIndexFromTerm(t)).filter((d): d is number => d !== undefined))
+      ).sort((a, b) => a - b);
+      if (days.length === 0) return null;
+      return { freq: "weekly", interval: 1, byWeekday: days };
+    },
+  },
+
+  // single weekday: "every Monday" or plural "Mondays"
+  {
+    regex: new RegExp(`\\bevery\\s+(${WEEKDAY_TERM})\\b`, "i"),
+    build: (m) => {
+      const day = weekdayIndexFromTerm(m[1]);
+      if (day === undefined) return null;
+      return { freq: "weekly", interval: 1, byWeekday: [day] };
+    },
+  },
+  {
+    regex: new RegExp(`\\b(${WEEKDAY_TERM})s\\b`, "i"),
+    build: (m) => {
+      const day = weekdayIndexFromTerm(m[1]);
+      if (day === undefined) return null;
+      return { freq: "weekly", interval: 1, byWeekday: [day] };
+    },
+  },
+
+  // monthly on the Nth
+  {
+    regex: /\bmonthly\s+on\s+the\s+\d+(?:st|nd|rd|th)\b/i,
+    build: () => ({ freq: "monthly", interval: 1 }),
+  },
+
+  // every day / daily / each day
+  { regex: /\bevery\s+day\b/i, build: () => ({ freq: "daily", interval: 1 }) },
+  { regex: /\beach\s+day\b/i, build: () => ({ freq: "daily", interval: 1 }) },
+  { regex: /\bdaily\b/i, build: () => ({ freq: "daily", interval: 1 }) },
+
+  // every week / weekly
+  { regex: /\bevery\s+week\b/i, build: () => ({ freq: "weekly", interval: 1 }) },
+  { regex: /\bweekly\b/i, build: () => ({ freq: "weekly", interval: 1 }) },
+
+  // every month / monthly
+  { regex: /\bevery\s+month\b/i, build: () => ({ freq: "monthly", interval: 1 }) },
+  { regex: /\bmonthly\b/i, build: () => ({ freq: "monthly", interval: 1 }) },
+
+  // every year / yearly / annually
+  { regex: /\bevery\s+year\b/i, build: () => ({ freq: "yearly", interval: 1 }) },
+  { regex: /\byearly\b/i, build: () => ({ freq: "yearly", interval: 1 }) },
+  { regex: /\bannually\b/i, build: () => ({ freq: "yearly", interval: 1 }) },
+];
+
+/**
+ * Scans free text for a single English recurrence phrase and returns both
+ * the parsed `RecurrenceRule` and the `[start, end)` span it matched, so the
+ * caller can strip that span from a reminder title (the existing `ranges`
+ * mechanism used elsewhere for date/time phrases).
+ *
+ * Matching strategy: try each matcher in `MATCHERS` (ordered most-specific
+ * first — see comment above the array) against the whole string, and among
+ * all matchers that hit, return the one whose match starts earliest, with
+ * matcher order breaking ties. This is a deliberately simple "first/longest
+ * specific phrase wins" scan rather than a grammar — good enough for the
+ * fixed phrase list in the brief, not a general NLP recurrence parser.
+ *
+ * All matchers use `\b` word boundaries, so "everyday" (no space) never
+ * matches "every day" — this is what keeps "everyday carry" phrase-free.
+ * The interval-N matcher requires a unit word (days/weeks/months/years)
+ * immediately after the number, so "3 times every day" does not get read as
+ * interval 3 — "3 times" simply isn't consumed by any matcher, and the
+ * separate literal "every day" later in the string still matches on its own
+ * as plain daily. This is a deliberate, minimal decision: counts ("N times")
+ * are out of scope for this phrase list and are left as ordinary text.
+ */
+export function parseRecurrencePhrase(
+  text: string
+): { rule: RecurrenceRule; match: { start: number; end: number } } | null {
+  if (!text) return null;
+
+  let best: { start: number; end: number; rule: RecurrenceRule } | null = null;
+
+  for (const matcher of MATCHERS) {
+    const m = text.match(matcher.regex);
+    if (!m || m.index === undefined) continue;
+    const rule = matcher.build(m);
+    if (!rule) continue;
+    const start = m.index;
+    const end = start + m[0].length;
+    if (!best || start < best.start || (start === best.start && end - start > best.end - best.start)) {
+      best = { start, end, rule };
+    }
+  }
+
+  if (!best) return null;
+  return { rule: best.rule, match: { start: best.start, end: best.end } };
+}

@@ -1,4 +1,9 @@
-import { computeNextOccurrence, describeRecurrence, type RecurrenceRule } from "./recurrence";
+import {
+  computeNextOccurrence,
+  describeRecurrence,
+  parseRecurrencePhrase,
+  type RecurrenceRule,
+} from "./recurrence";
 
 describe("computeNextOccurrence", () => {
   describe("daily", () => {
@@ -295,5 +300,186 @@ describe("describeRecurrence", () => {
   it("describes yearly interval N as 'Every N years on 18 Sep'", () => {
     const rule: RecurrenceRule = { freq: "yearly", interval: 3 };
     expect(describeRecurrence(rule, new Date(2026, 8, 18))).toBe("Every 3 years on 18 Sep");
+  });
+});
+
+describe("parseRecurrencePhrase", () => {
+  it("matches 'every day'", () => {
+    const result = parseRecurrencePhrase("every day");
+    expect(result).toEqual({
+      rule: { freq: "daily", interval: 1 },
+      match: { start: 0, end: 9 },
+    });
+  });
+
+  it("matches 'daily'", () => {
+    const result = parseRecurrencePhrase("take pills daily please");
+    expect(result?.rule).toEqual({ freq: "daily", interval: 1 });
+    expect(result?.match).toEqual({ start: 11, end: 16 });
+  });
+
+  it("matches 'each day'", () => {
+    const result = parseRecurrencePhrase("water plants each day");
+    expect(result?.rule).toEqual({ freq: "daily", interval: 1 });
+  });
+
+  it("matches 'every weekday' as weekly Mon-Fri", () => {
+    const result = parseRecurrencePhrase("gym every weekday");
+    expect(result?.rule).toEqual({ freq: "weekly", interval: 1, byWeekday: [1, 2, 3, 4, 5] });
+  });
+
+  it("matches 'every weekend' as weekly Sat/Sun", () => {
+    const result = parseRecurrencePhrase("clean house every weekend");
+    expect(result?.rule).toEqual({ freq: "weekly", interval: 1, byWeekday: [0, 6] });
+  });
+
+  it("matches 'every Monday'", () => {
+    const result = parseRecurrencePhrase("call mom every Monday");
+    expect(result?.rule).toEqual({ freq: "weekly", interval: 1, byWeekday: [1] });
+  });
+
+  it("matches 'Mondays' (plural weekday, no 'every')", () => {
+    const result = parseRecurrencePhrase("trash pickup Mondays");
+    expect(result?.rule).toEqual({ freq: "weekly", interval: 1, byWeekday: [1] });
+  });
+
+  it("matches multi-day 'every Monday and Thursday'", () => {
+    const result = parseRecurrencePhrase("gym every Monday and Thursday");
+    expect(result?.rule).toEqual({ freq: "weekly", interval: 1, byWeekday: [1, 4] });
+  });
+
+  it("matches multi-day abbreviated list 'every Mon, Wed, Fri'", () => {
+    const result = parseRecurrencePhrase("gym every Mon, Wed, Fri");
+    expect(result?.rule).toEqual({ freq: "weekly", interval: 1, byWeekday: [1, 3, 5] });
+  });
+
+  it("matches 'every week'", () => {
+    const result = parseRecurrencePhrase("standup every week");
+    expect(result?.rule).toEqual({ freq: "weekly", interval: 1 });
+  });
+
+  it("matches 'weekly'", () => {
+    const result = parseRecurrencePhrase("weekly report");
+    expect(result?.rule).toEqual({ freq: "weekly", interval: 1 });
+  });
+
+  it("matches 'every month'", () => {
+    const result = parseRecurrencePhrase("pay rent every month");
+    expect(result?.rule).toEqual({ freq: "monthly", interval: 1 });
+  });
+
+  it("matches 'monthly'", () => {
+    const result = parseRecurrencePhrase("monthly review");
+    expect(result?.rule).toEqual({ freq: "monthly", interval: 1 });
+  });
+
+  it("matches 'monthly on the 15th'", () => {
+    const result = parseRecurrencePhrase("pay rent monthly on the 15th");
+    expect(result?.rule).toEqual({ freq: "monthly", interval: 1 });
+  });
+
+  it("matches 'monthly on the 1st'", () => {
+    const result = parseRecurrencePhrase("review monthly on the 1st");
+    expect(result?.rule).toEqual({ freq: "monthly", interval: 1 });
+  });
+
+  it("matches 'every year'", () => {
+    const result = parseRecurrencePhrase("renew passport every year");
+    expect(result?.rule).toEqual({ freq: "yearly", interval: 1 });
+  });
+
+  it("matches 'yearly'", () => {
+    const result = parseRecurrencePhrase("yearly checkup");
+    expect(result?.rule).toEqual({ freq: "yearly", interval: 1 });
+  });
+
+  it("matches 'annually'", () => {
+    const result = parseRecurrencePhrase("renew license annually");
+    expect(result?.rule).toEqual({ freq: "yearly", interval: 1 });
+  });
+
+  it("matches 'every 3 days'", () => {
+    const result = parseRecurrencePhrase("water plants every 3 days");
+    expect(result?.rule).toEqual({ freq: "daily", interval: 3 });
+  });
+
+  it("matches 'every 2 weeks'", () => {
+    const result = parseRecurrencePhrase("team sync every 2 weeks");
+    expect(result?.rule).toEqual({ freq: "weekly", interval: 2 });
+  });
+
+  it("matches 'every 6 months'", () => {
+    const result = parseRecurrencePhrase("dentist every 6 months");
+    expect(result?.rule).toEqual({ freq: "monthly", interval: 6 });
+  });
+
+  it("matches 'every 2 years'", () => {
+    const result = parseRecurrencePhrase("passport renewal every 2 years");
+    expect(result?.rule).toEqual({ freq: "yearly", interval: 2 });
+  });
+
+  it("matches 'every other day' as interval 2", () => {
+    const result = parseRecurrencePhrase("water plants every other day");
+    expect(result?.rule).toEqual({ freq: "daily", interval: 2 });
+  });
+
+  it("matches 'every other week' as interval 2", () => {
+    const result = parseRecurrencePhrase("trash every other week");
+    expect(result?.rule).toEqual({ freq: "weekly", interval: 2 });
+  });
+
+  it("matches 'every other month' as interval 2", () => {
+    const result = parseRecurrencePhrase("billing every other month");
+    expect(result?.rule).toEqual({ freq: "monthly", interval: 2 });
+  });
+
+  it("matches 'every other year' as interval 2", () => {
+    const result = parseRecurrencePhrase("checkup every other year");
+    expect(result?.rule).toEqual({ freq: "yearly", interval: 2 });
+  });
+
+  it("is case-insensitive", () => {
+    const result = parseRecurrencePhrase("Take pills DAILY");
+    expect(result?.rule).toEqual({ freq: "daily", interval: 1 });
+  });
+
+  it("tolerates surrounding whitespace", () => {
+    const result = parseRecurrencePhrase("  every day  ");
+    expect(result?.rule).toEqual({ freq: "daily", interval: 1 });
+  });
+
+  it("returns the correct match span for stripping", () => {
+    const text = "take out trash every week";
+    const result = parseRecurrencePhrase(text);
+    expect(result).not.toBeNull();
+    const { start, end } = result!.match;
+    expect(text.slice(start, end)).toBe("every week");
+  });
+
+  describe("negative cases", () => {
+    it("does not match 'everyday' as part of a longer word/phrase (everyday carry)", () => {
+      const result = parseRecurrencePhrase("buy everyday carry gear");
+      expect(result).toBeNull();
+    });
+
+    it("does not let a numeric count produce interval 3 or crash ('3 times every day')", () => {
+      const result = parseRecurrencePhrase("take medicine 3 times every day");
+      // Documented decision: "3 times" is not a recurrence-interval phrase (no
+      // unit like days/weeks follows the number), so it must not be consumed
+      // by the interval-N matcher. The literal "every day" phrase later in
+      // the string still matches as plain daily (interval 1) — the count is
+      // simply text the matcher doesn't understand and ignores.
+      expect(result).not.toBeNull();
+      expect(result?.rule).toEqual({ freq: "daily", interval: 1 });
+    });
+
+    it("returns null when there is no recurrence phrase at all", () => {
+      const result = parseRecurrencePhrase("buy milk tomorrow");
+      expect(result).toBeNull();
+    });
+
+    it("returns null for empty string", () => {
+      expect(parseRecurrencePhrase("")).toBeNull();
+    });
   });
 });
