@@ -241,7 +241,10 @@ const MAX_ADVANCE_ITERATIONS = 10000;
 
 /**
  * The reminder advanced to its next future occurrence, or null if it isn't
- * recurring / has nothing to advance to yet.
+ * recurring, has nothing to advance to yet, or the catch-up loop exhausts
+ * MAX_ADVANCE_ITERATIONS without reaching a strictly-future occurrence (see
+ * the cap-exhaustion comment inline below - not reachable via any real rule
+ * today, but a rule could arrive from an external source in a later task).
  *
  * Pure and synchronous - no I/O, no write lock. Callers (Task 5) are
  * responsible for wrapping any actual load/save around this inside
@@ -275,6 +278,19 @@ export function advanceRecurringReminder(r: Reminder, now: Date): Reminder | nul
   while (next.getTime() <= now.getTime() && iterations < MAX_ADVANCE_ITERATIONS) {
     next = computeNextOccurrence(r.recurrence, next);
     iterations += 1;
+  }
+
+  // Not reachable through any real RecurrenceRule today - normalizeInput()
+  // in recurrence.ts floors `interval` to >= 1 and every addX() helper
+  // advances by at least one day, so computeNextOccurrence always makes
+  // strictly-forward progress. This is defense in depth, not dead code:
+  // Task 5c will feed rules parsed from an external Tier 2 invitation
+  // payload through this same path, so "the rule made no progress" must
+  // fail safely rather than silently return a still-past-due occurrence
+  // dressed up as a valid result (per-occurrence fields already reset,
+  // looking like a fresh future reminder while actually stuck in the past).
+  if (next.getTime() <= now.getTime()) {
+    return null;
   }
 
   return {

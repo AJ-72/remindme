@@ -78,6 +78,7 @@ import {
 } from "@/services/ReminderService";
 import { DEFAULT_QUIET_HOURS } from "@/utils/quietHours";
 import type { RecurrenceRule } from "@/utils/recurrence";
+import * as recurrenceModule from "@/utils/recurrence";
 import {
   scheduleNotificationAsync,
   cancelScheduledNotificationAsync,
@@ -2056,11 +2057,10 @@ describe("advanceRecurringReminder", () => {
     );
   });
 
-  it("bounds the catch-up loop for a pathological rule instead of hanging", () => {
-    // interval 0 degrades to daily via computeNextOccurrence's own fallback,
-    // so use a legitimate-looking but absurdly distant `now` to force many
-    // iterations and confirm the loop terminates within MAX_ADVANCE_ITERATIONS
-    // rather than hanging.
+  it("advances quickly for a large-but-under-cap number of missed occurrences", () => {
+    // Not the cap-hitting case (see below) - this just confirms a large,
+    // realistic catch-up (~9700 daily occurrences) stays fast and lands
+    // strictly in the future.
     const r: Reminder = {
       ...base,
       datetime: "2000-01-01T10:00:00.000Z",
@@ -2073,6 +2073,35 @@ describe("advanceRecurringReminder", () => {
     expect(advanced).not.toBeNull();
     expect(elapsed).toBeLessThan(2000);
     expect(new Date(advanced!.datetime).getTime()).toBeGreaterThan(now.getTime());
+  });
+
+  it("returns null instead of a still-past-due result when the iteration cap is genuinely hit", () => {
+    // No real RecurrenceRule can fail to progress (normalizeInput floors
+    // interval >= 1, and every addX() helper advances by at least a day) -
+    // but Task 5c will feed rules parsed from an external Tier 2 invitation
+    // payload through this same path, so the cap itself must be proven to
+    // fail safely rather than assumed unreachable. Force it here by
+    // stubbing computeNextOccurrence to never progress past `from`.
+    const spy = jest
+      .spyOn(recurrenceModule, "computeNextOccurrence")
+      .mockImplementation((_rule, from) => from);
+
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    const now = new Date("2026-09-05T00:00:00.000Z");
+
+    const advanced = advanceRecurringReminder(r, now);
+
+    // computeNextOccurrence was called MAX_ADVANCE_ITERATIONS + 1 times
+    // (the initial call, then one per loop iteration) before the loop gave
+    // up - proves the cap was actually exercised, not just "under budget".
+    expect(spy).toHaveBeenCalledTimes(10001);
+    expect(advanced).toBeNull();
+
+    spy.mockRestore();
   });
 
   it("resets per-occurrence state", () => {
