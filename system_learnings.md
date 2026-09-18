@@ -9,6 +9,22 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-18 — M2 Task 1 (`utils/recurrence.ts`): DST-safe date math needs local-component construction, never millisecond addition
+
+**WHAT:** Implemented `RecurrenceRule`, `computeNextOccurrence(rule, from)`, and `describeRecurrence(rule, anchor?)` in `artifacts/mobile/utils/recurrence.ts` (commit `b50e3a0`). Three decisions worth recording:
+
+(1) **All date arithmetic constructs new `Date`s from local-time components** (`new Date(year, month, day, h, min, s, ms)`) via a single `atLocal()` helper, never by adding raw milliseconds (`+= 86400000`). Adding a day in ms drifts the wall-clock hour across a DST boundary (spring-forward/fall-back); constructing from local components lets the JS runtime resolve the correct UTC offset for the new local date, so "every day at 8am" stays 8am wall-clock across the transition. Verified by a dedicated DST test, not just asserted.
+
+(2) **`describeRecurrence`'s signature grew an optional second parameter, `describeRecurrence(rule, anchor?: Date)`, beyond the brief's `describeRecurrence(rule): string`.** `RecurrenceRule` carries only `freq`/`interval`/`byWeekday` — it has no day-of-month or month-day, so "Monthly on the 15th" / "Yearly on 18 Sep" is unrenderable without the reminder's own datetime as `anchor`. Daily/weekly ignore it; if omitted for monthly/yearly, it falls back to frequency-only copy ("Monthly") rather than throwing. Downstream UI tasks (6, 7) must pass the reminder's datetime as `anchor` when calling this for monthly/yearly display.
+
+(3) **Defensive fallback for malformed input is a single documented rule, not per-field special-casing:** `interval < 1` clamps to 1, an unrecognized `freq` degrades to `"daily"`, and a non-finite `from` (e.g. `new Date(NaN)`) anchors at `now()` instead. This guarantees `computeNextOccurrence` never throws and never loops — a malformed rule degrades to "remind me again tomorrow" instead of silently losing the reminder or crashing scheduling code that calls it.
+
+**WHY:** (1) is the one-line fix that's easy to skip under time pressure and invisible until a DST transition actually happens on a device — exactly the kind of bug Jest alone can catch if (and only if) the test explicitly straddles a transition date, which the brief required. (2) is a real, load-bearing signature deviation from the plan text, not scope creep — flagged so Tasks 6/7's dispatches carry it rather than rediscovering the gap mid-task. (3) exists because every call site (the scheduling/advance path built in Tasks 4-5) needs a guarantee it never has to wrap this in a try/catch.
+
+**WHERE:** `artifacts/mobile/utils/recurrence.ts`, `artifacts/mobile/utils/recurrence.test.ts` (27 tests). `daysInMonth` was duplicated from `utils/parseNaturalLanguage.ts` rather than imported, deliberately, to keep this module a dependency-free leaf.
+
+---
+
 ## 2026-09-18 — M2 recurring reminders: advance-in-place silently zeroes adherence, and `send_invitation`'s 30-day `least()` is a content cap, not a schedule clamp
 
 **WHAT:** Planning-only commit (`2d21afa`, `docs/superpowers/plans/2026-09-18-recurring-reminders-m2.md`, branch `feature/m2-recurring-reminders`), but three findings are worth having before anyone implements against them.
