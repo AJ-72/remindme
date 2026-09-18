@@ -1180,7 +1180,7 @@ returns to the previous screen once, not to more copies of home).
 active but draws nothing, or the tour restarts on a later cold launch after
 being skipped.
 
-## D79 — System-wide "Remind Me" text-selection menu · `PENDING`
+## D85 — System-wide "Remind Me" text-selection menu · `PASS` (2026-09-18, OnePlus, Android 13, EAS build — partial, see "What was watched")
 
 *Added 2026-09-17.* `ACTION_PROCESS_TEXT` is pure system integration: the
 menu entry, the launch intent and the singleTask re-use path all live in the
@@ -1218,6 +1218,30 @@ entries appear in recents (launchMode is wrong).
 **Note.** The app never replaces the source text — it only reads it. So the
 calling app always gets `RESULT_CANCELED`, and an editable source field must
 stay unchanged.
+
+**What was watched (2026-09-18, OnePlus, Android 13, EAS build).** Steps 1-3
+confirmed by hand in **Chrome** (read-only web-page text) and in
+**WhatsApp**'s message input box (editable): "Remind Me" is in the selection
+toolbar, and the quick-add field fills with the selected text. Rotation
+(step 4), the app-already-running path (step 5) and Malayalam (step 7) were
+**not** watched — they stay unproven, and the `PASS` above covers only what
+was.
+
+**Known limit — Gmail and Google Keep do not show the item, and cannot be
+made to.** Confirmed on the same device, overflow (⋮) opened, item absent.
+`ACTION_PROCESS_TEXT` items reach only the *standard* Android selection
+toolbar. An app is free to replace that toolbar with its own menu, and
+several Google apps do; Android offers no API to insert an entry into
+another app's custom menu, so **no change in this repo can fix this** — do
+not re-investigate it as a bug. It works where the standard toolbar is used
+(Chrome, WhatsApp).
+
+The user-facing answer for those apps is the **share sheet**: select, Share,
+Reminders — which lands on the same `sharedText` channel via
+`expo-share-intent`. A path that works in *every* app would need a
+quick-settings tile reading the clipboard, a `SYSTEM_ALERT_WINDOW` bubble,
+or an accessibility service — all far larger than this feature, and the last
+two are Play-policy restricted.
 
 ## D82 — One tap clears the quick-add box · `PENDING`
 
