@@ -1,4 +1,4 @@
-import { Platform } from "react-native";
+import { Linking, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getLocales } from "expo-localization";
 import {
@@ -16,6 +16,7 @@ import {
   addReminder,
   buildBackupJson,
   importRemindersFromJson,
+  openNotificationChannelSettings,
   cancelScheduledForReminder,
   scheduleNotification,
   channelIdForAlarm,
@@ -1835,5 +1836,55 @@ describe("quiet hours persistence", () => {
     await setQuietHours({ startMinute: 1320, endMinute: 480 });
     const parsed = JSON.parse(await buildBackupJson());
     expect(parsed.settings.quietHours).toEqual({ startMinute: 1320, endMinute: 480 });
+  });
+});
+
+// The sound belongs to the Android channel, not to anything this app can set
+// at runtime, so this helper is the whole feature: send the user to the system
+// screen for the channel their reminders use. If the extras are wrong the
+// screen opens on the wrong channel — or not at all — and the user's chosen
+// sound never plays.
+describe("openNotificationChannelSettings", () => {
+  afterEach(() => {
+    delete (Linking as any).sendIntent;
+  });
+
+  it("opens the system channel screen with the app package and channel id", async () => {
+    jest.replaceProperty(Platform, "OS", "android");
+    const sendIntent = jest.fn().mockResolvedValue(undefined);
+    (Linking as any).sendIntent = sendIntent;
+
+    expect(await openNotificationChannelSettings("reminders-alarm")).toBe(true);
+    expect(sendIntent).toHaveBeenCalledWith(
+      "android.settings.CHANNEL_NOTIFICATION_SETTINGS",
+      expect.arrayContaining([
+        { key: "android.provider.extra.CHANNEL_ID", value: "reminders-alarm" },
+      ])
+    );
+    const extras = sendIntent.mock.calls[0][1];
+    expect(
+      extras.find((e: { key: string }) => e.key === "android.provider.extra.APP_PACKAGE")
+        .value
+    ).toBeTruthy();
+  });
+
+  it("falls back to the app settings screen when the OEM refuses the intent", async () => {
+    jest.replaceProperty(Platform, "OS", "android");
+    (Linking as any).sendIntent = jest.fn().mockRejectedValue(new Error("no activity"));
+    const openSettings = jest
+      .spyOn(Linking, "openSettings")
+      .mockResolvedValue(undefined as never);
+
+    expect(await openNotificationChannelSettings("reminders-alarm")).toBe(true);
+    expect(openSettings).toHaveBeenCalled();
+    openSettings.mockRestore();
+  });
+
+  it("does nothing on iOS, which has no per-channel sound screen", async () => {
+    const sendIntent = jest.fn();
+    (Linking as any).sendIntent = sendIntent;
+
+    expect(await openNotificationChannelSettings("reminders-alarm")).toBe(false);
+    expect(sendIntent).not.toHaveBeenCalled();
   });
 });

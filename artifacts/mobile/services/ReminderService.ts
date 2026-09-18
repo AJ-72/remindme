@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Linking, Platform } from "react-native";
+import Constants from "expo-constants";
 import { getLocales } from "expo-localization";
 import {
   DEFAULT_SNOOZE_PRESET,
@@ -563,7 +564,13 @@ export async function clearRegisteredPhone(): Promise<void> {
   await AsyncStorage.removeItem(REGISTERED_PHONE_KEY);
 }
 
-async function setupNotificationChannel(): Promise<void> {
+/**
+ * Creates (or re-asserts) the four notification channels. Exported because the
+ * Settings screen must guarantee a channel exists before it sends the user to
+ * Android's per-channel settings screen — that screen shows nothing at all for
+ * a channel ID the system has never seen.
+ */
+export async function ensureNotificationChannels(): Promise<void> {
   if (Platform.OS !== "android" || !Notifications) return;
   // Remove the legacy "reminders" channel left behind when the channel ID
   // was renamed to "reminders-alarm". Android keeps stale channels visible
@@ -684,7 +691,7 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   if (permissionRequestInFlight) return permissionRequestInFlight;
   permissionRequestInFlight = (async () => {
     try {
-      await setupNotificationChannel();
+      await ensureNotificationChannels();
       await setupSnoozeCategory(await getSnoozePreset());
       const { status } = await Notifications.requestPermissionsAsync();
       return status === "granted";
@@ -891,6 +898,57 @@ export function openExactAlarmSettings(): void {
   }
 }
 
+/**
+ * Opens Android's per-channel notification settings for `channelId`, where the
+ * system offers the full device sound picker.
+ *
+ * Android owns the channel sound: config is cached immutably by channel ID for
+ * the life of the install (see ensureNotificationChannels above), so the app
+ * cannot swap the sound at runtime. Handing the user the system screen is the
+ * only way to let them pick a sound that already lives on the phone, and their
+ * choice then applies to every notification we post on that channel with no
+ * further work here.
+ *
+ * Returns false when nothing was opened, so the caller can say so rather than
+ * leaving the user staring at a row that did nothing.
+ */
+export async function openNotificationChannelSettings(
+  channelId: string
+): Promise<boolean> {
+  if (Platform.OS !== "android") return false;
+  const sendIntent = (Linking as any).sendIntent as
+    | ((
+        action: string,
+        extras?: { key: string; value: string | number | boolean }[]
+      ) => Promise<void>)
+    | undefined;
+  // The channel must exist first — the system screen is blank otherwise.
+  try {
+    await ensureNotificationChannels();
+  } catch {}
+  const packageName =
+    Constants?.expoConfig?.android?.package ?? "com.curios.remindme";
+  if (sendIntent) {
+    try {
+      await sendIntent("android.settings.CHANNEL_NOTIFICATION_SETTINGS", [
+        { key: "android.provider.extra.APP_PACKAGE", value: packageName },
+        { key: "android.provider.extra.CHANNEL_ID", value: channelId },
+      ]);
+      return true;
+    } catch {
+      // Some OEM builds do not answer the channel intent. The app-level
+      // notification screen still lists every channel, so it is a usable
+      // fallback rather than a dead end.
+    }
+  }
+  try {
+    await Linking.openSettings();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function initNotifications(): Promise<void> {
   if (!Notifications) return;
   try {
@@ -908,7 +966,7 @@ export async function initNotifications(): Promise<void> {
   // Set up (and clean up stale) notification channels on every app start so
   // the legacy "reminders" channel is removed as soon as the user upgrades,
   // without waiting for a scheduling flow to trigger requestPermissions().
-  await setupNotificationChannel();
+  await ensureNotificationChannels();
 }
 
 export async function addReminder(

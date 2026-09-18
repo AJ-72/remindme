@@ -18,7 +18,11 @@ import { buildAppShareMessage } from "@/utils/appShare";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
-import { countPendingRemindersDisagreeingWithAlarm } from "@/services/ReminderService";
+import {
+  channelIdForAlarm,
+  countPendingRemindersDisagreeingWithAlarm,
+  openNotificationChannelSettings,
+} from "@/services/ReminderService";
 import {
   useThemePreference,
   type ThemePreference,
@@ -62,6 +66,26 @@ export default function SettingsScreen() {
   // switch on this screen means "do not use the Android alarm feature", so
   // it shows ON exactly when the underlying setting is OFF.
   const disableExactAlarm = !defaultExactTimingEnabled;
+
+  /**
+   * Android owns the notification sound: it belongs to the channel, and channel
+   * config is immutable by ID for the life of the install. So the app cannot
+   * offer an in-app sound list that does anything — it hands the user the
+   * system screen for the channel their reminders actually use, where every
+   * sound on the phone is selectable. `channelIdForAlarm` is the same mapping
+   * the scheduler uses, so the screen is never for some other channel.
+   */
+  const handleOpenSoundSettings = async () => {
+    const opened = await openNotificationChannelSettings(
+      channelIdForAlarm(defaultAlarmEnabled, vibrationEnabled)
+    );
+    if (!opened) {
+      Alert.alert(
+        "Could not open sound settings",
+        "Your phone did not open the notification settings. You can change the sound from Android Settings → Apps → Reminders → Notifications."
+      );
+    }
+  };
 
   /**
    * The default always changes — that is what the switch means. What needs
@@ -338,6 +362,44 @@ export default function SettingsScreen() {
               thumbColor={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
             />
           </View>
+
+          {/* Android-only: there is no iOS equivalent of a per-channel sound
+              screen. Disabled while the alarm is off, because the silent and
+              vibrate-only channels carry no sound for the picker to change. */}
+          {Platform.OS === "android" && (
+            <Pressable
+              testID="notification-sound-row"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !defaultAlarmEnabled }}
+              disabled={!defaultAlarmEnabled}
+              style={[styles.row, styles.rowDivider]}
+              onPress={() => {
+                void handleOpenSoundSettings();
+              }}
+            >
+              <Feather
+                name="music"
+                size={18}
+                color={defaultAlarmEnabled ? colors.primary : colors.mutedForeground}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Notification sound</Text>
+                <Text style={styles.rowSubLabel}>
+                  {defaultAlarmEnabled
+                    ? "Choose any sound on your phone — opens your phone's settings"
+                    : "Turn on Alarm sound to choose a sound"}
+                </Text>
+              </View>
+              {defaultAlarmEnabled && (
+                <Feather
+                  name="chevron-right"
+                  size={18}
+                  color={colors.mutedForeground}
+                  style={styles.chevron}
+                />
+              )}
+            </Pressable>
+          )}
 
           {/* Negated on purpose: framing this as "arrive on time" made the
               off position read as "let it arrive late", which nobody wants

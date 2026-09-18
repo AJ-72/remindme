@@ -650,3 +650,81 @@ describe("SettingsScreen — Backup & troubleshooting entry", () => {
     expect(router.push).toHaveBeenCalledWith("/backup");
   });
 });
+
+// Android owns the notification sound — it lives on the channel, and channel
+// config is immutable by ID — so the only honest way to offer "any sound on
+// the phone" is to open the system screen for the channel the reminders
+// actually use. These tests pin that the row targets the RIGHT channel: an
+// off-by-one here sends the user to a screen whose sound they will change to
+// no effect.
+describe("SettingsScreen — notification sound row", () => {
+  let replaced: { restore: () => void }[] = [];
+  const setPlatform = (os: string) => {
+    replaced.push(jest.replaceProperty(Platform, "OS", os as any));
+  };
+  let sendIntent: jest.Mock;
+
+  beforeEach(() => {
+    sendIntent = jest.fn().mockResolvedValue(undefined);
+    (Linking as any).sendIntent = sendIntent;
+  });
+
+  afterEach(() => {
+    replaced.forEach((r) => r.restore());
+    replaced = [];
+    delete (Linking as any).sendIntent;
+  });
+
+  const channelOf = () =>
+    sendIntent.mock.calls[0][1].find(
+      (e: { key: string }) => e.key === "android.provider.extra.CHANNEL_ID"
+    ).value;
+
+  it("opens the alarm channel when alarm and vibration are both on", async () => {
+    setPlatform("android");
+    const { findByTestId } = renderScreen();
+
+    fireEvent.press(await findByTestId("notification-sound-row"));
+
+    await waitFor(() => expect(sendIntent).toHaveBeenCalled());
+    expect(sendIntent.mock.calls[0][0]).toBe(
+      "android.settings.CHANNEL_NOTIFICATION_SETTINGS"
+    );
+    expect(channelOf()).toBe("reminders-alarm");
+  });
+
+  it("opens the no-vibrate alarm channel when vibration is off", async () => {
+    await AsyncStorage.setItem(VIBRATION_KEY, JSON.stringify(false));
+    setPlatform("android");
+    const { findByTestId } = renderScreen();
+    const row = await findByTestId("notification-sound-row");
+    await waitFor(() =>
+      expect(row.props.accessibilityState?.disabled).toBe(false)
+    );
+
+    fireEvent.press(row);
+
+    await waitFor(() => expect(sendIntent).toHaveBeenCalled());
+    expect(channelOf()).toBe("reminders-alarm-novibrate");
+  });
+
+  it("is disabled while the alarm is off — a silent channel has no sound to pick", async () => {
+    await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
+    setPlatform("android");
+    const { findByTestId } = renderScreen();
+    const row = await findByTestId("notification-sound-row");
+
+    await waitFor(() =>
+      expect(row.props.accessibilityState?.disabled).toBe(true)
+    );
+    fireEvent.press(row);
+    expect(sendIntent).not.toHaveBeenCalled();
+  });
+
+  it("is not rendered on iOS, which has no per-channel sound screen", async () => {
+    setPlatform("ios");
+    const { queryByTestId, findByTestId } = renderScreen();
+    await findByTestId("default-alarm-switch");
+    expect(queryByTestId("notification-sound-row")).toBeNull();
+  });
+});

@@ -9,6 +9,7 @@
 | [D4](#d4) | Duplicate notifications | `PARTIAL` | 2026-09-04 | AUTO (partial) |
 | [D15](#d15) | Body tap, then Mark Done | `PENDING` | — | SEMI |
 | [D16](#d16) | Personalized snooze re-alert | `PARTIAL` | 2026-09-04 | AUTO (partial) |
+| [D47](#d47) | Pick a phone sound for the alarm channel | `PENDING` | — | SEMI |
 
 ## Known ColorOS harness limitation (affects D3 and D15)
 
@@ -248,3 +249,30 @@ fire, press Snooze, wait out the interval, or read the re-alert
 notification's title via `dumpsys notification`. That full loop (Steps 1–6
 above) needs timing Maestro doesn't drive well for OS-scheduled
 notifications and is still **untested** on hardware.
+
+---
+
+<a id="d47"></a>
+## D47 — Pick a phone sound for the alarm channel · `PENDING`
+
+Settings → **Notification sound** opens Android's per-channel screen for the
+channel the current alarm/vibration settings select (`channelIdForAlarm`). The
+sound itself is Android's to own: channel config is immutable by ID, so nothing
+in the app can prove the picked sound reaches a real notification. Only a
+device can.
+
+Steps:
+
+1. Open Settings. Confirm the **Notification sound** row sits under **Alarm
+   sound**.
+2. Tap it. The system screen opens on **Reminders (Alarm)**.
+3. Tap **Sound**, select a sound that is not the app's own, and go back.
+4. Create a reminder for one minute later.
+5. Confirm the selected sound plays, not `alarm.wav`.
+6. Turn **Alarm sound** off. Confirm the row is disabled and does not open.
+7. Turn **Vibration** off, leave **Alarm sound** on, tap the row. Confirm the
+   screen opens on **Reminders (Alarm, no vibration)**.
+
+Also worth a look on a non-Pixel ROM: step 2 falls back to the app-level
+notification screen when the OEM refuses the channel intent. That fallback is
+acceptable, but note which ROM needed it.
