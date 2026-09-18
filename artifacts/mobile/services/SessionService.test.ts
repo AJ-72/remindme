@@ -10,21 +10,31 @@
 function mockSupabaseClient(overrides?: {
   getSession?: jest.Mock;
   signInAnonymously?: jest.Mock;
+  getUser?: jest.Mock;
+  signOut?: jest.Mock;
 }) {
   const getSession =
     overrides?.getSession ?? jest.fn().mockResolvedValue({ data: { session: null }, error: null });
   const signInAnonymously =
     overrides?.signInAnonymously ??
     jest.fn().mockResolvedValue({ data: { session: { access_token: "mock" } }, error: null });
+  const getUser =
+    overrides?.getUser ?? jest.fn().mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+  const signOut = overrides?.signOut ?? jest.fn().mockResolvedValue({ error: null });
 
   return {
     createClient: jest.fn(() => ({
-      auth: { getSession, signInAnonymously },
+      auth: { getSession, signInAnonymously, getUser, signOut },
     })),
     getSession,
     signInAnonymously,
+    getUser,
+    signOut,
   };
 }
+
+const cachedSession = (access_token: string) =>
+  jest.fn().mockResolvedValue({ data: { session: { access_token } }, error: null });
 
 function freshImport(overrides?: Parameters<typeof mockSupabaseClient>[0]) {
   jest.resetModules();
@@ -118,5 +128,62 @@ describe("SessionService", () => {
     });
 
     await expect(service.ensureSession()).rejects.toBeTruthy();
+  });
+
+  // Regression: deleting an auth.users row server-side used to brick that
+  // install — the orphaned token stayed cached, every call 403'd, and the
+  // refresh grant 400'd with no path back short of clearing app storage.
+  it("ensureSession replaces a cached session whose user no longer exists", async () => {
+    const { service, signInAnonymously, signOut } = freshImport({
+      getSession: cachedSession("orphaned"),
+      getUser: jest.fn().mockResolvedValue({
+        data: { user: null },
+        error: { message: "user_not_found", status: 403 },
+      }),
+    });
+
+    const session = await service.ensureSession();
+
+    expect(session).toEqual({ access_token: "mock" });
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(signInAnonymously).toHaveBeenCalledTimes(1);
+  });
+
+  it("ensureSession keeps a cached session whose user still exists", async () => {
+    const { service, signInAnonymously, signOut } = freshImport({
+      getSession: cachedSession("still-good"),
+    });
+
+    const session = await service.ensureSession();
+
+    expect(session).toEqual({ access_token: "still-good" });
+    expect(signOut).not.toHaveBeenCalled();
+    expect(signInAnonymously).not.toHaveBeenCalled();
+  });
+
+  // The ambiguous case must fail safe: discarding a valid account because the
+  // device was briefly offline would be worse than the bug above.
+  it("ensureSession keeps a cached session when revalidation fails for a network reason", async () => {
+    const { service, signInAnonymously, signOut } = freshImport({
+      getSession: cachedSession("offline-but-valid"),
+      getUser: jest.fn().mockResolvedValue({
+        data: { user: null },
+        error: { message: "Network request failed" },
+      }),
+    });
+
+    const session = await service.ensureSession();
+
+    expect(session).toEqual({ access_token: "offline-but-valid" });
+    expect(signOut).not.toHaveBeenCalled();
+    expect(signInAnonymously).not.toHaveBeenCalled();
+  });
+
+  it("does not revalidate when there is no cached session to check", async () => {
+    const { service, getUser } = freshImport();
+
+    await service.ensureSession();
+
+    expect(getUser).not.toHaveBeenCalled();
   });
 });
