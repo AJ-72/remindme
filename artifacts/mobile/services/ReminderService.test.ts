@@ -63,6 +63,8 @@ import {
   attachInvitationId,
   applyRecipientTimeChangeByInvitationId,
   isSendReminder,
+  isRecurring,
+  advanceRecurringReminder,
   INVITE_NUDGE_COUNT_KEY,
   INVITE_NUDGE_ENABLED_KEY,
   INVITE_NUDGE_MAX_ENTRIES,
@@ -75,6 +77,7 @@ import {
   type NotificationData,
 } from "@/services/ReminderService";
 import { DEFAULT_QUIET_HOURS } from "@/utils/quietHours";
+import type { RecurrenceRule } from "@/utils/recurrence";
 import {
   scheduleNotificationAsync,
   cancelScheduledNotificationAsync,
@@ -1976,5 +1979,142 @@ describe("scheduleNotification and the permission ask", () => {
 
     expect(requestPermissionsAsync).toHaveBeenCalled();
     expect(await getNotifPromptCount()).toBe(1);
+  });
+});
+
+describe("isRecurring", () => {
+  const base: Reminder = {
+    id: "1",
+    title: "t",
+    description: "",
+    datetime: "2026-09-01T10:00:00.000Z",
+    completed: false,
+  };
+
+  it("is false when there is no recurrence rule", () => {
+    expect(isRecurring(base)).toBe(false);
+  });
+
+  it("is true when a recurrence rule is present", () => {
+    const rule: RecurrenceRule = { freq: "daily", interval: 1 };
+    expect(isRecurring({ ...base, recurrence: rule })).toBe(true);
+  });
+});
+
+describe("advanceRecurringReminder", () => {
+  const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+
+  const base: Reminder = {
+    id: "1",
+    title: "t",
+    description: "",
+    datetime: "2026-09-01T10:00:00.000Z",
+    completed: false,
+  };
+
+  it("returns null for a non-recurring reminder", () => {
+    const now = new Date("2026-09-05T00:00:00.000Z");
+    expect(advanceRecurringReminder(base, now)).toBeNull();
+  });
+
+  it("returns null when the recurring reminder's datetime is still in the future", () => {
+    const r: Reminder = { ...base, recurrence: dailyRule };
+    const now = new Date("2026-08-01T00:00:00.000Z"); // before base.datetime
+    expect(advanceRecurringReminder(r, now)).toBeNull();
+  });
+
+  it("advances a single missed occurrence to the next strictly-future occurrence", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    // Just past due, no catch-up needed beyond one step.
+    const now = new Date("2026-09-01T11:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now);
+    expect(advanced).not.toBeNull();
+    expect(new Date(advanced!.datetime).toISOString()).toBe(
+      "2026-09-02T10:00:00.000Z"
+    );
+    expect(new Date(advanced!.datetime).getTime()).toBeGreaterThan(now.getTime());
+  });
+
+  it("catches up past multiple missed occurrences to land on the next future one", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    // Phone "off" for three days: now is well past three missed dailies.
+    const now = new Date("2026-09-04T12:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now);
+    expect(advanced).not.toBeNull();
+    // Next daily occurrence strictly after now, not the day right after the
+    // original due date.
+    expect(new Date(advanced!.datetime).toISOString()).toBe(
+      "2026-09-05T10:00:00.000Z"
+    );
+  });
+
+  it("bounds the catch-up loop for a pathological rule instead of hanging", () => {
+    // interval 0 degrades to daily via computeNextOccurrence's own fallback,
+    // so use a legitimate-looking but absurdly distant `now` to force many
+    // iterations and confirm the loop terminates within MAX_ADVANCE_ITERATIONS
+    // rather than hanging.
+    const r: Reminder = {
+      ...base,
+      datetime: "2000-01-01T10:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    const now = new Date("2026-09-18T00:00:00.000Z"); // ~9700 days later
+    const start = Date.now();
+    const advanced = advanceRecurringReminder(r, now);
+    const elapsed = Date.now() - start;
+    expect(advanced).not.toBeNull();
+    expect(elapsed).toBeLessThan(2000);
+    expect(new Date(advanced!.datetime).getTime()).toBeGreaterThan(now.getTime());
+  });
+
+  it("resets per-occurrence state", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+      completed: true,
+      completedAt: "2026-09-01T10:05:00.000Z",
+      notificationId: "notif-1",
+      notifiedAt: "2026-09-01T10:00:05.000Z",
+      openedAt: "2026-09-01T10:01:00.000Z",
+    };
+    const now = new Date("2026-09-01T11:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now)!;
+    expect(advanced.completed).toBe(false);
+    expect(advanced.completedAt).toBeUndefined();
+    expect(advanced.notificationId).toBeUndefined();
+    expect(advanced.notifiedAt).toBeUndefined();
+    expect(advanced.openedAt).toBeUndefined();
+  });
+
+  it("preserves series-level state", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+      snoozeCount: 3,
+      snoozeHistory: [{ at: "2026-09-01T09:00:00.000Z", minutes: 30 }],
+      originalDatetime: "2026-08-30T10:00:00.000Z",
+      createdAt: "2026-08-29T00:00:00.000Z",
+      senderName: "Priya",
+      recipient: { name: "Priya", phone: "+911234567890" },
+    };
+    const now = new Date("2026-09-01T11:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now)!;
+    expect(advanced.snoozeCount).toBe(3);
+    expect(advanced.snoozeHistory).toEqual(r.snoozeHistory);
+    expect(advanced.originalDatetime).toBe(r.originalDatetime);
+    expect(advanced.createdAt).toBe(r.createdAt);
+    expect(advanced.recurrence).toEqual(dailyRule);
+    expect(advanced.senderName).toBe("Priya");
+    expect(advanced.recipient).toEqual(r.recipient);
   });
 });

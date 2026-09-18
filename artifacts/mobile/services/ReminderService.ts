@@ -19,6 +19,7 @@ import {
   parseBackup,
   serializeBackup,
 } from "@/utils/reminderBackup";
+import { computeNextOccurrence, type RecurrenceRule } from "@/utils/recurrence";
 
 export type { SnoozePreset };
 export type { QuietHours };
@@ -198,6 +199,13 @@ export interface Reminder {
    * alone means "looked at it", which a snooze or completion doesn't need to
    * have happened for. */
   openedAt?: string;
+  /**
+   * Present only on a recurring reminder. Absent means one-shot - no
+   * migration needed, every existing record predating M2 simply has no
+   * recurrence and behaves exactly as before. See advanceRecurringReminder()
+   * below for how a recurring reminder moves to its next occurrence.
+   */
+  recurrence?: RecurrenceRule;
 }
 
 /**
@@ -216,6 +224,73 @@ export function isReceivedReminder(r: Reminder): boolean {
  */
 export function isSendReminder(r: Reminder): boolean {
   return !!r.recipient?.phone?.trim();
+}
+
+/**
+ * Single definition of "is this reminder recurring", mirroring
+ * isSendReminder/isReceivedReminder above so every consumer agrees.
+ */
+export function isRecurring(r: Reminder): boolean {
+  return !!r.recurrence;
+}
+
+/** Bounds the catch-up loop in advanceRecurringReminder() below so a
+ * pathological rule (e.g. an interval that somehow yields near-zero
+ * progress) cannot hang the app trying to catch up to "now". */
+const MAX_ADVANCE_ITERATIONS = 10000;
+
+/**
+ * The reminder advanced to its next future occurrence, or null if it isn't
+ * recurring / has nothing to advance to yet.
+ *
+ * Pure and synchronous - no I/O, no write lock. Callers (Task 5) are
+ * responsible for wrapping any actual load/save around this inside
+ * withWriteLock(), matching the pattern markNotifiedById() etc. use below.
+ *
+ * Catches up past MULTIPLE missed occurrences: a phone that was off for
+ * three days must land on the next FUTURE occurrence, not three days ago -
+ * so this loops computeNextOccurrence() from the reminder's own `datetime`
+ * until the result is strictly after `now`, rather than advancing just once.
+ *
+ * `snoozeCount`/`snoozeHistory` are deliberately preserved across
+ * occurrences, not reset - they are the series-level avoidance signal (M9's
+ * dread-override reads them), not a per-occurrence counter. It is `stuck`'s
+ * use of snoozeCount that conflates the two; Task 5b fixes that by adding a
+ * separate `currentOccurrenceSnoozes` rather than changing what this field
+ * means here. Do not "fix" this by resetting snoozeCount - both statements
+ * (series-level persists; per-occurrence tracking is a distinct, separate
+ * field) are correct at once, for different consumers.
+ */
+export function advanceRecurringReminder(r: Reminder, now: Date): Reminder | null {
+  if (!r.recurrence) return null;
+
+  const currentDue = new Date(r.datetime);
+  if (Number.isFinite(currentDue.getTime()) && currentDue.getTime() > now.getTime()) {
+    // Still in the future - nothing to advance to.
+    return null;
+  }
+
+  let next = computeNextOccurrence(r.recurrence, currentDue);
+  let iterations = 0;
+  while (next.getTime() <= now.getTime() && iterations < MAX_ADVANCE_ITERATIONS) {
+    next = computeNextOccurrence(r.recurrence, next);
+    iterations += 1;
+  }
+
+  return {
+    ...r,
+    datetime: next.toISOString(),
+    // Per-occurrence state resets: a new occurrence has not been notified,
+    // opened, or completed yet.
+    completed: false,
+    completedAt: undefined,
+    notificationId: undefined,
+    notifiedAt: undefined,
+    openedAt: undefined,
+    // Everything else (snoozeCount, snoozeHistory, originalDatetime,
+    // createdAt, recurrence, recipient/senderName, etc.) is preserved via
+    // the spread above - series-level state, not per-occurrence state.
+  };
 }
 
 export interface NotificationData {
