@@ -9,6 +9,20 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-19 — M2 Task 4: `advanceRecurringReminder`'s iteration cap now fails to `null`, not a silent stale date — hardened ahead of Task 5c's external input
+
+**WHAT:** `advanceRecurringReminder` (`artifacts/mobile/services/ReminderService.ts`, commit `b0b0a53`) loops `computeNextOccurrence` until it passes `now`, bounded by `MAX_ADVANCE_ITERATIONS = 10000` so a pathological rule can't hang the app. The original version (`e9ce4db`) exhausted the cap by returning whatever the loop last computed — even if that date was still not strictly future. A task review caught that the only test covering the cap used a ~9700-iteration gap, under the 10000 cap, so the cap itself was never actually exercised, and traced the un-tested fallback path to a real silent-corruption risk: a reminder that's already had its per-occurrence state reset but is still effectively past-due, with nothing signaling the failure.
+
+Fixed by returning `null` when the cap is exhausted without reaching a strictly-future date, and adding a test that stubs `computeNextOccurrence` to never progress, asserting the stub was called exactly 10001 times (proving the cap was genuinely hit, not just approached) and that the function returns `null`.
+
+**Before fixing, the implementer checked reachability rather than assuming**: read `normalizeInput()` and all four `addX()` helpers in `utils/recurrence.ts` and confirmed `interval` is always floored ≥1 and every helper advances by at least one day — so no `RecurrenceRule` producible by this app's own UI or parser can cause non-progression today. The cap is currently defense-in-depth, not a live bug. It was hardened anyway because **Task 5c (later in this plan) feeds `RecurrenceRule`s from an external Tier 2 invitation payload — another user's client — through this same function**, at which point "can a bad rule reach this" stops being hypothetical.
+
+**WHY:** the reusable lesson is the review finding's shape, not the specific bug: a test that proves a bound is *fast* is not a test that proves the bound *works* — the two are easy to conflate because both produce a green suite. The `null`-collapsing tradeoff (this now merges a third case — "recurring, past-due, but unresolvable within the cap" — into the same `null` return already used for "not recurring" and "recurring but not yet due") is a known, accepted simplification for now: callers currently don't need to distinguish "nothing to do" from "something is wrong," but a future reader adding cap-related telemetry or an error surface should know these three cases are indistinguishable at the return type today.
+
+**WHERE:** `artifacts/mobile/services/ReminderService.ts` (`advanceRecurringReminder`), `artifacts/mobile/services/ReminderService.test.ts`. Relevant to Task 5c (`docs/superpowers/plans/2026-09-18-recurring-reminders-m2.md`) when it validates externally-sourced recurrence rules server- and client-side.
+
+---
+
 ## 2026-09-18 — M2 Task 3: `parseNaturalLanguage`'s title-stripping ranges can overlap when two independent matchers claim the same substring
 
 **WHAT:** Wiring `parseRecurrencePhrase` into `utils/parseNaturalLanguage.ts` (commit `d61ebb5`) surfaced a real bug the plan didn't anticipate: a recurrence phrase's matched span can *contain* a chrono-detected date match rather than sit beside it — e.g. in `"every monday take out trash"`, the recurrence matcher's span is `[0,12)` ("every monday") but chrono independently matches `"monday"` at `[6,12)` as a same-day date. The existing strip loop (`title.slice(0,start) + title.slice(end)`, applied highest-index-first over each range's own start/end) assumes ranges are disjoint; stripping two overlapping ranges independently against the *original* string's indices double-counts the shared region and corrupts the result (`"out trash"` instead of `"take out trash"`). Fixed with a `mergeRanges()` pass (collapsing overlapping/adjacent ranges into one before stripping) ahead of a shared `stripRanges()`, used by both the has-recurrence and no-recurrence code paths — replacing what would otherwise have become duplicated stripping logic between them.
