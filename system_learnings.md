@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-18 — `process.env.TZ` mutated inside a running Jest test does nothing; force a DST-observing zone via a child process instead
+
+**WHAT:** M2 Task 1's DST test for `computeNextOccurrence` (`artifacts/mobile/utils/recurrence.test.ts`, commit `c4bbe45`) originally tried to assert wall-clock preservation across a DST boundary while running under whatever timezone the host/CI happened to default to. On this dev box (and confirmed as also true for CI, since no `TZ` is pinned anywhere in `.github/workflows/*.yml` or Jest config), the ambient zone is `Asia/Calcutta`, which never observes DST — so the test's `from`/expected-result pair had an identical UTC offset either way, and it passed even when the exact buggy `date.getTime() + 86400000` implementation was hand-substituted in. Setting `process.env.TZ = "America/New_York"` inside the test body did **not** fix this: confirmed by hand that Jest resolves each worker's ICU timezone before any test-file code runs, so a mid-test mutation is a no-op — true even under a bare `testEnvironment: "node"` config, not a `jest-expo` quirk. The working fix: spawn a real child process via `execFileSync("node", ["-e", script], { env: { ...process.env, TZ: "America/New_York" } })`, transpiling the real `recurrence.ts` via the TypeScript compiler API and running `computeNextOccurrence` inside that child against the 2026 US spring-forward boundary (Mar 7→8). On Windows/Git-Bash, a shell-prefix form (`TZ=x node ...`) silently failed to propagate through `npx` — the `env` option on `execFileSync` was required, not a shell-level `TZ=` prefix. Sabotage-checked by hand: temporarily reintroduced the ms-addition bug into `recurrence.ts`, confirmed the test failed for the right reason, then reverted (`recurrence.ts` is byte-identical to before this fix).
+
+**WHY:** a TZ-sensitive test is only as strong as its power to actually force the TZ it claims to test under — an ambient-TZ-dependent DST test looks green everywhere it happens to be run in a non-DST zone and provides zero regression protection, which is worse than no test because it creates false confidence. The reusable lesson for any future TZ-sensitive Jest test in this repo: setting `process.env.TZ` mid-test is a no-op; pin it via a spawned child process's `env`, not the test process's own `process.env`.
+
+**WHERE:** `artifacts/mobile/utils/recurrence.test.ts`. Caught by a task reviewer who hand-simulated the buggy implementation against the original test and got an identical passing result — not caught by the implementer's own first-pass verification, which trusted the test's green result without checking whether the test could ever go red for the right reason.
+
+---
+
 ## 2026-09-18 — M2 Task 1 (`utils/recurrence.ts`): DST-safe date math needs local-component construction, never millisecond addition
 
 **WHAT:** Implemented `RecurrenceRule`, `computeNextOccurrence(rule, from)`, and `describeRecurrence(rule, anchor?)` in `artifacts/mobile/utils/recurrence.ts` (commit `b50e3a0`). Three decisions worth recording:
