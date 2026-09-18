@@ -101,21 +101,107 @@ describe("computeNextOccurrence", () => {
   });
 
   describe("DST", () => {
+    // This dev/CI environment's ambient timezone (Asia/Calcutta) never
+    // observes DST, so running this assertion under the ambient TZ would
+    // pass even with the exact buggy millisecond-addition implementation
+    // this test exists to catch (adding 86400000ms always lands on the same
+    // wall-clock time when the UTC offset never changes) — an offset-blind
+    // test proves nothing about DST correctness.
+    //
+    // Setting process.env.TZ *inside* a running Jest test does not work:
+    // confirmed by hand that Jest/jest-expo resolve the worker's ICU
+    // timezone before any test file's own code runs at all (even before the
+    // file's top-level statements), so an in-test mutation of
+    // process.env.TZ is always too late — Intl/Date keep resolving to the
+    // ambient zone regardless of any later reassignment. The only reliable
+    // way to force a DST-observing zone for a Date computation is to set TZ
+    // in a *fresh child process's* environment before that process starts.
+    //
+    // So this test transpiles the real recurrence.ts source with the
+    // TypeScript compiler API (`ts.transpileModule` — already a project
+    // dependency, no extra tooling needed) and runs the actual, unmodified
+    // computeNextOccurrence against a `node -e` child process spawned with
+    // TZ="America/New_York" in its env. This exercises the real
+    // implementation, not a re-description of it. A second, clearly-labeled
+    // buggy ms-addition snippet runs in the same child alongside it purely
+    // as the falsification check (see below) — it is not itself under test.
+    //
+    // Hand-verified (America/New_York, US DST spring-forward is 2026-03-08):
+    // from = 2026-03-07 09:30 local (EST, UTC-5).
+    //   Buggy (`new Date(from.getTime() + 86400000)`): lands at 2026-03-08
+    //   10:30 EDT (UTC-4) — drifts forward an hour because the +24h-in-ms
+    //   crosses the UTC-5 -> UTC-4 spring-forward transition.
+    //   Real computeNextOccurrence (builds the next Date from local-time
+    //   components, per atLocal() in recurrence.ts): lands at 2026-03-08
+    //   09:30 EDT — same wall-clock time, different UTC instant, which is
+    //   what a human expects from "remind me at 9:30 tomorrow" regardless
+    //   of a DST transition in between.
     it("preserves wall-clock time across a DST boundary rather than drifting by an hour", () => {
-      // US DST spring-forward 2026: clocks jump forward on 2026-03-08.
-      // A daily reminder starting 2026-03-07 09:30 local should land on
-      // 2026-03-08 09:30 local, not 08:30 or 10:30, even though the
-      // system's local timezone may or may not itself observe DST in test
-      // environments. Constructing via local-time components (year, month,
-      // day, hour, minute) rather than adding raw milliseconds is what makes
-      // this hold regardless of the runner's TZ.
-      const from = new Date(2026, 2, 7, 9, 30, 0);
-      const rule: RecurrenceRule = { freq: "daily", interval: 1 };
-      const next = computeNextOccurrence(rule, from);
-      expect(next.getHours()).toBe(9);
-      expect(next.getMinutes()).toBe(30);
-      expect(next.getDate()).toBe(8);
-      expect(next.getMonth()).toBe(2);
+      const ts = require("typescript") as typeof import("typescript");
+      const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+      const fs = require("node:fs") as typeof import("node:fs");
+      const path = require("node:path") as typeof import("node:path");
+      const os = require("node:os") as typeof import("node:os");
+
+      const recurrenceSrcPath = path.resolve(__dirname, "recurrence.ts");
+      const source = fs.readFileSync(recurrenceSrcPath, "utf8");
+      const transpiled = ts.transpileModule(source, {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 },
+      }).outputText;
+
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "recurrence-dst-"));
+      const compiledPath = path.join(tmpDir, "recurrence.cjs");
+      fs.writeFileSync(compiledPath, transpiled);
+
+      try {
+        const childScript = `
+          const { computeNextOccurrence } = require(${JSON.stringify(compiledPath)});
+          const from = new Date(2026, 2, 7, 9, 30, 0);
+
+          // The real, unmodified implementation under test.
+          const real = computeNextOccurrence({ freq: "daily", interval: 1 }, from);
+
+          // Falsification check ONLY: the exact bug the brief warns
+          // against (adding raw milliseconds instead of local-time
+          // components). Not part of the module under test.
+          const buggy = new Date(from.getTime() + 24 * 60 * 60 * 1000);
+
+          console.log(JSON.stringify({
+            realHours: real.getHours(),
+            realMinutes: real.getMinutes(),
+            realDate: real.getDate(),
+            realMonth: real.getMonth(),
+            buggyHours: buggy.getHours(),
+            resolvedTz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }));
+        `;
+
+        const output = execFileSync(process.execPath, ["-e", childScript], {
+          env: { ...process.env, TZ: "America/New_York" },
+          encoding: "utf8",
+        });
+        const result = JSON.parse(output.trim());
+
+        // Sanity: the child process actually ran under the pinned DST zone.
+        expect(result.resolvedTz).toBe("America/New_York");
+
+        // The real computeNextOccurrence preserves wall-clock time across
+        // the spring-forward boundary.
+        expect(result.realHours).toBe(9);
+        expect(result.realMinutes).toBe(30);
+        expect(result.realDate).toBe(8);
+        expect(result.realMonth).toBe(2);
+
+        // Falsification check: under this pinned DST-observing TZ, the
+        // buggy ms-addition version does NOT preserve wall-clock time
+        // (lands at 10:30, not 9:30) — confirming this test actually
+        // exercises the DST boundary rather than passing vacuously
+        // regardless of implementation.
+        expect(result.buggyHours).not.toBe(result.realHours);
+        expect(result.buggyHours).toBe(10);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
     });
   });
 
