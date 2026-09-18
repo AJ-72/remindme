@@ -55,8 +55,22 @@ describe("SmartAlertsScreen", () => {
 
   // The footer states an automatic behaviour that would otherwise read as a
   // bug when observed: alerts stopping for a task that keeps being postponed.
-  it("explains the automatic behaviour it does not expose as a control", async () => {
+  // The old copy here promised that alerts go quiet on a repeatedly postponed
+  // task, which nothing implemented. The screen now describes what the app
+  // actually does -- offer to shrink the task, on the task's own screen.
+  it("describes the postponement behaviour that is actually implemented", async () => {
     const { findByText } = renderScreen();
-    expect(await findByText(/stops sending alerts/i)).toBeTruthy();
+    expect(await findByText(/postpone three times or more/i)).toBeTruthy();
+  });
+
+  it("does not claim that alerts stop on their own", async () => {
+    const { queryByText, findByTestId } = renderScreen();
+    await findByTestId("quiet-hours-start");
+    expect(queryByText(/stops sending alerts/i)).toBeNull();
+  });
+
+  it("links to the adherence screen", async () => {
+    const { findByTestId } = renderScreen();
+    expect(await findByTestId("smart-alerts-insights-row")).toBeTruthy();
   });
 });

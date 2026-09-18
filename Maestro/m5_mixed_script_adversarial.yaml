@@ -1,0 +1,28 @@
+# M5: Mixed-script adversarial title
+# Types a title mixing English, digits and emoji in one string (Malayalam
+# script itself can't be typed via Maestro's inputText - see CLAUDE.md's
+# ADBKeyboard note - so this covers the non-Malayalam mixed-script case).
+# Verifies no crash and the raw text renders back correctly, un-mangled.
+#
+# AUTO: fully scriptable
+appId: com.curios.remindme
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quick-add-input"
+    timeout: 15000
+
+- tapOn:
+    id: "quick-add-input"
+- inputText: "Call Priya 🎉 re: invoice #42 at 5pm"
+- assertVisible: "Call Priya 🎉 re: invoice #42"
+- tapOn:
+    id: "quick-add-save"
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      text: "Call Priya"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Call Priya 🎉 re: invoice #42"

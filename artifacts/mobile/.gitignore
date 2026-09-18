@@ -12,6 +12,10 @@ expo-env.d.ts
 # Native
 ios/
 android/
+# ...but local Expo modules keep their own hand-written native source, which
+# `expo prebuild` never generates and must stay in git.
+!/modules/*/android/
+!/modules/*/android/**
 *.orig.*
 *.jks
 *.p8

@@ -25,6 +25,8 @@ import {
   buildBackupJson,
   importRemindersFromJson,
 } from "@/services/ReminderService";
+import { EVENTS } from "@/constants/analytics";
+import { track } from "@/services/AnalyticsService";
 
 // Backup/restore and debug logs, split out of the main Settings screen
 // (2026-09-06): these are each touched at most once (a phone change, or
@@ -34,7 +36,7 @@ import {
 export default function BackupScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { refreshFromStorage } = useReminders();
+  const { refreshFromStorage, reminders } = useReminders();
 
   const [logsVisible, setLogsVisible] = useState(false);
   const [logsText, setLogsText] = useState("");
@@ -61,6 +63,9 @@ export default function BackupScreen() {
   const shareBackup = async () => {
     try {
       await Share.share({ message: await buildBackupJson() });
+      // Reminders live only in AsyncStorage, so how many people ever take a
+      // copy is a data-loss risk measurement, not a feature-usage one.
+      track(EVENTS.BACKUP_EXPORTED, { reminders: reminders.length });
     } catch {
       // user cancelled or sharing isn't available — nothing to do
     }
@@ -74,6 +79,10 @@ export default function BackupScreen() {
 
   const confirmRestore = async () => {
     const result = await importRemindersFromJson(restoreText);
+    track(EVENTS.BACKUP_IMPORTED, {
+      ok: result.ok,
+      added: result.ok ? result.added : 0,
+    });
     if (!result.ok) {
       setRestoreError(
         "That doesn't look like a Reminders backup. Paste the whole backup text, including the outer { }."

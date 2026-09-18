@@ -91,15 +91,18 @@ describe("BindInviteScreen", () => {
     expect(getByTestId("claimed-invitation-row-inv-2")).toBeTruthy();
   });
 
-  it("shows singular copy and navigates directly to invitation-preview when exactly one invitation is claimed", async () => {
+  // Frame I1 of the first-run study: the invitation is the payoff, and
+  // nothing goes in front of it. "You're all set" used to paint for a frame
+  // before the navigation, putting a congratulation ahead of the reminder
+  // the user tapped a link to read.
+  it("goes straight to invitation-preview, with no success screen in front of it", async () => {
     (InvitationService.bindViaInviteToken as jest.Mock).mockResolvedValue({ ok: true });
     (InvitationService.claimPendingInvitations as jest.Mock).mockResolvedValue([
       { id: "inv-1", title: "Take BP tablets", description: null, datetime: "2026-09-09T08:00:00Z", senderId: "s1" },
     ]);
 
-    const { findByText } = renderScreen();
+    const { queryByText } = renderScreen();
 
-    expect(await findByText(/1 reminder waiting/i)).toBeTruthy();
     await waitFor(() =>
       expect(mockPush).toHaveBeenCalledWith({
         pathname: "/invitation-preview",
@@ -112,6 +115,8 @@ describe("BindInviteScreen", () => {
         },
       })
     );
+    expect(queryByText(/reminder waiting/i)).toBeNull();
+    expect(queryByText(/all set/i)).toBeNull();
   });
 
   it("calls registerDeviceForPush after a successful bind, without blocking the success screen", async () => {

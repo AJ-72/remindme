@@ -73,6 +73,11 @@ onlyBuiltDependencies:
   - esbuild
   - msw
   - unrs-resolver
+  # @sentry/cli downloads its binary in a postinstall script. Without this it
+  # installs as a stub, and the EAS build's source-map upload step silently
+  # does nothing - which is exactly the failure that makes a crash report
+  # show minified JS instead of real file/line.
+  - '@sentry/cli'
 
 overrides:
   # Exactly ONE copy of the React type definitions across the whole workspace.
@@ -189,6 +194,7 @@ overrides:
   uuid: "^9.0.0"
 
 allowBuilds:
+  '@sentry/cli': true
   esbuild: true
 
 patchedDependencies:

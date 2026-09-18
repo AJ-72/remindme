@@ -51,9 +51,73 @@ const CALLING_CODES: Record<string, string> = {
   MX: "52",
 };
 
+const REGION_NAMES: Record<string, string> = {
+  IN: "India",
+  US: "United States",
+  CA: "Canada",
+  GB: "United Kingdom",
+  AE: "United Arab Emirates",
+  SA: "Saudi Arabia",
+  QA: "Qatar",
+  KW: "Kuwait",
+  OM: "Oman",
+  BH: "Bahrain",
+  SG: "Singapore",
+  MY: "Malaysia",
+  AU: "Australia",
+  NZ: "New Zealand",
+  DE: "Germany",
+  FR: "France",
+  IT: "Italy",
+  ES: "Spain",
+  NL: "Netherlands",
+  IE: "Ireland",
+  CH: "Switzerland",
+  SE: "Sweden",
+  NO: "Norway",
+  DK: "Denmark",
+  ZA: "South Africa",
+  NG: "Nigeria",
+  KE: "Kenya",
+  LK: "Sri Lanka",
+  NP: "Nepal",
+  BD: "Bangladesh",
+  PK: "Pakistan",
+  JP: "Japan",
+  KR: "South Korea",
+  CN: "China",
+  HK: "Hong Kong",
+  PH: "Philippines",
+  ID: "Indonesia",
+  TH: "Thailand",
+  VN: "Vietnam",
+  BR: "Brazil",
+  MX: "Mexico",
+};
+
 export function callingCodeForRegion(region?: string | null): string | null {
   if (!region) return null;
   return CALLING_CODES[region.toUpperCase()] ?? null;
+}
+
+export interface CountryOption {
+  region: string;
+  name: string;
+  callingCode: string;
+}
+
+/**
+ * Every region with a known calling code, for a country-code picker UI.
+ * Sorted by name so the list reads naturally regardless of insertion order.
+ */
+export function listCountries(): CountryOption[] {
+  return Object.keys(CALLING_CODES)
+    .map((region) => ({
+      region,
+      name: REGION_NAMES[region] ?? region,
+      callingCode: CALLING_CODES[region],
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function deviceCallingCode(): string | null {
@@ -147,7 +211,13 @@ export interface PhoneIdentity {
  */
 export function normalizeForIdentity(
   raw: string | null | undefined,
-  region: string | null | undefined
+  region: string | null | undefined,
+  // True when `region` came from the user explicitly picking a country code
+  // (e.g. a registration-screen picker), not from guessing the device
+  // locale. An explicit pick removes the ambiguity entirely - a device in a
+  // different region would still resolve the same way, since the region
+  // isn't being guessed - so the result is safe to cache as durable.
+  regionExplicit = false
 ): PhoneIdentity {
   const trimmed = (raw ?? "").trim();
   const hasPlus = trimmed.startsWith("+") || /^\(\s*\+/.test(trimmed);
@@ -163,16 +233,17 @@ export function normalizeForIdentity(
     return { e164: `+${digits.slice(2)}`, ambiguous: false };
   }
 
-  // Everything below needs a region to resolve, which is precisely what makes
-  // it ambiguous - a device in another region would answer differently.
+  // Everything below needs a region to resolve. Unless that region was
+  // explicitly chosen, this is precisely what makes it ambiguous - a device
+  // in another region would answer differently.
   const cc = callingCodeForRegion(region);
   if (cc) {
     // National trunk prefix: 0 followed by exactly 10 digits.
     if (digits.startsWith("0") && digits.length === 11) {
-      return { e164: `+${cc}${digits.slice(1)}`, ambiguous: true };
+      return { e164: `+${cc}${digits.slice(1)}`, ambiguous: !regionExplicit };
     }
     if (digits.length === 10) {
-      return { e164: `+${cc}${digits}`, ambiguous: true };
+      return { e164: `+${cc}${digits}`, ambiguous: !regionExplicit };
     }
   }
 

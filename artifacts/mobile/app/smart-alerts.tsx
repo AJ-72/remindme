@@ -151,6 +151,23 @@ export default function SmartAlertsScreen() {
 
         <Pressable
           style={styles.card}
+          onPress={() => router.push("/insights")}
+          testID="smart-alerts-insights-row"
+        >
+          <View style={styles.row}>
+            <Feather name="bar-chart-2" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>How you&apos;re doing</Text>
+              <Text style={styles.subLabel}>
+                Which hours you actually finish things, from your own history
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+          </View>
+        </Pressable>
+
+        <Pressable
+          style={styles.card}
           onPress={() => router.push("/why-tasks-slip")}
           testID="why-tasks-slip-row"
         >
@@ -166,11 +183,14 @@ export default function SmartAlertsScreen() {
           </View>
         </Pressable>
 
-        {/* States an automatic behaviour that has no control, so it never
-            reads as a bug when the user notices alerts going quiet. */}
+        {/* Describes what the app actually does with a repeatedly postponed
+            task. The earlier wording here promised that alerts go quiet on
+            their own, which nothing implemented -- and a settings screen that
+            describes absent behaviour trains the user to distrust the rest. */}
         <Text style={styles.footer}>
-          When a task keeps getting postponed, the app stops sending alerts for
-          it and offers to help instead.
+          A task you postpone three times or more stops being a timing problem.
+          The app keeps its alerts, and offers to help you shrink it instead.
+          Open the task to see that.
         </Text>
       </ScrollView>
 
