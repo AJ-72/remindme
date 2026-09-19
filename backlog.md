@@ -43,7 +43,7 @@ Ordered cheapest-first within the tier.
 | B5 | 18 | Rename `SNOOZE_ACTION_ID` tech debt | M | `OPEN` | String is `"SNOOZE_10"` but snooze durations are now user-configurable (5/15/30/60 min/tomorrow) — misleading name, left as-is deliberately because it's embedded in the `categoryIdentifier` of notifications already scheduled on devices. Needs a migration story (e.g. register both old and new action IDs for one release, then drop the old one). |
 | B6 | 2 | Image support in shared/dictated input | M | `OPEN` | Audio half done (mic + WhatsApp voice-note forwarding, Android only — see B7). Image support not started. Part of the [M5](#m5-forward-to-remind) "forward-to-remind" area. |
 | B9 | — | Recipient phone lookup silently misses on ambiguous numbers | M | `OPEN` | Found live-testing 2026-09-11 (two-device Tier 2 test — see `system_learnings.md`): a contact saved as local digits with no leading `+`, on a device whose system region doesn't match the number's real country, gets misnormalized to a different E.164/`phone_hash` than the same person's own registration — `normalizeForIdentity()` (`artifacts/mobile/utils/phoneNumber.ts`) currently just returns `ambiguous: true` and hopes both sides agree, with no repair. Symptom is a bare "not reachable" badge (no error, no hint) — indistinguishable from the recipient genuinely not having the app, which is the exact failure mode `recipientReachability.ts`'s own doc comment already calls out as the harmful one. Workaround today: type the number with an explicit leading `+` and full country code (bypasses region-guessing entirely, `normalizeForIdentity`'s `hasPlus` branch) — but this is a manual burden most contacts won't have, and most users won't think to do. **Fix should be in normalization, not in asking users to type numbers correctly**: on an ambiguous miss, retry against a small set of plausible alternate regions (e.g. the app's own configured default region if set, or a short fixed list of likely candidates) before giving up, rather than guessing once from device locale and stopping. Needs a design pass, not a one-line fix — touches `normalizeForIdentity`, the `lookup` Edge Function's hash matching (currently exact-match on one hash), and possibly storing more than one normalization candidate's hash per lookup call. |
-| M2 | — | Recurring reminders ("every day at 8", "every Monday") | L | `OPEN` | See [Major features](#major-features) below — highest-value missing feature, needs its own spec. |
+| M2 | — | Recurring reminders ("every day at 8", "every Monday") | L | `DONE` 2026-09-19 (Jest only — see D85-D90) | See [Major features](#major-features) below. |
 | M9 | — | Smart re-nudge (re-alert ladder) | L | `OPEN` | See [Major features](#major-features) below — prerequisite (real `snoozeCount` data) is now met; ready to spec. |
 | M3 | — | Location-based reminders | L | `OPEN` | See [Major features](#major-features) below. |
 | B17 | — | Collapse ReminderService's duplicated cancel→schedule sequence | M | `DONE` 2026-09-12 | Architecture review found `toggleComplete`, `snoozeReminder`, `rescheduleAllFutureReminders`, and `setAlarmForPendingReminders` each hand-rolled the same cancel-by-payload→cancel-by-id→schedule sequence with drifted guards — implicated in nearly every scheduling bug-fix commit in the log (missed alarms, un-complete scheduling, silent reminders late, exact-alarm setAlarmClock). Landed: `rearmReminder(reminder, {guard, schedule})` in `ReminderService.ts` now backs all four call sites; the "still in the future" guard (previously missing only from `snoozeReminder`) is applied everywhere. 143/143 `ReminderService.test.ts` tests passing, typecheck clean. Commit `a89563d` on `refactor/architecture-review-deepening`. |
@@ -134,7 +134,7 @@ deepen those two things over ones that widen the app's surface.**
 | ID | Feature | Status | Effort |
 | --- | --- | --- | --- |
 | [M1](#m1-dark-mode) | Dark mode | `DONE` 2026-08-10 | — |
-| [M2](#m2-recurring-reminders) | Recurring reminders | `OPEN` | L |
+| [M2](#m2-recurring-reminders) | Recurring reminders | `DONE` 2026-09-19 (Jest only — see D85-D90) | L |
 | [M3](#m3-location-based-reminders) | Location-based reminders | `OPEN` | L |
 | [M4](#m4-remind-someone-else) Tier 1 | Remind someone else (send-only) | `DONE` 2026-08-30 (core loop on device) | — |
 | [M4](#m4-remind-someone-else) Tier 2 | Remind someone else (app-to-app + ack) | `IN PROGRESS` (schema landed) | L |
@@ -157,21 +157,22 @@ slip, quiet-hours/name sheets) shipped after the last pass. See
 
 ### M2. Recurring reminders
 
-"every day at 8", "every Monday", "monthly on the 1st". Repeatedly
-identified as the highest-value missing feature. Known constraints
-(2026-08-07 analysis):
-(a) `chrono-node` does NOT return recurrence info — it silently drops "every
-day"/"daily", stranding the word in the title, so recurrence parsing must be
-built, not configured;
-(b) `malayalamDateParser.ts` has no recurrence support either;
-(c) the codebase schedules only one-shot `SchedulableTriggerInputTypes.DATE`
-triggers, so either a repeating trigger type or a rolling
-re-schedule-on-fire scheme is needed — the latter interacts with the
-boot-reschedule task and `ALARM_EARLY_OFFSET_MS` (see
-[device-tests/cross-cutting.md#d19](device-tests/cross-cutting.md#d19));
-(d) UI surface is larger than it looks — `add-reminder.tsx` (~630 lines) and
-`QuickAddInput.tsx` (~810 lines) both need changes;
-(e) the `Reminder` interface and its AsyncStorage records need a migration.
+`DONE` 2026-09-19 (English only — Malayalam recurrence is still unbuilt,
+`ParsedReading.recurrence` is type-only there) — "every day at 8", "every
+Monday", "monthly on the 1st". Plan: `docs/superpowers/plans/2026-09-18-recurring-reminders-m2.md`.
+Advance-in-place (one record rolls forward, no per-occurrence history) via a
+rolling reschedule-on-fire scheme — see the "Recurrence model" entry under
+Architecture decisions in `CLAUDE.md` for the full design. Covers: NL parsing
+in both QuickAddInput and add-reminder (typing "every day at 8" fills a
+`RecurrenceRule` live), a shared `RecurrencePicker` for explicit
+set/edit, the home-list card marker, the detail screen's rule line and "Next
+3" preview, adherence-stats tallying so a recurring reminder's completions
+aren't invisible to Insights, snooze-vs-anchor semantics (a snooze defers one
+occurrence, never moves the series), and Tier 2 (a recurring reminder sent to
+someone else carries its rule to their device on accept). **Unproven on
+hardware** — see [device-tests/notifications.md](device-tests/notifications.md)
+D85-D90 for the device-only checks (killed-app re-arm across occurrences,
+notification-tray mark-done advancing the series, DST).
 
 ### M3. Location-based reminders
 
