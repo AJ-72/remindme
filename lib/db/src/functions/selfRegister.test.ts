@@ -45,13 +45,50 @@ describe("self_register", () => {
     await db.close();
   });
 
-  it("refuses a number already registered to a different account", async () => {
+  it("refuses a number already registered to a different, still-active account", async () => {
     const db = await createSchemaTestDb();
     await db.asService(seed);
     await db.asService(`insert into users (id, phone_hash) values ('${STRANGER}', 'hash-amma')`);
     await expect(
       db.asUser(AMMA, `select * from self_register('hash-amma')`)
     ).rejects.toThrow(/already registered/i);
+    await db.close();
+  });
+
+  it("still refuses a number registered to an account just inside the 45-day floor", async () => {
+    const db = await createSchemaTestDb();
+    await db.asService(seed);
+    await db.asService(`
+      insert into users (id, phone_hash, last_active_at) values
+        ('${STRANGER}', 'hash-amma', now() - interval '44 days');
+    `);
+    await expect(
+      db.asUser(AMMA, `select * from self_register('hash-amma')`)
+    ).rejects.toThrow(/already registered/i);
+    await db.close();
+  });
+
+  it("reclaims a number from a STALE account (45+ days inactive) as a fresh account", async () => {
+    const db = await createSchemaTestDb();
+    await db.asService(seed);
+    await db.asService(`
+      insert into users (id, phone_hash, last_active_at) values
+        ('${STRANGER}', 'hash-amma', now() - interval '46 days');
+      -- The stale account's own state - must not survive onto the new caller.
+      insert into blocks (blocker_id, blocked_id) values ('${STRANGER}', '${ANAND}');
+    `);
+
+    const [row] = await db.asUser(AMMA, `select * from self_register('hash-amma')`);
+    expect(row.id).toBe(AMMA);
+    expect(row.phone_hash).toBe("hash-amma");
+
+    // The old account and everything keyed to it is gone, not transferred.
+    await expect(
+      db.asService(`select count(*)::int as n from users where id = '${STRANGER}'`)
+    ).resolves.toEqual([{ n: 0 }]);
+    await expect(
+      db.asService(`select count(*)::int as n from blocks where blocker_id = '${STRANGER}'`)
+    ).resolves.toEqual([{ n: 0 }]);
     await db.close();
   });
 
