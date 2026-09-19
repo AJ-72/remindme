@@ -455,6 +455,122 @@ describe("ReminderDetailScreen — recurrence", () => {
     expect(next3).toBeTruthy();
   });
 
+  it("Next 3 preview's 2nd/3rd entries reflect the series' standing anchor, not a snoozed-to-a-different-day datetime", async () => {
+    // Regression for a real bug: the preview used to walk
+    // computeNextOccurrence forward from `reminder.datetime`, but a snooze
+    // overwrites `datetime` for one occurrence only and never moves
+    // recurrenceAnchor (see Reminder.recurrenceAnchor) - so a snoozed
+    // recurring reminder's "Next 3" silently showed occurrences computed
+    // from the snoozed time/day, disagreeing with what
+    // advanceRecurringReminder actually schedules (which always computes
+    // from the anchor). Weekly, anchored on a Monday, but snoozed 3 days
+    // forward to Thursday - the anchor-based 2nd/3rd entries land on the
+    // following two Mondays; a datetime-based (buggy) computation would
+    // instead show the following two Thursdays. Asserting on rendered date
+    // text (not just presence) is what makes this a real regression test
+    // rather than a smoke test - see this file's own "Next 3" smoke test
+    // above for the difference.
+    const anchorMonday = new Date();
+    anchorMonday.setHours(9, 0, 0, 0);
+    // Walk to the next Monday strictly in the future from "now" so the
+    // fixture is never accidentally past-due regardless of what day the
+    // suite runs on.
+    while (anchorMonday.getDay() !== 1 || anchorMonday.getTime() <= Date.now()) {
+      anchorMonday.setDate(anchorMonday.getDate() + 1);
+    }
+    const snoozedThursday = new Date(anchorMonday);
+    snoozedThursday.setDate(snoozedThursday.getDate() + 3); // Mon -> Thu
+
+    // Entry 1 of the preview is intentionally reminder.datetime as-is (the
+    // current, possibly-snoozed occurrence) — so it legitimately shows
+    // Thursday. It's entries 2 and 3 (computed from the anchor) that the bug
+    // affected: the buggy version chained forward from Thursday and showed
+    // the FOLLOWING Thursday there; the fix must show the following Monday
+    // instead.
+    const secondMonday = new Date(anchorMonday);
+    secondMonday.setDate(secondMonday.getDate() + 7);
+    const secondMondayLabel = secondMonday.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+    const followingThursday = new Date(snoozedThursday);
+    followingThursday.setDate(followingThursday.getDate() + 7);
+    const wrongFollowingThursdayLabel = followingThursday.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          datetime: snoozedThursday.toISOString(),
+          recurrenceAnchor: anchorMonday.toISOString(),
+          recurrence: { freq: "weekly", interval: 1 },
+        }),
+      ])
+    );
+    const { findByTestId } = renderScreen();
+    const next3 = await findByTestId("repeat-next-occurrences");
+    const text = next3.props.children.join("");
+    expect(text).toContain(secondMondayLabel);
+    expect(text).not.toContain(wrongFollowingThursdayLabel);
+  });
+
+  it("Next 3 preview does not duplicate the current occurrence when repeated snoozes push `datetime` past anchor+1", async () => {
+    // Regression for a real bug found live on-device (2026-09-19): a DAILY
+    // reminder anchored Sat 9:00 AM, snoozed 3 times until it landed on Sun
+    // 5:05 PM. anchor+1 day (Sun 9:00 AM) is BEFORE the snoozed `datetime`
+    // (Sun 5:05 PM) — the previous fix (anchor+1, anchor+2 fixed periods)
+    // rendered entry 1 (Sun, from datetime) and entry 2 (Sun, from anchor+1)
+    // as the SAME calendar day, then jumped straight to entry 3 (Mon) —
+    // "Next 3: Sun · Sun · Mon" instead of three genuinely distinct
+    // occurrences. The weekly test above doesn't catch this because a 3-day
+    // snooze there never pushes `datetime` past anchor+1's own week-later
+    // landing; a daily rule with a same-day snooze does.
+    const anchor = new Date(2026, 8, 19, 9, 0, 0); // Sat 19 Sept, 9:00 AM
+    const snoozedDatetime = new Date(2026, 8, 20, 17, 5, 0); // Sun 20 Sept, 5:05 PM
+
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          datetime: snoozedDatetime.toISOString(),
+          recurrenceAnchor: anchor.toISOString(),
+          recurrence: { freq: "daily", interval: 1 },
+        }),
+      ])
+    );
+    const { findByTestId } = renderScreen();
+    const next3 = await findByTestId("repeat-next-occurrences");
+    const text = next3.props.children.join("");
+
+    const sunLabel = snoozedDatetime.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+    const monLabel = new Date(2026, 8, 21, 9, 0, 0).toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+    const tueLabel = new Date(2026, 8, 22, 9, 0, 0).toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+
+    // Entry 1 legitimately shows Sunday (the current, snoozed occurrence).
+    // The bug was entry 2 ALSO showing Sunday instead of the next distinct
+    // occurrence — assert the label appears exactly once, not "is present".
+    expect(text.split(sunLabel).length - 1).toBe(1);
+    expect(text).toContain(monLabel);
+    expect(text).toContain(tueLabel);
+  });
+
   it("routes Edit into add-reminder, same as any other reminder — no separate recurrence edit path", async () => {
     // Per the plan: "route editing into the SAME shared picker. Do not
     // build a third implementation." The existing footer Edit button

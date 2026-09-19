@@ -2394,6 +2394,36 @@ describe("advanceRecurringReminder", () => {
     );
   });
 
+  it("catching up a monthly reminder anchored on the 31st across several months lands on the 30th/31st, not drifted to the 28th", () => {
+    // Regression for a real bug: the catch-up loop used to compute each
+    // candidate by chaining computeNextOccurrence from the PREVIOUS
+    // candidate, which compounds the day-of-month clamp every step (Jan 31
+    // -> Feb 28 -> Mar 28 (from the already-clamped Feb 28, not from the
+    // real anchor) -> Apr 28), permanently losing the 31st the user actually
+    // set. Fixed by computing every candidate fresh from recurrenceAnchor via
+    // computeNthOccurrence, which clamps at most once. Confirmed as a live
+    // bug via a throwaway probe before this fix: catching up from Jan 31 to
+    // "now" of May 1 landed on May 28, not May 31.
+    const r: Reminder = {
+      ...base,
+      datetime: new Date(2026, 0, 31, 9, 0, 0).toISOString(),
+      recurrenceAnchor: new Date(2026, 0, 31, 9, 0, 0).toISOString(),
+      recurrence: { freq: "monthly", interval: 1 },
+    };
+    const now = new Date(2026, 4, 1, 0, 0, 0); // May 1 2026 - phone off since Jan 31
+    const advanced = advanceRecurringReminder(r, now);
+    expect(advanced).not.toBeNull();
+    const result = new Date(advanced!.datetime);
+    // Walking the anchor day (31) forward month by month: Feb clamps to 28
+    // (Feb has no 31st), Mar 31 is real (31 days), Apr clamps to 30 (Apr has
+    // no 31st) - Apr 30 is still not strictly after "now" (May 1 00:00), so
+    // the next actual future occurrence is May 31 (May has 31 days, no
+    // clamp needed). The bug this regresses against would have instead
+    // compounded every step's clamp and landed on May 28.
+    expect(result.getMonth()).toBe(4); // May (0-indexed)
+    expect(result.getDate()).toBe(31);
+  });
+
   it("advances quickly for a large-but-under-cap number of missed occurrences", () => {
     // Not the cap-hitting case (see below) - this just confirms a large,
     // realistic catch-up (~9700 daily occurrences) stays fast and lands
@@ -2418,10 +2448,16 @@ describe("advanceRecurringReminder", () => {
     // but Task 5c will feed rules parsed from an external Tier 2 invitation
     // payload through this same path, so the cap itself must be proven to
     // fail safely rather than assumed unreachable. Force it here by
-    // stubbing computeNextOccurrence to never progress past `from`.
+    // stubbing computeNthOccurrence to never progress past `anchor`.
+    //
+    // Mocks computeNthOccurrence, not computeNextOccurrence: the catch-up
+    // loop now computes each candidate fresh from the anchor via
+    // computeNthOccurrence (see advanceRecurringReminder's own comment on
+    // why - avoiding compounded monthly/yearly day-of-month clamping), so
+    // that is the call the cap-exhaustion path actually drives.
     const spy = jest
-      .spyOn(recurrenceModule, "computeNextOccurrence")
-      .mockImplementation((_rule, from) => from);
+      .spyOn(recurrenceModule, "computeNthOccurrence")
+      .mockImplementation((_rule, anchor) => anchor);
 
     const r: Reminder = {
       ...base,
@@ -2432,7 +2468,7 @@ describe("advanceRecurringReminder", () => {
 
     const advanced = advanceRecurringReminder(r, now);
 
-    // computeNextOccurrence was called MAX_ADVANCE_ITERATIONS + 1 times
+    // computeNthOccurrence was called MAX_ADVANCE_ITERATIONS + 1 times
     // (the initial call, then one per loop iteration) before the loop gave
     // up - proves the cap was actually exercised, not just "under budget".
     expect(spy).toHaveBeenCalledTimes(10001);

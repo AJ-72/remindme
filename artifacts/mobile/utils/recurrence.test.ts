@@ -1,8 +1,10 @@
 import {
   computeNextOccurrence,
+  computeNthOccurrence,
   describeRecurrence,
   isValidRecurrenceRule,
   parseRecurrencePhrase,
+  upcomingOccurrences,
   type RecurrenceRule,
 } from "./recurrence";
 
@@ -87,6 +89,88 @@ describe("computeNextOccurrence", () => {
       const rule: RecurrenceRule = { freq: "monthly", interval: 1 };
       const next = computeNextOccurrence(rule, from);
       expect(next).toEqual(new Date(2028, 1, 29, 9, 30, 0));
+    });
+  });
+
+  describe("computeNthOccurrence", () => {
+    it("does NOT compound a monthly day-of-month clamp across periods: Jan 31 + 3 months is Apr 30, not Apr 28", () => {
+      // Chaining computeNextOccurrence 3 times from Jan 31 would clamp once
+      // per step and compound: Jan 31 -> Feb 28 -> Mar 28 (computed FROM the
+      // already-clamped Feb 28, not from Jan 31) -> Apr 28, permanently
+      // losing the 31st. computeNthOccurrence must clamp at most once, always
+      // from the real anchor day.
+      const anchor = new Date(2026, 0, 31, 9, 0, 0); // Jan 31 2026
+      const rule: RecurrenceRule = { freq: "monthly", interval: 1 };
+      const third = computeNthOccurrence(rule, anchor, 3);
+      expect(third).toEqual(new Date(2026, 3, 30, 9, 0, 0)); // Apr 30, not Apr 28
+    });
+
+    it("does NOT compound a yearly Feb-29 clamp across periods", () => {
+      const anchor = new Date(2028, 1, 29, 9, 0, 0); // Feb 29 2028 (leap)
+      const rule: RecurrenceRule = { freq: "yearly", interval: 1 };
+      // 2029, 2030 are non-leap (clamp to Feb 28); 2032 is leap again.
+      // Chaining from the 2029 clamp would compute 2030 from Feb 28 2029
+      // (fine, still Feb 28) but must not accidentally "forget" Feb 29 is
+      // reachable again in 2032 - chaining vs. anchor-relative agree for
+      // yearly UNLESS an intermediate is itself clamped away from a leap
+      // day, so this pins the anchor-relative contract directly.
+      const fourth = computeNthOccurrence(rule, anchor, 4); // 2032, leap year
+      expect(fourth).toEqual(new Date(2032, 1, 29, 9, 0, 0));
+    });
+
+    it("agrees with chaining computeNextOccurrence for daily (no clamping involved)", () => {
+      const anchor = new Date(2026, 0, 1, 9, 0, 0);
+      const rule: RecurrenceRule = { freq: "daily", interval: 2 };
+      let chained = anchor;
+      for (let i = 0; i < 5; i++) chained = computeNextOccurrence(rule, chained);
+      const nth = computeNthOccurrence(rule, anchor, 5);
+      expect(nth).toEqual(chained);
+    });
+  });
+
+  describe("upcomingOccurrences", () => {
+    it("skips past occurrences that fall behind a snoozed `after` time, instead of duplicating it", () => {
+      // Reproduces the on-device bug: a daily reminder created Sat 9:00 AM,
+      // then snoozed until Sun 5:05 PM. `recurrenceAnchor` never moves on a
+      // snooze (see ReminderService.snoozeReminder), so anchor+1 day (Sun
+      // 9:00 AM) is BEFORE the already-snoozed `after` (Sun 5:05 PM) - the
+      // naive "anchor + 1, anchor + 2" the detail screen used to compute
+      // duplicated the current day instead of finding the next TWO
+      // occurrences strictly after the snoozed time.
+      const anchor = new Date(2026, 8, 19, 9, 0, 0); // Sat 19 Sept, 9:00 AM
+      const after = new Date(2026, 8, 20, 17, 5, 0); // Sun 20 Sept, 5:05 PM (snoozed)
+      const rule: RecurrenceRule = { freq: "daily", interval: 1 };
+      const result = upcomingOccurrences(rule, anchor, after, 2);
+      expect(result).toEqual([
+        new Date(2026, 8, 21, 9, 0, 0), // Mon 21 Sept
+        new Date(2026, 8, 22, 9, 0, 0), // Tue 22 Sept
+      ]);
+    });
+
+    it("returns occurrences strictly after `after`, not equal to it", () => {
+      const anchor = new Date(2026, 0, 1, 9, 0, 0);
+      const rule: RecurrenceRule = { freq: "daily", interval: 1 };
+      const after = new Date(2026, 0, 3, 9, 0, 0); // exactly the 3rd occurrence
+      const result = upcomingOccurrences(rule, anchor, after, 1);
+      expect(result).toEqual([new Date(2026, 0, 4, 9, 0, 0)]);
+    });
+
+    it("does not compound a monthly day-of-month clamp across the returned occurrences", () => {
+      const anchor = new Date(2026, 0, 31, 9, 0, 0); // Jan 31 2026
+      const rule: RecurrenceRule = { freq: "monthly", interval: 1 };
+      const after = new Date(2026, 1, 28, 9, 0, 0); // Feb 28 (clamped occurrence)
+      const result = upcomingOccurrences(rule, anchor, after, 1);
+      expect(result).toEqual([new Date(2026, 2, 31, 9, 0, 0)]); // Mar 31, not Mar 28
+    });
+
+    it("agrees with the un-snoozed case: anchor+1, anchor+2 when `after` equals the anchor", () => {
+      const anchor = new Date(2026, 0, 1, 9, 0, 0);
+      const rule: RecurrenceRule = { freq: "weekly", interval: 1 };
+      const result = upcomingOccurrences(rule, anchor, anchor, 2);
+      expect(result).toEqual([
+        computeNthOccurrence(rule, anchor, 1),
+        computeNthOccurrence(rule, anchor, 2),
+      ]);
     });
   });
 

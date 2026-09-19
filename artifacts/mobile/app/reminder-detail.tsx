@@ -21,7 +21,7 @@ import { useColors } from "@/hooks/useColors";
 import { isSendReminder } from "@/services/ReminderService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
-import { computeNextOccurrence, describeRecurrence } from "@/utils/recurrence";
+import { describeRecurrence, upcomingOccurrences } from "@/utils/recurrence";
 import type { SnoozePreset } from "@/utils/snoozePresets";
 
 function goBack() {
@@ -84,18 +84,22 @@ export default function ReminderDetailScreen() {
   // The one place a user can verify a rule means what they think before
   // trusting it overnight. The card's own upcoming datetime IS the first of
   // the three (matching the mockup: "Today · 8:00 AM" and "Next 3" both
-  // start from the same occurrence) — the other two come from walking
-  // computeNextOccurrence (Task 1) forward twice more.
+  // start from the same occurrence) — the other two come from
+  // upcomingOccurrences, computed from the series' anchor but walked forward
+  // past the CURRENT `datetime`, not just anchor+1/anchor+2: after a snooze,
+  // `datetime` no longer equals `recurrenceAnchor` (see
+  // Reminder.recurrenceAnchor) and can already be past where anchor+1 would
+  // land, so a fixed anchor+1/anchor+2 preview can duplicate or misorder the
+  // first entry instead of showing the next two occurrences the series will
+  // actually advance to (advanceRecurringReminder always computes from the
+  // anchor with the same catch-up-past-a-reference-time logic, never from
+  // `datetime` directly, and never by chaining).
   const nextOccurrences = useMemo(() => {
     if (!reminder?.recurrence) return [];
-    const dates: Date[] = [new Date(reminder.datetime)];
-    let from = dates[0];
-    for (let i = 0; i < 2; i++) {
-      from = computeNextOccurrence(reminder.recurrence, from);
-      dates.push(from);
-    }
-    return dates;
-  }, [reminder?.recurrence, reminder?.datetime]);
+    const anchor = new Date(reminder.recurrenceAnchor ?? reminder.datetime);
+    const current = new Date(reminder.datetime);
+    return [current, ...upcomingOccurrences(reminder.recurrence, anchor, current, 2)];
+  }, [reminder?.recurrence, reminder?.datetime, reminder?.recurrenceAnchor]);
 
   const handleMoveToStrongHour = async () => {
     if (!reminder || !strongHour) return;

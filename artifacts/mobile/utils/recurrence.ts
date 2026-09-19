@@ -253,6 +253,101 @@ export function computeNextOccurrence(rule: RecurrenceRule, from: Date): Date {
 }
 
 /**
+ * Returns the occurrence `periods` whole periods after `anchor` — e.g.
+ * `periods=3` on a monthly rule means "three months after anchor", always
+ * measured from `anchor` itself, never by chaining `computeNextOccurrence`
+ * `periods` times in a row.
+ *
+ * This distinction only matters for monthly/yearly, and only once a day of
+ * month that doesn't exist in every month is involved (29/30/31): `addMonthly`
+ * clamps a too-late day to the target month's last day (Jan 31 -> Feb 28), and
+ * if a SECOND step is computed `from` that already-clamped Feb 28 rather than
+ * from the original anchor, the clamp compounds — Feb 28 + 1 month = Mar 28,
+ * permanently losing the 31st the anchor actually meant, instead of Mar 31.
+ * Multiplying the interval and computing once from the anchor sidesteps this:
+ * Jan 31 + (3 * 1) months clamps once, correctly, to Apr 30. Daily/weekly
+ * never clamp a day-of-month, so chaining vs. multiplying makes no difference
+ * there; this is written as the general form anyway so callers don't have to
+ * know which frequencies are affected.
+ */
+export function computeNthOccurrence(rule: RecurrenceRule, anchor: Date, periods: number): Date {
+  const { rule: safeRule, from: safeAnchor } = normalizeInput(rule, anchor);
+  const { freq, interval, byWeekday } = safeRule;
+  const scaledInterval = interval * Math.max(1, Math.floor(periods));
+
+  switch (freq) {
+    case "daily":
+      return addDaily(safeAnchor, scaledInterval);
+    case "weekly":
+      // byWeekday steps land on specific weekdays within a week, not a fixed
+      // day-of-month — it has nothing to clamp, so chaining is exact and
+      // there is no anchor-scaled shortcut for it. `periods` calls in a row
+      // from the anchor reproduces the same result computeNextOccurrence's
+      // caller-side loop would, just kept here so every freq has one entry
+      // point.
+      if (byWeekday && byWeekday.length > 0) {
+        let result = safeAnchor;
+        for (let i = 0; i < Math.max(1, Math.floor(periods)); i++) {
+          result = addWeeklyWithByWeekday(result, interval, byWeekday);
+        }
+        return result;
+      }
+      return addWeeklyNoByWeekday(safeAnchor, scaledInterval);
+    case "monthly":
+      return addMonthly(safeAnchor, scaledInterval);
+    case "yearly":
+      return addYearly(safeAnchor, scaledInterval);
+    default:
+      return addDaily(safeAnchor, scaledInterval);
+  }
+}
+
+// Same cap as ReminderService's advanceRecurringReminder — defense in depth
+// against a rule that somehow makes no forward progress; not reachable
+// through any real RecurrenceRule today (normalizeInput floors interval to
+// >= 1 and every addX() helper advances by at least one day).
+const MAX_UPCOMING_ITERATIONS = 10000;
+
+/**
+ * Returns the next `count` occurrences strictly after `after`, computed from
+ * `anchor` — the correct way to preview "what's coming up" once `anchor` and
+ * `after` may have diverged (e.g. `after` is a reminder's current `datetime`
+ * post-snooze, while `anchor` is the series' original, never-moved
+ * `recurrenceAnchor` — see ReminderService.snoozeReminder and
+ * advanceRecurringReminder's own doc comment on why the anchor must not
+ * move).
+ *
+ * Naively previewing "anchor + 1 period, anchor + 2 periods" breaks once a
+ * snooze has pushed `after` past where the un-snoozed anchor sequence would
+ * be: anchor + 1 period can land BEFORE or EQUAL TO the already-snoozed
+ * `after`, producing a duplicate or out-of-order preview instead of the next
+ * two occurrences the series will actually advance to next. This mirrors
+ * advanceRecurringReminder's own catch-up loop (growing the period count from
+ * the anchor until strictly past the reference time) so the preview and the
+ * real advance-on-fire logic never disagree.
+ */
+export function upcomingOccurrences(
+  rule: RecurrenceRule,
+  anchor: Date,
+  after: Date,
+  count: number
+): Date[] {
+  const results: Date[] = [];
+  let periods = 1;
+  let candidate = computeNthOccurrence(rule, anchor, periods);
+  let iterations = 0;
+  while (results.length < count && iterations < MAX_UPCOMING_ITERATIONS) {
+    if (candidate.getTime() > after.getTime()) {
+      results.push(candidate);
+    }
+    periods += 1;
+    candidate = computeNthOccurrence(rule, anchor, periods);
+    iterations += 1;
+  }
+  return results;
+}
+
+/**
  * Human label used by the UI ("Daily", "Every 2 days", "Weekly on Mon, Wed",
  * "Monthly on the 15th", "Yearly on 18 Sep"). Lives here (not duplicated in
  * a screen or the reminder card) so all consumers agree and it is

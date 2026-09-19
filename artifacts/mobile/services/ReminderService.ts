@@ -19,7 +19,7 @@ import {
   parseBackup,
   serializeBackup,
 } from "@/utils/reminderBackup";
-import { computeNextOccurrence, type RecurrenceRule } from "@/utils/recurrence";
+import { computeNthOccurrence, type RecurrenceRule } from "@/utils/recurrence";
 
 export type { SnoozePreset };
 export type { QuietHours };
@@ -284,8 +284,9 @@ const MAX_ADVANCE_ITERATIONS = 10000;
  *
  * Catches up past MULTIPLE missed occurrences: a phone that was off for
  * three days must land on the next FUTURE occurrence, not three days ago -
- * so this loops computeNextOccurrence() from the reminder's own `datetime`
- * until the result is strictly after `now`, rather than advancing just once.
+ * so this calls computeNthOccurrence() with a growing period count, from the
+ * reminder's own recurrenceAnchor, until the result is strictly after `now`,
+ * rather than advancing just once.
  *
  * `snoozeCount`/`snoozeHistory` are deliberately preserved across
  * occurrences, not reset - they are the series-level avoidance signal (M9's
@@ -313,10 +314,21 @@ export function advanceRecurringReminder(r: Reminder, now: Date): Reminder | nul
   // case specifically (it has never been snoozed, so it IS the anchor).
   const anchor = new Date(r.recurrenceAnchor ?? r.datetime);
 
-  let next = computeNextOccurrence(r.recurrence, anchor);
+  // Each candidate is computed FRESH from `anchor` via computeNthOccurrence
+  // (periods=1, 2, 3, ...), never by chaining computeNextOccurrence from the
+  // previous candidate. Chaining would compound a monthly/yearly day-of-month
+  // clamp: a Jan-31 monthly reminder catching up after being past-due for
+  // several months would clamp Jan 31 -> Feb 28, then compute March from that
+  // already-clamped Feb 28 -> Mar 28, permanently losing the 31st instead of
+  // correctly landing back on Mar 31/Apr 30. Recomputing from the anchor each
+  // time clamps at most once, from the day the user actually set. See
+  // computeNthOccurrence's own doc comment.
+  let periods = 1;
+  let next = computeNthOccurrence(r.recurrence, anchor, periods);
   let iterations = 0;
   while (next.getTime() <= now.getTime() && iterations < MAX_ADVANCE_ITERATIONS) {
-    next = computeNextOccurrence(r.recurrence, next);
+    periods += 1;
+    next = computeNthOccurrence(r.recurrence, anchor, periods);
     iterations += 1;
   }
 
