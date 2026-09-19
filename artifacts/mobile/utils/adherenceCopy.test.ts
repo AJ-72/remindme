@@ -144,6 +144,25 @@ describe("suggestBetterHour", () => {
   it("stays silent with no history at all", () => {
     expect(suggestBetterHour(computeAdherenceStats([], NOW), 9)).toBeNull();
   });
+
+  // M2 Task 5b, per (A): moving a recurring reminder's hour moves EVERY
+  // future occurrence, not one event - materially bigger than the
+  // non-recurring case, and the copy must say so rather than reuse the
+  // same sentence for two different consequences.
+  it("says the change affects all future occurrences when the reminder is recurring", () => {
+    const s = suggestBetterHour(stats, 22, { isRecurring: true });
+    expect(s?.text).toMatch(/all future|every occurrence|every day|repeat/i);
+  });
+
+  it("keeps the plain, non-recurring copy when isRecurring is omitted", () => {
+    const s = suggestBetterHour(stats, 22);
+    expect(s?.text).not.toMatch(/all future|every occurrence|repeat/i);
+  });
+
+  it("keeps the plain, non-recurring copy when isRecurring is explicitly false", () => {
+    const s = suggestBetterHour(stats, 22, { isRecurring: false });
+    expect(s?.text).not.toMatch(/all future|every occurrence|repeat/i);
+  });
 });
 
 describe("hourAdviceBlocker", () => {

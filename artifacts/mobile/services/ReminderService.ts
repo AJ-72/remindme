@@ -206,6 +206,38 @@ export interface Reminder {
    * below for how a recurring reminder moves to its next occurrence.
    */
   recurrence?: RecurrenceRule;
+  /**
+   * The series' standing schedule: what "every day at 8" actually means.
+   * Set when a recurrence rule is attached; NEVER moved by a snooze (a
+   * snooze defers one occurrence, it does not restate the schedule) - only
+   * by a deliberate time edit, which IS the user restating the schedule.
+   * advanceRecurringReminder() computes the next occurrence from this, not
+   * from `datetime`, which snooze overwrites - otherwise one two-hour
+   * snooze of "every day at 8" would silently convert the series to a
+   * standing 10am reminder.
+   */
+  recurrenceAnchor?: string;
+  /**
+   * Occurrences of a recurring series completed on time, tallied as each one
+   * advances. A recurring reminder's CURRENT record is always `pending` by
+   * `outcomeOf`'s definition (it always has a next occurrence sitting in the
+   * future) - without this, a perfectly-kept daily habit would score zero
+   * completions forever. See adherenceStats.ts.
+   */
+  occurrencesCompleted?: number;
+  /** Occurrences of a recurring series that went unactioned, tallied the
+   * same way and for the same reason as occurrencesCompleted above. */
+  occurrencesMissed?: number;
+  /**
+   * Snoozes on the CURRENT occurrence only, reset to 0 on each advance.
+   * `stuck` (adherenceStats.ts) reads THIS, not the series-wide
+   * `snoozeCount` above - three snoozes spread across three separate days of
+   * a daily reminder is normal and must not read as one task avoided three
+   * times in a row. `snoozeCount` keeps its own meaning unchanged (the
+   * series-wide avoidance signal M9 reads); this is a second, narrower
+   * counter, not a replacement.
+   */
+  currentOccurrenceSnoozes?: number;
 }
 
 /**
@@ -273,7 +305,15 @@ export function advanceRecurringReminder(r: Reminder, now: Date): Reminder | nul
     return null;
   }
 
-  let next = computeNextOccurrence(r.recurrence, currentDue);
+  // Compute from the series' standing anchor, NEVER from `datetime` - a
+  // snooze overwrites `datetime` for that occurrence only, and computing
+  // from it here would silently convert the whole series to the snoozed
+  // time forever. `recurrenceAnchor` may be absent on a record from before
+  // this field existed; `datetime` is the correct fallback for that legacy
+  // case specifically (it has never been snoozed, so it IS the anchor).
+  const anchor = new Date(r.recurrenceAnchor ?? r.datetime);
+
+  let next = computeNextOccurrence(r.recurrence, anchor);
   let iterations = 0;
   while (next.getTime() <= now.getTime() && iterations < MAX_ADVANCE_ITERATIONS) {
     next = computeNextOccurrence(r.recurrence, next);
@@ -303,9 +343,29 @@ export function advanceRecurringReminder(r: Reminder, now: Date): Reminder | nul
     notificationId: undefined,
     notifiedAt: undefined,
     openedAt: undefined,
+    // Tally the RETIRING occurrence's outcome onto the record before
+    // resetting to a fresh, always-pending-by-construction next occurrence.
+    // Without this, `outcomeOf` (adherenceStats.ts) reads every advanced
+    // record as `pending` forever, and a perfectly-kept daily habit
+    // contributes zero completions to any adherence number - proved by a
+    // probe against the real computeAdherenceStats before this existed.
+    occurrencesCompleted: r.completed
+      ? (r.occurrencesCompleted ?? 0) + 1
+      : r.occurrencesCompleted,
+    occurrencesMissed: !r.completed
+      ? (r.occurrencesMissed ?? 0) + 1
+      : r.occurrencesMissed,
+    // Per-occurrence snooze count resets to 0 - `stuck` reads THIS field,
+    // not the series-wide snoozeCount below, specifically so snoozes spread
+    // across separate days of a recurring reminder don't permanently read
+    // as one task avoided repeatedly in a row.
+    currentOccurrenceSnoozes: 0,
     // Everything else (snoozeCount, snoozeHistory, originalDatetime,
-    // createdAt, recurrence, recipient/senderName, etc.) is preserved via
-    // the spread above - series-level state, not per-occurrence state.
+    // createdAt, recurrence, recurrenceAnchor, recipient/senderName, etc.)
+    // is preserved via the spread above - series-level state, not
+    // per-occurrence state. recurrenceAnchor in particular must NOT move
+    // here - only a deliberate time edit moves it (see its own doc comment
+    // on Reminder), never an advance.
   };
 }
 
@@ -1231,6 +1291,11 @@ export async function addReminder(
     completed: false,
     notificationId,
     createdAt: new Date().toISOString(),
+    // A newly-created recurring reminder's anchor IS its own datetime - the
+    // UI never has to know recurrenceAnchor exists, it just sets
+    // `recurrence` and the standing schedule is derived from where the
+    // reminder was actually set. Absent for a non-recurring reminder.
+    recurrenceAnchor: data.recurrence ? data.datetime : undefined,
   };
   const reminders = [added, ...current];
   await saveReminders(reminders);
@@ -1240,14 +1305,32 @@ export async function addReminder(
 export async function editReminder(
   current: Reminder[],
   id: string,
-  data: Omit<Reminder, "id" | "completed" | "notificationId">
+  data: Omit<Reminder, "id" | "completed" | "notificationId">,
+  options: { moveAnchor?: boolean } = {}
 ): Promise<Reminder[]> {
   const old = current.find((r) => r.id === id);
   await cancelNotification(old?.notificationId);
   const notificationId = await scheduleNotification(data, id);
-  const reminders = current.map((r) =>
-    r.id === id ? { ...r, ...data, notificationId } : r
-  );
+  const reminders = current.map((r) => {
+    if (r.id !== id) return r;
+    if (!data.recurrence) {
+      // "Doesn't repeat" was chosen (or recurrence was never set) - no
+      // anchor to carry, regardless of moveAnchor.
+      return { ...r, ...data, notificationId, recurrenceAnchor: undefined };
+    }
+    // Default is FALSE, deliberately, not "moves whenever datetime
+    // changes": editReminder is called from more than one place, and only
+    // an explicit, deliberate schedule restatement (the add-reminder Save
+    // button) should move the standing anchor. Other callers (e.g. the
+    // "move to your strongest hour" nudge on a recurring reminder) change
+    // `datetime` for reasons closer to a snooze - one occurrence, not the
+    // whole series - and must pass moveAnchor: false (the default) or
+    // explicitly ask the user first.
+    const recurrenceAnchor = options.moveAnchor
+      ? data.datetime
+      : r.recurrenceAnchor ?? data.datetime;
+    return { ...r, ...data, notificationId, recurrenceAnchor };
+  });
   await saveReminders(reminders);
   return reminders;
 }
@@ -1436,6 +1519,11 @@ export async function snoozeReminder(
           datetime,
           notificationId,
           snoozeCount: (r.snoozeCount ?? 0) + 1,
+          // Per-occurrence sibling of snoozeCount above - resets to 0 on
+          // every advance (see advanceRecurringReminder), so `stuck`
+          // (adherenceStats.ts) can read "is THIS occurrence stuck"
+          // separately from "has this series ever been avoided".
+          currentOccurrenceSnoozes: (r.currentOccurrenceSnoozes ?? 0) + 1,
           // `??` not `||`: written once, on the first snooze only. An existing
           // value must survive every later snooze, since it is what makes the
           // distance a task has slid measurable.

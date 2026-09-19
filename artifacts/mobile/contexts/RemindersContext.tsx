@@ -84,7 +84,8 @@ interface RemindersContextType {
   attachInvitationId: (id: string, invitationId: string) => Promise<void>;
   editReminder: (
     id: string,
-    data: Omit<Reminder, "id" | "completed" | "notificationId">
+    data: Omit<Reminder, "id" | "completed" | "notificationId">,
+    options?: { moveAnchor?: boolean }
   ) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
   deleteReminders: (ids: string[]) => Promise<void>;
@@ -374,9 +375,10 @@ export function RemindersProvider({
   const editReminder = useCallback(
     async (
       id: string,
-      data: Omit<Reminder, "id" | "completed" | "notificationId">
+      data: Omit<Reminder, "id" | "completed" | "notificationId">,
+      options?: { moveAnchor?: boolean }
     ) => {
-      const updated = await serviceEdit(reminders, id, data);
+      const updated = await serviceEdit(reminders, id, data, options);
       setReminders(updated);
       track(EVENTS.REMINDER_EDITED, reminderProps(data));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

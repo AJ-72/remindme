@@ -155,6 +155,101 @@ describe("stuck reminders", () => {
     );
     expect(stats.stuck).toEqual([]);
   });
+
+  // M2 Task 5b, per the probe that found this broken before the fix: a
+  // recurring reminder's snoozeCount is series-wide and never resets, so
+  // three snoozes spread harmlessly across three separate days would read
+  // identically to one task avoided three times in a row. `stuck` must read
+  // currentOccurrenceSnoozes (per-occurrence, reset on each advance)
+  // instead, when present.
+  it("does not call a recurring reminder stuck from snoozes spread across separate occurrences", () => {
+    const dailyRule = { freq: "daily" as const, interval: 1 };
+    const spreadAcrossDays = reminder({
+      recurrence: dailyRule,
+      snoozeCount: 9, // series-wide total, accumulated over many past days
+      currentOccurrenceSnoozes: 1, // but only 1 snooze on the CURRENT occurrence
+    });
+    const stats = computeAdherenceStats([spreadAcrossDays], NOW);
+    expect(stats.stuck).toEqual([]);
+  });
+
+  it("still calls a recurring reminder stuck when the CURRENT occurrence itself has been snoozed past the threshold", () => {
+    const dailyRule = { freq: "daily" as const, interval: 1 };
+    const genuinelyStuck = reminder({
+      recurrence: dailyRule,
+      snoozeCount: STUCK_SNOOZE_THRESHOLD,
+      currentOccurrenceSnoozes: STUCK_SNOOZE_THRESHOLD,
+    });
+    const stats = computeAdherenceStats([genuinelyStuck], NOW);
+    expect(stats.stuck.map((r) => r.id)).toEqual([genuinelyStuck.id]);
+  });
+
+  // Falls back to snoozeCount when currentOccurrenceSnoozes is absent - a
+  // non-recurring reminder, or a recurring one from before this field
+  // existed, must behave exactly as before.
+  it("falls back to snoozeCount for a reminder with no currentOccurrenceSnoozes", () => {
+    const stuck = reminder({ snoozeCount: STUCK_SNOOZE_THRESHOLD });
+    const stats = computeAdherenceStats([stuck], NOW);
+    expect(stats.stuck.map((r) => r.id)).toEqual([stuck.id]);
+  });
+});
+
+describe("recurring reminder occurrence tallies", () => {
+  // M2 Task 5b, per the probe: advance-in-place resets a recurring
+  // reminder's own record to `pending` on every occurrence, so without
+  // folding the tallies in, a perfectly-kept daily habit contributes ZERO
+  // completions to any adherence number. These three tests are the ones the
+  // probe used to prove the bug before the fix existed.
+  it("folds occurrencesCompleted into scored/completed, even though the CURRENT record is pending", () => {
+    const dailyRule = { freq: "daily" as const, interval: 1 };
+    const keptDaily = reminder({
+      recurrence: dailyRule,
+      datetime: at(1, 9), // next occurrence is in the future - pending by outcomeOf
+      occurrencesCompleted: 29,
+    });
+    const stats = computeAdherenceStats([keptDaily], NOW);
+    expect(stats.scored).toBe(29);
+    expect(stats.completed).toBe(29);
+    expect(stats.pending).toBe(1); // the current, not-yet-due occurrence
+    expect(stats.completionRate).toBeCloseTo(1);
+  });
+
+  it("folds occurrencesMissed into scored/missed the same way", () => {
+    const dailyRule = { freq: "daily" as const, interval: 1 };
+    const avoidedDaily = reminder({
+      recurrence: dailyRule,
+      datetime: at(1, 9),
+      occurrencesMissed: 10,
+    });
+    const stats = computeAdherenceStats([avoidedDaily], NOW);
+    expect(stats.scored).toBe(10);
+    expect(stats.missed).toBe(10);
+    expect(stats.completionRate).toBeCloseTo(0);
+  });
+
+  it("combines completed and missed tallies on the same reminder", () => {
+    const dailyRule = { freq: "daily" as const, interval: 1 };
+    const mixed = reminder({
+      recurrence: dailyRule,
+      datetime: at(1, 9),
+      occurrencesCompleted: 6,
+      occurrencesMissed: 4,
+    });
+    const stats = computeAdherenceStats([mixed], NOW);
+    expect(stats.scored).toBe(10);
+    expect(stats.completed).toBe(6);
+    expect(stats.missed).toBe(4);
+    expect(stats.completionRate).toBeCloseTo(0.6);
+  });
+
+  it("does not double-count: a non-recurring reminder's own decided outcome is unaffected by these fields being absent", () => {
+    const stats = computeAdherenceStats(
+      [reminder({ completed: true, completedAt: at(-1, 9) })],
+      NOW
+    );
+    expect(stats.scored).toBe(1);
+    expect(stats.completed).toBe(1);
+  });
 });
 
 describe("hour advice", () => {
@@ -262,6 +357,22 @@ describe("computeStreak", () => {
 
   it("ignores pending future reminders", () => {
     expect(computeStreak([reminder({ datetime: at(3, 9) })], NOW)).toBe(0);
+  });
+
+  // Documented limit (M2 plan, Cross-cutting impact A): occurrence tallies
+  // carry no dates, only counts, so computeStreak cannot credit them to any
+  // specific calendar day - crediting them would mean inventing dates. A
+  // recurring reminder's own CURRENT record is what counts toward the
+  // streak, exactly like any other reminder; its retired occurrences do
+  // not extend it. This is accepted, not a gap to close later.
+  it("does not credit retired occurrence tallies toward the streak - only the reminder's own current outcome counts", () => {
+    const dailyRule = { freq: "daily" as const, interval: 1 };
+    const keptForAMonth = reminder({
+      recurrence: dailyRule,
+      datetime: at(0, 9), // due today, not yet completed - today reads as a miss
+      occurrencesCompleted: 29,
+    });
+    expect(computeStreak([keptForAMonth], NOW)).toBe(0);
   });
 });
 
