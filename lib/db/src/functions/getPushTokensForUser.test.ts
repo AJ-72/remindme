@@ -97,4 +97,14 @@ describe("get_push_tokens_for_user", () => {
     ).rejects.toThrow(/not authenticated/i);
     await db.close();
   });
+
+  it("refuses a caller the target has blocked, even with a prior invitation", async () => {
+    const db = await withSeed();
+    // AMMA has received an invitation from ANAND (see seed), then blocks him.
+    await db.asService(`insert into blocks (blocker_id, blocked_id) values ('${AMMA}', '${ANAND}');`);
+    await expect(
+      db.asUser(ANAND, `select * from get_push_tokens_for_user('${AMMA}')`)
+    ).rejects.toThrow(/no invitation relationship/i);
+    await db.close();
+  });
 });

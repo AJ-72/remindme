@@ -39,10 +39,23 @@ begin
     return true;
   end if;
 
-  select count(distinct recipient_phone_hash) into distinct_new_today
-    from public.invitations
-   where sender_id = p_sender_id
-     and created_at > now() - interval '1 day';
+  -- Count only recipients who are actually new: a distinct recipient_phone_hash
+  -- contacted in the last 24 hours, with no invitation from this sender
+  -- PREDATING that window. Without the "not exists" guard, an established
+  -- contact re-messaged today also counts toward this ceiling, so a sender
+  -- with several regular contacts hits the 10-new-contacts-a-day cap far
+  -- sooner than the cap is meant to allow (bug found in a subsequent bug
+  -- hunt - see checkFirstContactRateLimit.test.ts for the sabotage case).
+  select count(distinct i1.recipient_phone_hash) into distinct_new_today
+    from public.invitations i1
+   where i1.sender_id = p_sender_id
+     and i1.created_at > now() - interval '1 day'
+     and not exists (
+       select 1 from public.invitations i2
+        where i2.sender_id = p_sender_id
+          and i2.recipient_phone_hash = i1.recipient_phone_hash
+          and i2.created_at <= now() - interval '1 day'
+     );
 
   return distinct_new_today < 10;
 end;

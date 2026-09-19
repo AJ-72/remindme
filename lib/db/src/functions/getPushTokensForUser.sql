@@ -21,6 +21,15 @@
 -- send-invitation Edge Function's own call still passes: by the time it
 -- calls this function, send_invitation() has already inserted the
 -- (caller, recipient-hash) invitation row this check looks for.
+--
+-- Bug fix (found in a subsequent bug hunt): the invitation-existence check
+-- alone does not expire. A recipient who blocks the caller AFTER an earlier
+-- invitation still has that invitation row, so the caller could keep
+-- calling this function directly and keep harvesting the recipient's live
+-- push tokens forever, completely bypassing the block send_invitation()
+-- itself enforces. A current block from the target now also refuses the
+-- call, with the same error as "no relationship" so a caller cannot use
+-- this function to probe whether they have been blocked.
 
 create or replace function public.get_push_tokens_for_user(p_user_id uuid)
 returns table(expo_push_token text)
@@ -39,6 +48,13 @@ begin
     select 1 from public.invitations i
     where i.sender_id = caller
       and i.recipient_phone_hash = (select u.phone_hash from public.users u where u.id = p_user_id)
+  ) then
+    raise exception 'no invitation relationship' using errcode = '28000';
+  end if;
+
+  if exists (
+    select 1 from public.blocks b
+     where b.blocker_id = p_user_id and b.blocked_id = caller
   ) then
     raise exception 'no invitation relationship' using errcode = '28000';
   end if;
