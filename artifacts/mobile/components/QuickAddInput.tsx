@@ -17,6 +17,7 @@ import {
 import { getLocales } from "expo-localization";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import QuietHoursSheet from "@/components/QuietHoursSheet";
+import RecurrencePicker from "@/components/RecurrencePicker";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
@@ -44,6 +45,7 @@ import {
 } from "@/services/ReminderService";
 import { formatTime12h } from "@/utils/formatDatetime";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
+import { describeRecurrence, type RecurrenceRule } from "@/utils/recurrence";
 import { EVENTS } from "@/constants/analytics";
 import { track } from "@/services/AnalyticsService";
 import { contentScript } from "@/utils/analyticsProps";
@@ -135,6 +137,8 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [input, setInput] = useState("");
   const [parsedTitle, setParsedTitle] = useState("");
   const [parsedDate, setParsedDate] = useState<Date | null>(null);
+  const [recurrence, setRecurrence] = useState<RecurrenceRule | undefined>(undefined);
+  const [showRepeatSheet, setShowRepeatSheet] = useState(false);
   const [alarm, setAlarm] = useState(defaultAlarmEnabled);
   // Tracks whether the user has overridden the alarm for the reminder they're
   // currently composing, so the sync effect below doesn't undo that.
@@ -244,10 +248,16 @@ export default function QuickAddInput({ onSaved }: Props) {
   }, [defaultAlarmEnabled]);
 
   useEffect(() => {
-    const { title, date, ambiguity: parsedAmbiguity } = parseNaturalLanguage(input);
+    const { title, date, ambiguity: parsedAmbiguity, recurrence: parsedRecurrence } =
+      parseNaturalLanguage(input);
     setParsedTitle(title);
     setParsedDate(date);
     setAmbiguity(parsedAmbiguity ?? null);
+    // Mirrors parsedDate exactly: the parse effect sets the rule on every
+    // keystroke, and a rule chosen by hand in the repeat sheet wins only
+    // until the text changes again and re-parses (see the plan's explicit
+    // sync rule for this surface).
+    setRecurrence(parsedRecurrence);
 
     if (date) {
       Animated.parallel([
@@ -320,6 +330,7 @@ export default function QuickAddInput({ onSaved }: Props) {
         // entirely - `'recipient' in obj` is true even when it holds undefined,
         // which is what isSendReminder would otherwise trip over.
         ...(recipient ? { recipient } : {}),
+        ...(recurrence ? { recurrence } : {}),
       });
 
       // Additive Tier 2 send - never blocks the Tier 1 save above, which has
@@ -346,6 +357,9 @@ export default function QuickAddInput({ onSaved }: Props) {
       setParsedTitle("");
       setParsedDate(null);
       setAmbiguity(null);
+      // A forgotten reset here means the next reminder silently inherits the
+      // last one's recurrence — the worst available bug in this feature.
+      setRecurrence(undefined);
       // Back to the user's Settings default, not a hardcoded true — resetting
       // to true left a lit bell after every save even with sound turned off.
       alarmTouchedRef.current = false;
@@ -1229,6 +1243,20 @@ export default function QuickAddInput({ onSaved }: Props) {
         </Pressable>
         <Pressable
           style={styles.alarmBtn}
+          onPress={() => setShowRepeatSheet(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={recurrence ? describeRecurrence(recurrence, parsedDate ?? new Date()) : "Repeat"}
+          testID="quick-add-repeat"
+        >
+          <Feather
+            name="repeat"
+            size={16}
+            color={recurrence ? colors.primary : colors.mutedForeground}
+          />
+        </Pressable>
+        <Pressable
+          style={styles.alarmBtn}
           onPress={() => {
             alarmTouchedRef.current = true;
             setAlarm((a) => !a);
@@ -1430,6 +1458,17 @@ export default function QuickAddInput({ onSaved }: Props) {
               <Feather name="clock" size={11} color={colors.primary} />
               <Text style={styles.pillText}>{formatTimePill(parsedDate)}</Text>
             </View>
+            {recurrence && (
+              <>
+                <Text style={styles.pillDivider}>·</Text>
+                <View style={styles.pill} testID="quick-add-repeat-pill">
+                  <Feather name="repeat" size={11} color={colors.primary} />
+                  <Text style={styles.pillText}>
+                    {describeRecurrence(recurrence, parsedDate)}
+                  </Text>
+                </View>
+              </>
+            )}
           </>
         )}
       </Animated.View>
@@ -1626,6 +1665,44 @@ export default function QuickAddInput({ onSaved }: Props) {
                 disabled={saving}
               >
                 <Text style={styles.sheetConfirmText}>Confirm</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showRepeatSheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRepeatSheet(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowRepeatSheet(false)}>
+          <Pressable onPress={() => {}} style={styles.sheet} testID="repeat-sheet">
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Repeat</Text>
+            <Text style={styles.sheetSubtitle}>How often should this come back?</Text>
+
+            <RecurrencePicker
+              value={recurrence}
+              anchorDate={parsedDate ?? new Date()}
+              onChange={setRecurrence}
+            />
+
+            <View style={styles.sheetBtnRow}>
+              <Pressable
+                style={styles.sheetCancelBtn}
+                onPress={() => setShowRepeatSheet(false)}
+                testID="repeat-sheet-cancel"
+              >
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={styles.sheetConfirmBtn}
+                onPress={() => setShowRepeatSheet(false)}
+                testID="repeat-sheet-confirm"
+              >
+                <Text style={styles.sheetConfirmText}>Done</Text>
               </Pressable>
             </View>
           </Pressable>

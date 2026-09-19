@@ -174,6 +174,27 @@ describe("AddReminderScreen — recipient", () => {
     expect("recipient" in stored[0]).toBe(false);
   });
 
+  it("clears an ALREADY-STORED recipient on an existing reminder, not just a freshly-picked one", async () => {
+    // Regression: {...r, ...data} alone can never clear a field the caller
+    // omits, since there is nothing in `data` to overwrite r's own old value
+    // with — only reproducible when the recipient was already on the stored
+    // reminder BEFORE this edit session, unlike the test above (which picks
+    // and clears within the same session, never touching r's stored value).
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recipient: { name: "Anand", phone: "9123456789" } })])
+    );
+    const { findByTestId, findByText } = renderScreen();
+    expect(await findByText("Anand")).toBeTruthy();
+
+    fireEvent.press(await findByTestId("recipient-clear"));
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect("recipient" in stored[0]).toBe(false);
+  });
+
   it("loads an existing reminder's recipient into the row", async () => {
     await AsyncStorage.setItem(
       STORAGE_KEY,
@@ -497,6 +518,143 @@ describe("the better-time suggestion", () => {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       const saved = JSON.parse(raw as string).find((r: Reminder) => r.id === "r1");
       expect(new Date(saved.datetime).getHours()).toBe(22);
+    });
+  });
+});
+
+describe("AddReminderScreen — recurrence", () => {
+  it("add mode: sets the rule from a typed recurrence phrase and strips it from the title", async () => {
+    mockSearchParams = {};
+    const { findByTestId } = renderScreen();
+    fireEvent.changeText(
+      await findByTestId("input-textbox"),
+      "take tablet every day at 8am"
+    );
+    await waitFor(() => {
+      expect(findByTestId("repeat-row")).toBeTruthy();
+    });
+    const repeatRow = await findByTestId("repeat-row");
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].recurrence).toEqual({ freq: "daily", interval: 1 });
+    expect(repeatRow).toBeTruthy();
+  });
+
+  it("add mode: does not write a recurrence key for a one-shot reminder", async () => {
+    mockSearchParams = {};
+    const { findByTestId } = renderScreen();
+    fireEvent.changeText(await findByTestId("input-textbox"), "Call mom tomorrow at 3pm");
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect("recurrence" in stored[0]).toBe(false);
+  });
+
+  it("add mode: setting the rule by hand via the Repeats row reaches the save payload", async () => {
+    mockSearchParams = {};
+    const { findByTestId } = renderScreen();
+    fireEvent.changeText(await findByTestId("input-textbox"), "Water the plants at 6pm");
+
+    fireEvent.press(await findByTestId("repeat-row"));
+    fireEvent.press(await findByTestId("repeat-option-weekly"));
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].recurrence.freq).toBe("weekly");
+  });
+
+  it("edit mode: seeds the Repeats row from the existing reminder's rule", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recurrence: { freq: "daily", interval: 1 } })])
+    );
+    const { findByText } = renderScreen();
+    expect(await findByText("Daily")).toBeTruthy();
+  });
+
+  it("edit mode: clearing to 'Doesn't repeat' via the picker removes the rule on save", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recurrence: { freq: "daily", interval: 1 } })])
+    );
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("repeat-row"));
+    fireEvent.press(await findByTestId("repeat-option-none"));
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect("recurrence" in stored[0]).toBe(false);
+    });
+  });
+
+  it("edit mode: typing a recurrence phrase into the title sets the rule", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByTestId, findByText } = renderScreen();
+    const titleInput = await findByTestId("edit-title-input");
+    // The seed effect sets editTitle asynchronously (existing loads from
+    // context after mount) — wait for the seeded value to actually land
+    // before typing, or this edit races the seed and is silently overwritten.
+    await waitFor(() => expect(titleInput.props.value).toBe("Original title"));
+
+    fireEvent.changeText(titleInput, "Original title every monday");
+
+    expect(await findByText(/Weekly on Mon/)).toBeTruthy();
+  });
+
+  it("edit mode: removing the recurrence phrase from the title does NOT clear an existing rule", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recurrence: { freq: "daily", interval: 1 } })])
+    );
+    const { findByTestId, findByText } = renderScreen();
+    // Seeded as "Daily" from existing.recurrence — confirm before editing.
+    expect(await findByText("Daily")).toBeTruthy();
+
+    const titleInput = await findByTestId("edit-title-input");
+    await waitFor(() => expect(titleInput.props.value).toBe("Original title"));
+    fireEvent.changeText(titleInput, "Updated title, no recurrence phrase here");
+
+    // Still "Daily" — the rule was not silently blanked by the title edit.
+    expect(await findByText("Daily")).toBeTruthy();
+  });
+
+  it("edit mode: saving with moveAnchor true moves the recurrence anchor to the edited time", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          recurrence: { freq: "daily", interval: 1 },
+          recurrenceAnchor: "2000-01-01T08:00:00.000Z",
+        }),
+      ])
+    );
+    const { findByTestId } = renderScreen();
+    const titleInput = await findByTestId("edit-title-input");
+    // Wait for the seed effect to fully land before saving, or this races
+    // parsedDate's own seed from existing.datetime.
+    await waitFor(() => expect(titleInput.props.value).toBe("Original title"));
+    fireEvent.press(await findByTestId("save-button"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      // The screen's own parsedDate (from the existing reminder's datetime,
+      // FUTURE) becomes the new anchor — deliberately moved because saving
+      // from this screen IS the deliberate schedule restatement.
+      expect(stored[0].recurrenceAnchor).not.toBe("2000-01-01T08:00:00.000Z");
     });
   });
 });

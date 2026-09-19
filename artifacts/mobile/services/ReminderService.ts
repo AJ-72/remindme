@@ -1313,10 +1313,29 @@ export async function editReminder(
   const notificationId = await scheduleNotification(data, id);
   const reminders = current.map((r) => {
     if (r.id !== id) return r;
+    // `{ ...r, ...data }` alone can never CLEAR a field: when the caller
+    // omits an optional key (the same "absent means unset" convention
+    // addReminder documents for `recipient`), spreading `data` on top of `r`
+    // leaves r's own old value untouched, since there is nothing in `data`
+    // to overwrite it with. editReminder's contract is a full-replacement
+    // payload (unlike addReminder's fresh object), so clearing an
+    // already-set recipient or recurrence needs an explicit reset here, not
+    // just the spread. Found via the recurrence "clear to Doesn't repeat"
+    // case, then confirmed to be the identical pre-existing bug for
+    // recipient (clearing an existing recipient and saving silently kept
+    // the old one) - fixed for both.
+    const recipientPatch = "recipient" in data ? { recipient: data.recipient } : { recipient: undefined };
     if (!data.recurrence) {
       // "Doesn't repeat" was chosen (or recurrence was never set) - no
       // anchor to carry, regardless of moveAnchor.
-      return { ...r, ...data, notificationId, recurrenceAnchor: undefined };
+      return {
+        ...r,
+        ...data,
+        ...recipientPatch,
+        notificationId,
+        recurrence: undefined,
+        recurrenceAnchor: undefined,
+      };
     }
     // Default is FALSE, deliberately, not "moves whenever datetime
     // changes": editReminder is called from more than one place, and only
@@ -1329,7 +1348,7 @@ export async function editReminder(
     const recurrenceAnchor = options.moveAnchor
       ? data.datetime
       : r.recurrenceAnchor ?? data.datetime;
-    return { ...r, ...data, notificationId, recurrenceAnchor };
+    return { ...r, ...data, ...recipientPatch, notificationId, recurrenceAnchor };
   });
   await saveReminders(reminders);
   return reminders;

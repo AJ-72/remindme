@@ -1464,3 +1464,116 @@ describe("QuickAddInput — the send-to-a-person chip", () => {
     expect(await findByTestId("send-to-person-chip")).toBeTruthy();
   });
 });
+
+describe("QuickAddInput — recurrence", () => {
+  it("shows a third pill and strips the recurrence phrase from the title when typed", async () => {
+    const { findByTestId, getByText, queryByText } = renderComponent();
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "take tablet every day at 8am"
+    );
+    expect(await findByTestId("quick-add-repeat-pill")).toBeTruthy();
+    expect(getByText("Daily")).toBeTruthy();
+    // The title itself must not still carry the recurrence phrase.
+    await waitFor(() => {
+      const stored = queryByText("take tablet every day");
+      expect(stored).toBeNull();
+    });
+  });
+
+  it("lights the repeat action-row button when a rule is parsed", async () => {
+    const { findByTestId } = renderComponent();
+    const repeatBtn = await findByTestId("quick-add-repeat");
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "take tablet every day at 8am"
+    );
+    await waitFor(() => {
+      expect(repeatBtn.props.accessibilityLabel).not.toBe("Repeat");
+    });
+  });
+
+  it("opens the repeat sheet from the action row and sets a rule by hand", async () => {
+    const { findByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Take tablet at 8am");
+    fireEvent.press(await findByTestId("quick-add-repeat"));
+    expect(await findByTestId("repeat-sheet")).toBeTruthy();
+
+    fireEvent.press(await findByTestId("repeat-option-daily"));
+    fireEvent.press(await findByTestId("repeat-sheet-confirm"));
+
+    expect(await findByTestId("quick-add-repeat-pill")).toBeTruthy();
+  });
+
+  it("saves the recurrence rule on the reminder payload", async () => {
+    const { findByTestId } = renderComponent();
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "take tablet every day at 8am"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].recurrence).toEqual({ freq: "daily", interval: 1 });
+  });
+
+  it("omits the recurrence key entirely for a one-shot reminder", async () => {
+    const { findByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Call mom tomorrow at 3pm");
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect("recurrence" in stored[0]).toBe(false);
+  });
+
+  it("resets recurrence after save so the next reminder does not inherit it", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    fireEvent.changeText(
+      await findByTestId("quick-add-input"),
+      "take tablet every day at 8am"
+    );
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Call mom tomorrow at 3pm");
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(2);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    // Newest-first storage order — "Call mom" was saved second.
+    const callMom = stored.find((r: { title: string }) => r.title === "Call mom");
+    expect("recurrence" in callMom).toBe(false);
+  });
+
+  it("a rule set by hand is cleared once the text changes and re-parses without one", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Take tablet at 8am");
+    fireEvent.press(await findByTestId("quick-add-repeat"));
+    fireEvent.press(await findByTestId("repeat-option-daily"));
+    fireEvent.press(await findByTestId("repeat-sheet-confirm"));
+    expect(await findByTestId("quick-add-repeat-pill")).toBeTruthy();
+
+    // Re-typing re-runs the parse effect and, since this text has no
+    // recurrence phrase, clears the hand-picked rule — matching parsedDate's
+    // own documented sync rule exactly (the parse effect always wins).
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Take tablet at 9am");
+    await waitFor(() => {
+      expect(queryByTestId("quick-add-repeat-pill")).toBeNull();
+    });
+  });
+});

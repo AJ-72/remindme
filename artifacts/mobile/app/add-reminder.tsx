@@ -26,6 +26,7 @@ import { computeAdherenceStats } from "@/utils/adherenceStats";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import ListeningSurface from "@/components/ListeningSurface";
 import RegisterNumberNudge from "@/components/RegisterNumberNudge";
+import RepeatRow from "@/components/RepeatRow";
 import { useDictation } from "@/hooks/useDictation";
 import type { PickableContact } from "@/services/ContactsService";
 import {
@@ -37,6 +38,7 @@ import {
 import { checkReachability, isReachabilityStale } from "@/services/RecipientLookupService";
 import { sendInvitation } from "@/services/InvitationService";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
+import type { RecurrenceRule } from "@/utils/recurrence";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { formatTime12h } from "@/utils/formatDatetime";
 import {
@@ -97,6 +99,8 @@ export default function AddReminderScreen() {
   const [parsedTitle, setParsedTitle] = useState("");
   const [parsedDate, setParsedDate] = useState<Date>(defaultDate);
   const [dateWasParsed, setDateWasParsed] = useState(false);
+  const [recurrence, setRecurrence] = useState<RecurrenceRule | undefined>(undefined);
+  const [recurrenceWasParsed, setRecurrenceWasParsed] = useState(false);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [alarm, setAlarm] = useState<boolean>(defaultAlarmEnabled);
   const [saving, setSaving] = useState(false);
@@ -134,12 +138,13 @@ export default function AddReminderScreen() {
     setParsedDate(new Date(existing.datetime));
     setAlarm(existing.alarm !== false);
     setRecipient(existing.recipient);
+    setRecurrence(existing.recurrence);
   }, [isEditing, existing]);
 
   // Re-parse whenever input changes (add mode)
   useEffect(() => {
     if (isEditing) return;
-    const { title, date } = parseNaturalLanguage(input);
+    const { title, date, recurrence: parsedRecurrence } = parseNaturalLanguage(input);
     setParsedTitle(title);
     if (date) {
       setParsedDate(date);
@@ -147,6 +152,8 @@ export default function AddReminderScreen() {
     } else {
       setDateWasParsed(false);
     }
+    setRecurrence(parsedRecurrence);
+    setRecurrenceWasParsed(parsedRecurrence !== undefined);
   }, [input, isEditing]);
 
   // Re-parse the title in edit mode too, so typing e.g. "...tomorrow at 5pm"
@@ -160,12 +167,24 @@ export default function AddReminderScreen() {
   // and blanking it would be destructive rather than helpful.
   useEffect(() => {
     if (!isEditing || !seededFromExisting.current) return;
-    const { date } = parseNaturalLanguage(editTitle);
+    const { date, recurrence: parsedRecurrence } = parseNaturalLanguage(editTitle);
     if (date) {
       setParsedDate(date);
       setDateWasParsed(true);
     } else {
       setDateWasParsed(false);
+    }
+    // Same asymmetry as the date above, and for the same reason: an edited
+    // reminder already has a real recurrence rule (or deliberately none), and
+    // silently blanking it because the user's edit no longer contains the
+    // recurrence phrase would be destructive, not helpful. Typing a phrase in
+    // sets the rule; removing it does NOT clear one already set — clearing is
+    // explicit, via the Repeats row's "Doesn't repeat".
+    if (parsedRecurrence !== undefined) {
+      setRecurrence(parsedRecurrence);
+      setRecurrenceWasParsed(true);
+    } else {
+      setRecurrenceWasParsed(false);
     }
   }, [editTitle, isEditing]);
 
@@ -195,8 +214,10 @@ export default function AddReminderScreen() {
    */
   const timeSuggestion = useMemo(
     () =>
-      suggestionDismissed ? null : suggestBetterHour(adherence, parsedDate.getHours()),
-    [adherence, parsedDate, suggestionDismissed]
+      suggestionDismissed
+        ? null
+        : suggestBetterHour(adherence, parsedDate.getHours(), { isRecurring: !!recurrence }),
+    [adherence, parsedDate, suggestionDismissed, recurrence]
   );
 
   const acceptTimeSuggestion = () => {
@@ -237,10 +258,15 @@ export default function AddReminderScreen() {
         // Spread rather than `recipient` so an unset value omits the key
         // entirely - `'recipient' in obj` is true even when it holds undefined.
         ...(recipient ? { recipient } : {}),
+        ...(recurrence ? { recurrence } : {}),
       };
       let localId = id;
       if (isEditing && id) {
-        await editReminder(id, payload);
+        // moveAnchor: true — this IS the deliberate schedule restatement the
+        // plan's anchor rule means (as opposed to reminder-detail.tsx's
+        // "move to strongest hour" nudge or its exact-alarm toggle, neither
+        // of which should move a recurring series' anchor).
+        await editReminder(id, payload, { moveAnchor: true });
       } else {
         const added = await addReminder(payload);
         localId = added.id;
@@ -850,7 +876,7 @@ export default function AddReminderScreen() {
 
               {/* Time row */}
               <Pressable
-                style={styles.previewRowLast}
+                style={styles.previewRow}
                 onPress={() => setPickerMode((m) => (m === "time" ? null : "time"))}
               >
                 <Feather name="clock" size={16} color={colors.primary} />
@@ -902,6 +928,17 @@ export default function AddReminderScreen() {
                   })}
                 </View>
               )}
+
+              {/* Repeats row */}
+              <RepeatRow
+                value={recurrence}
+                anchorDate={parsedDate}
+                onChange={setRecurrence}
+                wasParsed={recurrenceWasParsed}
+                isLast
+                previewRowStyle={styles.previewRow}
+                previewRowLastStyle={styles.previewRowLast}
+              />
             </View>
           </View>
 
