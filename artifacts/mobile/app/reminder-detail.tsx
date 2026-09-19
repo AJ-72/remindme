@@ -21,6 +21,7 @@ import { useColors } from "@/hooks/useColors";
 import { isSendReminder } from "@/services/ReminderService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
+import { computeNextOccurrence, describeRecurrence } from "@/utils/recurrence";
 import type { SnoozePreset } from "@/utils/snoozePresets";
 
 function goBack() {
@@ -79,6 +80,22 @@ export default function ReminderDetailScreen() {
     [isStuck, reminders]
   );
   const strongHour = stuckStats?.bestHour ?? null;
+
+  // The one place a user can verify a rule means what they think before
+  // trusting it overnight. The card's own upcoming datetime IS the first of
+  // the three (matching the mockup: "Today · 8:00 AM" and "Next 3" both
+  // start from the same occurrence) — the other two come from walking
+  // computeNextOccurrence (Task 1) forward twice more.
+  const nextOccurrences = useMemo(() => {
+    if (!reminder?.recurrence) return [];
+    const dates: Date[] = [new Date(reminder.datetime)];
+    let from = dates[0];
+    for (let i = 0; i < 2; i++) {
+      from = computeNextOccurrence(reminder.recurrence, from);
+      dates.push(from);
+    }
+    return dates;
+  }, [reminder?.recurrence, reminder?.datetime]);
 
   const handleMoveToStrongHour = async () => {
     if (!reminder || !strongHour) return;
@@ -244,6 +261,9 @@ export default function ReminderDetailScreen() {
       gap: 6,
       marginBottom: 24,
     },
+    timeRowWithRepeat: {
+      marginBottom: 6,
+    },
     timeText: {
       fontSize: 14,
       fontFamily: "Inter_500Medium",
@@ -251,6 +271,18 @@ export default function ReminderDetailScreen() {
     },
     timeChangeText: {
       fontSize: 13,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginBottom: 20,
+    },
+    repeatRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginBottom: 8,
+    },
+    nextOccurrencesText: {
+      fontSize: 12,
       fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
       marginBottom: 20,
@@ -373,10 +405,30 @@ export default function ReminderDetailScreen() {
               {reminder.description}
             </Text>
           )}
-          <View style={styles.timeRow}>
+          <View style={[styles.timeRow, !!reminder.recurrence && styles.timeRowWithRepeat]}>
             <Feather name="clock" size={14} color={colors.mutedForeground} />
             <Text style={styles.timeText}>{formatDatetime(reminder.datetime)}</Text>
           </View>
+
+          {reminder.recurrence && (
+            <View style={styles.repeatRow} testID="repeat-detail">
+              <Feather name="repeat" size={14} color={colors.mutedForeground} />
+              <Text style={styles.timeText}>
+                {describeRecurrence(reminder.recurrence, new Date(reminder.datetime))}
+              </Text>
+            </View>
+          )}
+
+          {nextOccurrences.length > 0 && (
+            <Text style={styles.nextOccurrencesText} testID="repeat-next-occurrences">
+              Next 3:{" "}
+              {nextOccurrences
+                .map((d) =>
+                  d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
+                )
+                .join(" · ")}
+            </Text>
+          )}
 
           {isSendReminder(reminder) && reminder.recipientTimeChange && (
             <Text style={styles.timeChangeText} testID="recipient-time-change-text">

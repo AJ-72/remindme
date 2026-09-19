@@ -18,6 +18,7 @@ import {
 } from "@/services/ReminderService";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
 import { TAB_BAR_HEIGHT } from "@/constants/tabBar";
+import * as ReminderServiceModule from "@/services/ReminderService";
 
 jest.mock("expo-haptics");
 jest.mock("expo-router", () => ({
@@ -125,6 +126,76 @@ describe("HomeScreen", () => {
     expect(await findByText("Completed")).toBeTruthy();
     expect(await findByText("Not done")).toBeTruthy();
     expect(await findByText("Done")).toBeTruthy();
+  });
+
+  it("a completed recurring reminder never comes to rest in Completed — it advances and stays in Upcoming", async () => {
+    // PAST, not FUTURE: advanceRecurringReminder only advances a reminder
+    // whose occurrence has actually fired (Task 4's contract) — completing a
+    // recurring reminder early, before its scheduled time, is a different,
+    // deliberately-unhandled case that falls through to a plain complete.
+    //
+    // The mount-time rescheduleAllFutureReminders sweep (Task 5's own
+    // catch-up pass) would otherwise race this: it advances any past-due
+    // recurring reminder on its own, before this test's toggle press ever
+    // fires, so by the time the tap lands the reminder is already at its
+    // NEXT (future) occurrence — completing THAT is "early", not "the fired
+    // occurrence", and the test would observe a plain complete instead of
+    // an advance. No-op the sweep here so the test can control this
+    // deterministically and actually exercise toggleComplete's own advance
+    // path, which is the thing this test means to prove.
+    jest.spyOn(ReminderServiceModule, "rescheduleAllFutureReminders").mockResolvedValue(undefined);
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          id: "r1",
+          title: "Take tablet",
+          completed: false,
+          datetime: PAST,
+          recurrence: { freq: "daily", interval: 1 },
+        }),
+      ])
+    );
+    const { findByText, getByTestId, queryByText } = renderScreen();
+    expect(await findByText("Take tablet")).toBeTruthy();
+    expect(await findByText("Upcoming")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(getByTestId("complete-toggle"));
+    });
+
+    // Still visible (advanced to its next occurrence), still under Upcoming,
+    // and never visibly parked in Completed at any point.
+    await waitFor(() => expect(queryByText("Take tablet")).toBeTruthy());
+    expect(queryByText("Completed")).toBeNull();
+  });
+
+  it("upcomingCount reflects the post-advance state of a completed recurring reminder", async () => {
+    // Same mount-sweep race as above — no-op it so the toggle itself is the
+    // thing under test.
+    jest.spyOn(ReminderServiceModule, "rescheduleAllFutureReminders").mockResolvedValue(undefined);
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          id: "r1",
+          title: "Take tablet",
+          completed: false,
+          datetime: PAST,
+          recurrence: { freq: "daily", interval: 1 },
+        }),
+      ])
+    );
+    const { findByText, getByTestId } = renderScreen();
+    await findByText("Take tablet");
+    expect(await findByText("1 upcoming")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(getByTestId("complete-toggle"));
+    });
+
+    // Still 1 upcoming — the series advanced rather than dropping to 0.
+    await waitFor(async () => expect(await findByText("1 upcoming")).toBeTruthy());
   });
 
   it("sorts completed reminders newest-first, independent of upcoming's earliest-first order", async () => {

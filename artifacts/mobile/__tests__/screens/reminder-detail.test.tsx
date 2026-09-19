@@ -426,3 +426,49 @@ describe("the panel for a task that keeps moving", () => {
     await waitFor(() => expect(queryByTestId("stuck-panel")).toBeNull());
   });
 });
+
+describe("ReminderDetailScreen — recurrence", () => {
+  it("shows no repeat line for a one-shot reminder", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByText, queryByTestId } = renderScreen();
+    await findByText("Test reminder");
+    expect(queryByTestId("repeat-detail")).toBeNull();
+  });
+
+  it("shows the rule via describeRecurrence", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recurrence: { freq: "daily", interval: 1 } })])
+    );
+    const { findByTestId, getByText } = renderScreen();
+    expect(await findByTestId("repeat-detail")).toBeTruthy();
+    expect(getByText("Daily")).toBeTruthy();
+  });
+
+  it("shows a Next 3 preview computed from computeNextOccurrence", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recurrence: { freq: "daily", interval: 1 } })])
+    );
+    const { findByTestId } = renderScreen();
+    const next3 = await findByTestId("repeat-next-occurrences");
+    expect(next3).toBeTruthy();
+  });
+
+  it("routes Edit into add-reminder, same as any other reminder — no separate recurrence edit path", async () => {
+    // Per the plan: "route editing into the SAME shared picker. Do not
+    // build a third implementation." The existing footer Edit button
+    // already routes into add-reminder.tsx, where the Repeats row lives —
+    // this screen adds no second Edit affordance for the rule specifically.
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recurrence: { freq: "daily", interval: 1 } })])
+    );
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("edit-button"));
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: "/add-reminder",
+      params: { id: "r1" },
+    });
+  });
+});
