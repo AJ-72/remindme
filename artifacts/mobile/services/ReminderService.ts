@@ -1320,6 +1320,44 @@ async function rearmReminder(
   return options.schedule();
 }
 
+/**
+ * The single decision for "what happens when this reminder is marked
+ * done", shared by toggleComplete (list-based, in-app) and markDoneById
+ * (by-id, notification-tray action) so a user gets the same result from
+ * either path.
+ *
+ * A recurring reminder does not stay completed - "every day at 8" means
+ * tomorrow's occurrence is still expected even though today's was just
+ * marked done, so completing it advances the series instead. A
+ * non-recurring reminder completes exactly as before.
+ *
+ * Only called on the COMPLETING transition, never on un-completing - see
+ * toggleComplete's own comment on why un-completing a past-due reminder is
+ * deliberately left overdue rather than advanced or rescheduled.
+ */
+async function completeOccurrence(
+  target: Reminder,
+  id: string
+): Promise<Partial<Reminder>> {
+  if (isRecurring(target)) {
+    const advanced = advanceRecurringReminder(target, new Date());
+    if (advanced) {
+      const notificationId = await rearmReminder(advanced, {
+        schedule: () => scheduleNotification(advanced, id),
+      });
+      return { ...advanced, notificationId };
+    }
+    // advanceRecurringReminder returned null (e.g. the iteration cap was
+    // exhausted - see its own doc comment): fall through to completing
+    // normally rather than leaving the reminder in limbo.
+  }
+  return {
+    completed: true,
+    notificationId: undefined,
+    completedAt: new Date().toISOString(),
+  };
+}
+
 export async function toggleComplete(
   current: Reminder[],
   id: string
@@ -1340,25 +1378,20 @@ export async function toggleComplete(
   // passed: it stays overdue and unscheduled (the list already surfaces
   // overdue items), rather than us inventing a new time on the user's behalf.
   // rearmReminder's default guard enforces exactly this.
-  const notificationId = completing
-    ? undefined
-    : await rearmReminder(
-        { ...target, completed: false },
-        { schedule: () => scheduleNotification(target, id) }
-      );
+  const patch: Partial<Reminder> = completing
+    ? await completeOccurrence(target, id)
+    : {
+        completed: false,
+        notificationId: await rearmReminder(
+          { ...target, completed: false },
+          { schedule: () => scheduleNotification(target, id) }
+        ),
+        // Set on completion, cleared on un-completion: a record must never
+        // claim a completion time for a task that is not complete.
+        completedAt: undefined,
+      };
 
-  const reminders = current.map((r) =>
-    r.id === id
-      ? {
-          ...r,
-          completed: !r.completed,
-          notificationId,
-          // Set on completion, cleared on un-completion: a record must never
-          // claim a completion time for a task that is not complete.
-          completedAt: completing ? new Date().toISOString() : undefined,
-        }
-      : r
-  );
+  const reminders = current.map((r) => (r.id === id ? { ...r, ...patch } : r));
   await saveReminders(reminders);
   return reminders;
 }
@@ -1435,20 +1468,39 @@ export async function rescheduleAllFutureReminders(): Promise<void> {
   await withWriteLock(async () => {
     const reminders = await loadReminders();
     let changed = false;
+    const now = new Date();
     const updated = await Promise.all(
       reminders.map(async (reminder) => {
+        // A past-due RECURRING reminder must be advanced to its next future
+        // occurrence BEFORE rearmReminder runs, never after or instead of -
+        // isPendingForAlarmRewrite (below) rejects any past-due reminder by
+        // design (rescheduling an already-delivered one would show a second
+        // copy while orphaning the first), so a fired recurring occurrence
+        // is invisible to it until its datetime is moved into the future.
+        // This is the ONE path that makes the whole feature correct even if
+        // the best-effort received-listener advance never runs (a killed
+        // app misses the fire moment entirely) - everything else is
+        // latency, this is correctness.
+        const advanced =
+          isRecurring(reminder) &&
+          new Date(reminder.datetime).getTime() <= now.getTime()
+            ? advanceRecurringReminder(reminder, now)
+            : null;
+        const candidate = advanced ?? reminder;
+        if (advanced) changed = true;
+
         // rearmReminder's default guard (not completed, still in the future)
         // is exactly right here too: a reminder whose datetime has passed has
         // ALREADY been delivered, and rescheduling it would show a second copy
         // while orphaning the first — see isPendingForAlarmRewrite's doc.
-        const notificationId = await rearmReminder(reminder, {
-          schedule: () => scheduleNotification(reminder, reminder.id),
+        const notificationId = await rearmReminder(candidate, {
+          schedule: () => scheduleNotification(candidate, candidate.id),
         });
         if (notificationId !== undefined) {
           changed = true;
-          return { ...reminder, notificationId };
+          return { ...candidate, notificationId };
         }
-        return reminder;
+        return candidate;
       })
     );
     if (changed) {
@@ -1537,15 +1589,12 @@ export async function markDoneById(id: string): Promise<void> {
   const target = reminders.find((r) => r.id === id);
   if (!target) return;
   await cancelNotification(target.notificationId);
+  // Shares completeOccurrence with toggleComplete so marking done from the
+  // notification tray advances a recurring series exactly the same way
+  // marking done in-app does - see that function's own doc comment.
+  const completionPatch = await completeOccurrence(target, id);
   const updated = reminders.map((r) =>
-    r.id === id
-      ? {
-          ...r,
-          completed: true,
-          notificationId: undefined,
-          completedAt: new Date().toISOString(),
-        }
-      : r
+    r.id === id ? { ...r, ...completionPatch } : r
   );
   await saveReminders(updated);
 }
@@ -1578,6 +1627,32 @@ export async function markNotifiedById(id: string): Promise<void> {
 /** Stamps openedAt: the user just looked at this reminder's own detail
  * screen. See Reminder.openedAt for why this is tracked separately from
  * completing or snoozing it. */
+/**
+ * Best-effort recurring-series advance: a scheduled notification for this
+ * reminder just fired while the app is alive, so advance it to its next
+ * future occurrence immediately rather than waiting for the next mount-time
+ * sweep. This is latency, not correctness -
+ * rescheduleAllFutureReminders' own catch-up pass covers the case where this
+ * never runs at all (the app was killed at the exact fire moment), which is
+ * why that sweep, not this function, is the one path the feature's
+ * correctness actually depends on.
+ *
+ * A silent no-op for an unknown id or a non-recurring reminder, matching
+ * markNotifiedById's convention.
+ */
+export async function advanceRecurringById(id: string): Promise<void> {
+  // Same race as markNotifiedById/markOpenedById - see withWriteLock.
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    const target = reminders.find((r) => r.id === id);
+    if (!target) return;
+    const advanced = advanceRecurringReminder(target, new Date());
+    if (!advanced) return;
+    const updated = reminders.map((r) => (r.id === id ? advanced : r));
+    await saveReminders(updated);
+  });
+}
+
 export async function markOpenedById(id: string): Promise<void> {
   // See withWriteLock and markNotifiedById's comment above - same race, this
   // time from a notification tap cold-starting straight into the detail

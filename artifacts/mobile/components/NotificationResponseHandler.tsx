@@ -9,6 +9,7 @@ import {
   loadReminderById,
   markDoneById,
   markNotifiedById,
+  advanceRecurringById,
   scheduleSnoozeNotification,
   updateSnoozeById,
 } from "@/services/ReminderService";
@@ -184,6 +185,17 @@ export default function NotificationResponseHandler() {
           // runs while the app process is alive).
           if (data?.reminderId) {
             await markNotifiedById(data.reminderId);
+            // Best-effort: advance a recurring series the moment its
+            // notification lands, so it moves on immediately while the app
+            // is alive rather than waiting for the next mount-time sweep.
+            // Latency only - rescheduleAllFutureReminders' own catch-up
+            // pass is what makes this correct even if the app is killed
+            // before this listener ever runs. Called after markNotifiedById
+            // deliberately: this stamps the occurrence that just fired,
+            // advancing then resets notifiedAt on the NEW occurrence it
+            // creates (which has not itself been notified) - the fired
+            // occurrence's stamp is not meant to carry forward.
+            await advanceRecurringById(data.reminderId);
           }
 
           if (data?.type !== "invitation") return;

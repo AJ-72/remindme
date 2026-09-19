@@ -45,6 +45,7 @@ import {
   saveReminders,
   markDoneById,
   markNotifiedById,
+  advanceRecurringById,
   markOpenedById,
   MAX_SNOOZE_HISTORY_ENTRIES,
   requestNotificationPermissions,
@@ -265,6 +266,60 @@ describe("toggleComplete", () => {
     await toggleComplete([r], "r1");
 
     expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  // Completing a recurring reminder must advance the series, not leave it
+  // completed forever - "every day at 8" means tomorrow's occurrence is
+  // still expected even though today's was just marked done.
+  it("advances a recurring reminder instead of completing it forever", async () => {
+    (scheduleNotificationAsync as jest.Mock).mockClear();
+    (scheduleNotificationAsync as jest.Mock).mockResolvedValueOnce("advanced-notif-id");
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({
+      id: "r1",
+      completed: false,
+      datetime: PAST,
+      recurrence: dailyRule,
+    });
+
+    const result = await toggleComplete([r], "r1");
+    const updated = result.find((x) => x.id === "r1")!;
+
+    // Never left completed=true - it rolled forward to the next occurrence.
+    expect(updated.completed).toBe(false);
+    expect(new Date(updated.datetime).getTime()).toBeGreaterThan(Date.now());
+    // The advanced occurrence gets a fresh scheduled notification, since
+    // its own future datetime makes it eligible again.
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // Un-completing must never advance - that path is deliberately subtle
+  // (see the existing "past reminders stay overdue" comment above) and
+  // advancing here would silently skip an occurrence the user is actively
+  // trying to restore, not retire.
+  it("does not advance a recurring reminder when un-completing it", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({
+      id: "r1",
+      completed: true,
+      datetime: FUTURE,
+      recurrence: dailyRule,
+    });
+    const originalDatetime = r.datetime;
+
+    const result = await toggleComplete([r], "r1");
+    const updated = result.find((x) => x.id === "r1")!;
+
+    expect(updated.completed).toBe(false);
+    expect(updated.datetime).toBe(originalDatetime);
+  });
+
+  // A non-recurring reminder must behave exactly as before - no advance
+  // logic should engage for it.
+  it("still completes a non-recurring reminder normally (no regression)", async () => {
+    const r = makeReminder({ id: "r1", completed: false, datetime: FUTURE });
+    const result = await toggleComplete([r], "r1");
+    expect(result.find((x) => x.id === "r1")?.completed).toBe(true);
   });
 });
 
@@ -605,6 +660,76 @@ describe("rescheduleAllFutureReminders", () => {
     );
     await rescheduleAllFutureReminders();
     expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // The one path that makes the whole feature correct even if the
+  // best-effort received-listener advance (Task 5b) never runs: a killed
+  // app that missed a recurring reminder's fire time must self-heal on the
+  // next mount-time sweep, not stay stuck past-due forever. This is the
+  // sweep's own catch-up responsibility, independent of any UI ever opening.
+  it("advances a past-due recurring reminder before re-arming it", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({
+      completed: false,
+      datetime: PAST,
+      recurrence: dailyRule,
+    });
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify([r])
+    );
+    await rescheduleAllFutureReminders();
+    // isPendingForAlarmRewrite rejects past-due reminders by design - the
+    // sweep must advance datetime into the future FIRST, then re-arm the
+    // advanced (now-future) record, or this reminder is silently skipped
+    // forever.
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    const saved = JSON.parse(
+      (AsyncStorage.setItem as jest.Mock).mock.calls.slice(-1)[0][1]
+    );
+    expect(new Date(saved[0].datetime).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  // A non-recurring past-due reminder must still be skipped exactly as
+  // before - the sweep's new recurring-aware branch must not change
+  // behavior for the reminder shape every other test in this block covers.
+  it("still skips a non-recurring past-due reminder (no regression)", async () => {
+    const r = makeReminder({ completed: false, datetime: PAST });
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify([r])
+    );
+    await rescheduleAllFutureReminders();
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  // Phone off for several days: the sweep must land on the next FUTURE
+  // occurrence in one pass, not require multiple app opens to catch up one
+  // missed day at a time.
+  it("catches up a recurring reminder missed for multiple days in one sweep", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const threeDaysAgo = new Date(
+      Date.now() - 3 * 24 * 60 * 60 * 1000
+    ).toISOString();
+    const r = makeReminder({
+      completed: false,
+      datetime: threeDaysAgo,
+      recurrence: dailyRule,
+    });
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify([r])
+    );
+    await rescheduleAllFutureReminders();
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    const saved = JSON.parse(
+      (AsyncStorage.setItem as jest.Mock).mock.calls.slice(-1)[0][1]
+    );
+    const advancedTime = new Date(saved[0].datetime).getTime();
+    expect(advancedTime).toBeGreaterThan(Date.now());
+    // Should NOT be several days in the future either - only advanced to the
+    // next occurrence past now, not overshot. Generous margin (not exactly
+    // 24h) since the reminder's own datetime and this assertion's Date.now()
+    // are captured at different moments - a tight boundary here is flaky,
+    // not meaningfully stricter.
+    expect(advancedTime).toBeLessThan(Date.now() + 2 * 24 * 60 * 60 * 1000);
   });
 });
 
@@ -1142,6 +1267,30 @@ describe("markDoneById", () => {
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].completed).toBe(false);
   });
+
+  // Parity with toggleComplete: marking done from the notification tray
+  // must advance a recurring series exactly the same way marking done
+  // in-app does - a user must not get a different result depending on
+  // which path they used.
+  it("advances a recurring reminder instead of completing it forever, same as toggleComplete", async () => {
+    (scheduleNotificationAsync as jest.Mock).mockClear();
+    (scheduleNotificationAsync as jest.Mock).mockResolvedValueOnce("advanced-notif-id");
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({
+      id: "r1",
+      completed: false,
+      datetime: PAST,
+      recurrence: dailyRule,
+      notificationId: "notif-r1",
+    });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await markDoneById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].completed).toBe(false);
+    expect(new Date(stored[0].datetime).getTime()).toBeGreaterThan(Date.now());
+  });
 });
 
 describe("snoozeReminder", () => {
@@ -1330,6 +1479,56 @@ describe("markNotifiedById", () => {
   it("no-ops safely for an id with no matching reminder", async () => {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder({ id: "r1" })]));
     await expect(markNotifiedById("unknown")).resolves.toBeUndefined();
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].notifiedAt).toBeUndefined();
+  });
+});
+
+describe("advanceRecurringById", () => {
+  // Best-effort: while the app is alive, a delivered notification advances
+  // its series immediately rather than waiting for the next mount-time
+  // sweep. This is latency, not correctness - rescheduleAllFutureReminders'
+  // catch-up handles the case where this never runs (app killed at the
+  // fire moment).
+  it("advances a recurring reminder whose datetime is now past-due", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({ id: "r1", datetime: PAST, recurrence: dailyRule });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await advanceRecurringById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(new Date(stored[0].datetime).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("no-ops safely for an id with no matching reminder", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder({ id: "r1" })]));
+    await expect(advanceRecurringById("unknown")).resolves.toBeUndefined();
+  });
+
+  it("no-ops safely for a non-recurring reminder", async () => {
+    const r = makeReminder({ id: "r1", datetime: PAST });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await advanceRecurringById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].datetime).toBe(PAST);
+  });
+
+  // Ordering: markNotifiedById stamps notifiedAt on the occurrence that just
+  // fired. advanceRecurringById resets notifiedAt on the NEW occurrence it
+  // creates (a new occurrence has not been notified yet). Calling both for
+  // the same delivery must not leave the fired occurrence's stamp inherited
+  // by the fresh one.
+  it("resets notifiedAt on the advanced occurrence even if markNotifiedById ran first", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({ id: "r1", datetime: PAST, recurrence: dailyRule });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await markNotifiedById("r1");
+    await advanceRecurringById("r1");
+
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].notifiedAt).toBeUndefined();
   });

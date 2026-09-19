@@ -31,6 +31,7 @@ jest.mock("@/services/invitationClaimThrottle");
 jest.mock("@/services/ReminderService", () => ({
   ...jest.requireActual("@/services/ReminderService"),
   markNotifiedById: jest.fn(),
+  advanceRecurringById: jest.fn(),
   applyRecipientTimeChangeByInvitationId: jest.fn(),
 }));
 
@@ -113,6 +114,25 @@ describe("NotificationResponseHandler", () => {
     const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
     await onReceived({ request: { content: { data: { type: "invitation" } } } });
     expect(ReminderService.markNotifiedById).not.toHaveBeenCalled();
+  });
+
+  // Best-effort recurring advance: a series should move on the moment its
+  // notification lands, while the app is alive - not wait for the next
+  // mount-time sweep. See advanceRecurringById's own doc comment for why
+  // this is latency, not correctness (rescheduleAllFutureReminders' sweep
+  // covers a killed app).
+  it("advances a recurring series' notification alongside stamping notifiedAt", async () => {
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    await onReceived({ request: { content: { data: { reminderId: "r1" } } } });
+    expect(ReminderService.advanceRecurringById).toHaveBeenCalledWith("r1");
+  });
+
+  it("does not call advanceRecurringById for a received notification carrying no reminderId", async () => {
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    await onReceived({ request: { content: { data: { type: "invitation" } } } });
+    expect(ReminderService.advanceRecurringById).not.toHaveBeenCalled();
   });
 
   it("removes the received-listener subscription on unmount", () => {
