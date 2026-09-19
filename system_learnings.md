@@ -19,6 +19,26 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-19 — M2 Task 5c: `not (x = any(array[...]))` is NULL, not TRUE, when `x` is NULL — a naive Postgres "reject unless in this list" check silently passes a missing field
+
+**WHAT:** `send_invitation()`'s new server-side recurrence validation (`lib/db/src/functions/sendInvitation.sql`) first checked `not (p_recurrence ->> 'freq') = any (array['daily','weekly','monthly','yearly'])` intending to reject any rule whose `freq` wasn't one of the four known values. A rule with `freq` **missing entirely** (`{"interval": 1}`) has `p_recurrence ->> 'freq'` evaluate to SQL `NULL`, and `NULL = any(...)` is `NULL` under three-valued logic, not `FALSE` — so `not NULL` is also `NULL`, and Postgres's `if` treats a `NULL` condition as false (don't execute), silently letting the malformed rule through instead of rejecting it. Fixed by wrapping the whole comparison and testing `is distinct from true`, which is the one operator in this class that treats `NULL` as a genuine failure rather than "condition not met, move on." Caught by a dedicated test for the missing-field case specifically (not just a wrong-value case like `freq: "hourly"`), which is why writing that test separately — rather than assuming "wrong value" and "missing value" are covered by the same assertion — mattered.
+
+**WHY:** this is the general Postgres gotcha, not specific to recurrence rules: any `not (x = any(list))` / `not (x in (...))` style rejection check is silently bypassed whenever `x` can be `NULL`, because `NULL` propagates through comparison operators instead of becoming `FALSE`. The reusable rule for this codebase: a validation `if` in `plpgsql` that means "reject unless this holds" should wrap the condition and compare with `is distinct from true`, not rely on `not (...)` when any operand can be `NULL`.
+
+**WHERE:** `lib/db/src/functions/sendInvitation.sql` (both the `freq` and `interval` checks use this pattern now), `lib/db/src/functions/sendInvitation.test.ts` (dedicated missing-field tests, distinct from the wrong-value tests).
+
+---
+
+## 2026-09-19 — `deno test` without `--no-check`, run from this repo's root, silently rewrites the root `package.json`
+
+**WHAT:** Running `deno test --allow-net --allow-env supabase/functions/<fn>/index.test.ts` (without `--no-check`) fails on a pre-existing, unrelated `@types/node` resolution error — but before failing, Deno detects the nearby `pnpm-workspace.yaml`, prints a "migrated its workspace configuration" note, and **actually writes** a `workspaces`/`catalog` block into the root `package.json`, mirroring the pnpm workspace config into a shape Deno understands. This happened silently mid-session; only caught because `git status` showed an unexpected `package.json` diff. Reverted immediately with `git checkout -- package.json`.
+
+**WHY:** an unattended `deno test` invocation in a pnpm-monorepo root is not read-only — treat it as a potentially-mutating command and check `git status` after running it, the same discipline as any command that touches shared config. The reusable fix for this repo specifically: always pass `--no-check` when running Deno tests here (typechecking doesn't work anyway due to the separate `@types/node` issue, so `--no-check` costs nothing and avoids the write).
+
+**WHERE:** repo root `package.json` (reverted, no lasting change). Affects any future `supabase/functions/*/index.test.ts` run via the Deno CLI directly (as opposed to through a wrapper script, if one exists).
+
+---
+
 ## 2026-09-19 — M2 Task 5: a `jest.mock` factory that mocks specific named exports must be updated whenever the file under test calls a NEW named export from that module
 
 **WHAT:** `NotificationResponseHandler.tsx`'s test file (`artifacts/mobile/components/NotificationResponseHandler.test.tsx`) mocks `@/services/ReminderService` via `jest.mock("@/services/ReminderService", () => ({ ...jest.requireActual(...), markNotifiedById: jest.fn(), applyRecipientTimeChangeByInvitationId: jest.fn() }))` — spreading the real module then overriding two specific functions. Adding a call to a third function (`advanceRecurringById`, wired in alongside `markNotifiedById` for M2 Task 5) from the component under test, without adding it to this mock list, would have left it resolving to the REAL implementation — which does real AsyncStorage I/O the test file's mocks don't otherwise set up for this code path — inside a component test that mocks everything else. Added `advanceRecurringById: jest.fn()` to the same factory before wiring the real call in, and added dedicated tests asserting it's called (and not called) in the same shapes as the existing `markNotifiedById` assertions.
