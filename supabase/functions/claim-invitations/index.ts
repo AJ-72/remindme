@@ -22,6 +22,10 @@ export async function handleClaimInvitations(client: SupabaseClient) {
     description: row.description,
     datetime: row.datetime,
     senderId: row.sender_id,
+    // M2 Task 5c. null (not undefined) for a one-shot invitation, matching
+    // the column's own default - never re-sent or re-scheduled from here,
+    // it exists only to carry the rule across the recipient's one accept.
+    recurrence: row.recurrence ?? null,
   }));
 
   return { claimed };

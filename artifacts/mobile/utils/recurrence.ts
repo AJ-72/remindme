@@ -21,6 +21,39 @@ export interface RecurrenceRule {
   byWeekday?: number[];
 }
 
+const VALID_FREQS: readonly RecurrenceFreq[] = ["daily", "weekly", "monthly", "yearly"];
+
+/**
+ * The single "is this a rule this app will schedule" check, used wherever a
+ * RecurrenceRule crosses a trust boundary rather than coming from this
+ * app's own UI or parser - currently only a Tier 2 invitation payload
+ * (another user's client -> this device -> its own notification schedule).
+ *
+ * Deliberately a REJECT, not the defensive-fallback DEGRADE that
+ * `computeNextOccurrence` applies internally (see normalizeInput) - a
+ * malformed rule reaching THIS check must never be scheduled at all, not
+ * quietly coerced into "remind me again tomorrow".
+ *
+ * `send_invitation.sql` defines the same shape independently (SQL cannot
+ * import this module) - the two must be kept in agreement by hand.
+ */
+export function isValidRecurrenceRule(value: unknown): value is RecurrenceRule {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+
+  if (typeof v.freq !== "string" || !VALID_FREQS.includes(v.freq as RecurrenceFreq)) {
+    return false;
+  }
+  if (typeof v.interval !== "number" || !Number.isInteger(v.interval) || v.interval < 1) {
+    return false;
+  }
+  if (v.byWeekday !== undefined) {
+    if (!Array.isArray(v.byWeekday)) return false;
+    if (!v.byWeekday.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) return false;
+  }
+  return true;
+}
+
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_LABELS = [
   "Jan",

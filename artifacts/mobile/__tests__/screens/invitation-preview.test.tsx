@@ -173,6 +173,78 @@ describe("InvitationPreviewScreen", () => {
     });
   });
 
+  // M2 Task 5c: accepting a recurring reminder is a materially bigger
+  // commitment than a one-off, and the recipient must see that before
+  // tapping Accept, not discover it next morning.
+  describe("recurrence (M2 Task 5c)", () => {
+    it("shows the recurrence rule before Accept when the invitation carries one", async () => {
+      mockSearchParams.recurrence = JSON.stringify({ freq: "daily", interval: 1 });
+      const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
+      (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+      const { findByText, getByTestId } = renderScreen();
+      await findByText("From Amma");
+      expect(getByTestId("invitation-recurrence")).toBeTruthy();
+      expect(await findByText(/Daily/)).toBeTruthy();
+    });
+
+    it("does not show a recurrence line for a one-shot invitation", async () => {
+      const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
+      (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+      const { findByText, queryByTestId } = renderScreen();
+      await findByText("From Amma");
+      expect(queryByTestId("invitation-recurrence")).toBeNull();
+    });
+
+    it("threads the recurrence rule through to addReminder on accept", async () => {
+      mockSearchParams.recurrence = JSON.stringify({ freq: "daily", interval: 1 });
+      const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
+      (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+      const addReminderSpy = jest.spyOn(ReminderService, "addReminder");
+      jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+
+      const { getByTestId, findByText } = renderScreen();
+      await findByText("From Amma");
+      fireEvent.press(getByTestId("accept-button"));
+
+      await waitFor(() => expect(addReminderSpy).toHaveBeenCalled());
+      const [, data] = addReminderSpy.mock.calls[0];
+      expect(data.recurrence).toEqual({ freq: "daily", interval: 1 });
+    });
+
+    it("rejects a malformed recurrence param rather than scheduling it, and shows no recurrence line", async () => {
+      // A hostile/corrupted param crossing this trust boundary must never
+      // reach addReminder or the notification schedule - never trust it
+      // merely because it parsed as JSON.
+      mockSearchParams.recurrence = JSON.stringify({ freq: "hourly", interval: 1 });
+      const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
+      (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+      const addReminderSpy = jest.spyOn(ReminderService, "addReminder");
+      jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+
+      const { getByTestId, findByText, queryByTestId } = renderScreen();
+      await findByText("From Amma");
+      expect(queryByTestId("invitation-recurrence")).toBeNull();
+
+      fireEvent.press(getByTestId("accept-button"));
+
+      await waitFor(() => expect(addReminderSpy).toHaveBeenCalled());
+      const [, data] = addReminderSpy.mock.calls[0];
+      expect(data.recurrence).toBeUndefined();
+    });
+
+    it("rejects unparseable JSON in the recurrence param without crashing", async () => {
+      mockSearchParams.recurrence = "{not json";
+      const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
+      (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+      const { findByText, queryByTestId } = renderScreen();
+      await findByText("From Amma");
+      expect(queryByTestId("invitation-recurrence")).toBeNull();
+    });
+  });
+
   it("declining calls respondToInvitation and does NOT add a local reminder", async () => {
     const rpcMock = jest.fn().mockResolvedValue({ data: "Amma", error: null });
     (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });

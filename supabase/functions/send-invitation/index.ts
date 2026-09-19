@@ -9,6 +9,16 @@ export interface SendInvitationRequest {
   title: string;
   description: string;
   datetime: string;
+  /**
+   * M2 Task 5c. Optional; absent means one-shot, matching the client's own
+   * convention. Forwarded straight through to send_invitation()'s
+   * p_recurrence param, which validates its shape server-side - this
+   * function does not re-validate it, since the DB is the single
+   * enforcement point (per Task 6's own pattern for the block-list check).
+   * Never re-sent or re-scheduled from here after the one send - the
+   * recipient accepts once and the series then lives on her own device.
+   */
+  recurrence?: { freq: string; interval: number; byWeekday?: number[] };
 }
 
 type PushSender = (
@@ -36,6 +46,7 @@ export async function handleSendInvitation(
     p_title: body.title,
     p_description: body.description,
     p_datetime: body.datetime,
+    ...(body.recurrence ? { p_recurrence: body.recurrence } : {}),
   });
   if (error) throw error;
 

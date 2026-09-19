@@ -1,6 +1,7 @@
 import {
   computeNextOccurrence,
   describeRecurrence,
+  isValidRecurrenceRule,
   parseRecurrencePhrase,
   type RecurrenceRule,
 } from "./recurrence";
@@ -481,5 +482,80 @@ describe("parseRecurrencePhrase", () => {
     it("returns null for empty string", () => {
       expect(parseRecurrencePhrase("")).toBeNull();
     });
+  });
+});
+
+// M2 Task 5c: the single validity definition used to reject a hostile or
+// malformed rule crossing a trust boundary (another user's Tier 2
+// invitation payload -> this device -> its own notification schedule).
+// Server-side validation in send_invitation.sql defines the same shape
+// independently (SQL cannot import this module) - the two must be kept in
+// agreement by hand, not by code sharing.
+describe("isValidRecurrenceRule", () => {
+  it("accepts a well-formed rule for each frequency", () => {
+    expect(isValidRecurrenceRule({ freq: "daily", interval: 1 })).toBe(true);
+    expect(isValidRecurrenceRule({ freq: "weekly", interval: 2 })).toBe(true);
+    expect(isValidRecurrenceRule({ freq: "monthly", interval: 1 })).toBe(true);
+    expect(isValidRecurrenceRule({ freq: "yearly", interval: 3 })).toBe(true);
+  });
+
+  it("accepts a valid byWeekday array", () => {
+    expect(
+      isValidRecurrenceRule({ freq: "weekly", interval: 1, byWeekday: [0, 1, 6] })
+    ).toBe(true);
+  });
+
+  it("rejects null and undefined", () => {
+    expect(isValidRecurrenceRule(null)).toBe(false);
+    expect(isValidRecurrenceRule(undefined)).toBe(false);
+  });
+
+  it("rejects a non-object value", () => {
+    expect(isValidRecurrenceRule("daily")).toBe(false);
+    expect(isValidRecurrenceRule(42)).toBe(false);
+    expect(isValidRecurrenceRule([])).toBe(false);
+  });
+
+  it("rejects an unknown freq", () => {
+    expect(isValidRecurrenceRule({ freq: "hourly", interval: 1 })).toBe(false);
+  });
+
+  it("rejects a missing freq", () => {
+    expect(isValidRecurrenceRule({ interval: 1 })).toBe(false);
+  });
+
+  it("rejects interval < 1", () => {
+    expect(isValidRecurrenceRule({ freq: "daily", interval: 0 })).toBe(false);
+    expect(isValidRecurrenceRule({ freq: "daily", interval: -1 })).toBe(false);
+  });
+
+  it("rejects a non-integer interval", () => {
+    expect(isValidRecurrenceRule({ freq: "daily", interval: 1.5 })).toBe(false);
+  });
+
+  it("rejects a missing interval", () => {
+    expect(isValidRecurrenceRule({ freq: "daily" })).toBe(false);
+  });
+
+  it("rejects a byWeekday entry outside 0-6", () => {
+    expect(
+      isValidRecurrenceRule({ freq: "weekly", interval: 1, byWeekday: [0, 7] })
+    ).toBe(false);
+  });
+
+  it("rejects a byWeekday that is not an array", () => {
+    expect(
+      isValidRecurrenceRule({ freq: "weekly", interval: 1, byWeekday: "Mon" })
+    ).toBe(false);
+  });
+
+  it("rejects extra unexpected fields on an otherwise-valid rule", () => {
+    // A hostile payload could carry a field this app's own UI never sets.
+    // Not rejecting extra fields outright (harmless today), but the shape
+    // check itself must not be fooled by their presence into skipping the
+    // required-field checks.
+    expect(
+      isValidRecurrenceRule({ freq: "daily", interval: 1, evil: "__proto__" })
+    ).toBe(true);
   });
 });

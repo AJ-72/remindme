@@ -13,6 +13,7 @@ import {
 } from "@/services/InvitationService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
+import { describeRecurrence, isValidRecurrenceRule } from "@/utils/recurrence";
 
 /**
  * B15: shown when 2+ invitations were claimed at once (useInvitationCheck.ts
@@ -49,6 +50,17 @@ function goBack() {
   } else {
     router.replace("/(tabs)");
   }
+}
+
+/**
+ * M2 Task 5c: validated, or undefined - never trust `invitation.recurrence`
+ * merely because it parsed as JSON. It crosses a trust boundary (another
+ * user's client -> this device -> its own notification schedule), so a
+ * malformed or hostile rule must be dropped silently to a one-shot
+ * reminder rather than reaching addReminder or the notification schedule.
+ */
+function validatedRecurrence(invitation: ClaimedInvitation) {
+  return isValidRecurrenceRule(invitation.recurrence) ? invitation.recurrence : undefined;
 }
 
 export default function PendingInvitationsScreen() {
@@ -114,6 +126,10 @@ export default function PendingInvitationsScreen() {
         datetime: invitation.datetime,
         senderName: displayName(invitation),
         senderId: invitation.senderId,
+        ...(() => {
+          const recurrence = validatedRecurrence(invitation);
+          return recurrence ? { recurrence } : {};
+        })(),
       });
     }
 
@@ -182,6 +198,12 @@ export default function PendingInvitationsScreen() {
       fontSize: 13,
       fontFamily: "Inter_500Medium",
       color: colors.mutedForeground,
+    },
+    repeatMarker: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      marginLeft: 4,
     },
     actionsRow: {
       flexDirection: "row",
@@ -264,6 +286,22 @@ export default function PendingInvitationsScreen() {
               <View style={styles.timeRow}>
                 <Feather name="clock" size={13} color={colors.mutedForeground} />
                 <Text style={styles.timeText}>{formatDatetime(invitation.datetime)}</Text>
+                {!!validatedRecurrence(invitation) && (
+                  // The recipient must be able to see a recurring
+                  // invitation repeats before tapping Accept - this is a
+                  // materially bigger commitment than a one-off, and this
+                  // screen's own inline Accept bypasses
+                  // invitation-preview.tsx's full mockup entirely.
+                  <View
+                    style={styles.repeatMarker}
+                    testID={`pending-invitation-repeat-${invitation.id}`}
+                  >
+                    <Feather name="repeat" size={11} color={colors.mutedForeground} />
+                    <Text style={styles.timeText}>
+                      {describeRecurrence(validatedRecurrence(invitation)!)}
+                    </Text>
+                  </View>
+                )}
               </View>
 
               {done ? (
