@@ -5,10 +5,10 @@
 | ID | Scenario | Status | Last run | Auto? |
 | --- | --- | --- | --- | --- |
 | [D2](#d2) | Vibration setting, 4 combinations | `PARTIAL` | 2026-08-29 | SEMI |
-| [D3](#d3) | Mark Done / Snooze, app fully closed | `PENDING` | 2026-08-29 (inconclusive) | SEMI |
+| [D3](#d3) | Mark Done / Snooze, app fully closed | `PASS` | 2026-09-20 | SEMI |
 | [D4](#d4) | Duplicate notifications | `PARTIAL` | 2026-09-04 | AUTO (partial) |
-| [D15](#d15) | Body tap, then Mark Done | `PENDING` | — | SEMI |
-| [D16](#d16) | Personalized snooze re-alert | `PARTIAL` | 2026-09-04 | AUTO (partial) |
+| [D15](#d15) | Body tap, then Mark Done | `PASS` | 2026-09-20 | SEMI |
+| [D16](#d16) | Personalized snooze re-alert | `PASS` | 2026-09-20 | AUTO (partial) |
 | [D85](#d85) | Daily reminder fires two days running, app killed between | `PENDING` | — | SEMI |
 | [D86](#d86) | Weekly reminder's next occurrence arms without opening the app | `PENDING` | — | SEMI |
 | [D87](#d87) | Recurring `alarm: true` doesn't hijack the single alarm-clock slot | `PENDING` | — | SEMI |
