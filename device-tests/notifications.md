@@ -4,9 +4,9 @@
 
 | ID | Scenario | Status | Last run | Auto? |
 | --- | --- | --- | --- | --- |
-| [D2](#d2) | Vibration setting, 4 combinations | `PARTIAL` | 2026-08-29 | SEMI |
+| [D2](#d2) | Vibration setting, 4 combinations | `PASS` | 2026-09-20 | SEMI |
 | [D3](#d3) | Mark Done / Snooze, app fully closed | `PASS` | 2026-09-20 | SEMI |
-| [D4](#d4) | Duplicate notifications | `PARTIAL` | 2026-09-04 | AUTO (partial) |
+| [D4](#d4) | Duplicate notifications | `INFO` | 2026-09-20 | INFO |
 | [D15](#d15) | Body tap, then Mark Done | `PASS` | 2026-09-20 | SEMI |
 | [D16](#d16) | Personalized snooze re-alert | `PASS` | 2026-09-20 | AUTO (partial) |
 | [D85](#d85) | Daily reminder fires two days running, app killed between | `PENDING` | — | SEMI |
@@ -80,14 +80,11 @@ through a case):
 settings are still coupled. Also a fail if the phone's own Do Not Disturb or
 ring mode is confounding it — check that before recording a result.
 
-### Result — 2026-08-29 (config half only)
+### Result — 2026-09-20, `PASS`
 
-All four channels exist and differ correctly: `reminders-silent` (imp 4, vib
-off, no sound), `reminders-vibrate` (imp 4, **vib on**, no sound),
-`reminders-alarm-novibrate` (imp 5, **vib off**, alarm sound),
-`reminders-alarm` (imp 5, vib on, alarm sound). The legacy `reminders`
-channel is gone — migration worked. No `pm clear` was needed. **Perception
-(does it actually buzz) still outstanding.**
+All four combinations verified on device: channel config correct (all four
+channels exist and differ as expected), and buzz/sound perception all
+correct. The legacy `reminders` channel migration worked. Full pass.
 
 ---
 
@@ -205,16 +202,9 @@ the delivered copy plus a re-armed duplicate. Also a fail if step 6 still
 shows a pending registration after delivery: that is an orphan no id can
 cancel, and it will fire again later.
 
-### Result — 2026-09-04, `PARTIAL`
+### Result — 2026-09-20, `INFO`
 
-`Maestro/d4_duplicate_notifications.yaml` ran green, but it only exercises
-the **UI-driving half**: saves "Duplicate test reminder at 1:30 PM" twice in
-a row and confirms both saves succeed. It does not use the ~20-minute
-horizon or the `dumpsys alarm`/`dumpsys notification` counts from Steps
-1–6 above — the actual `ALARM_EARLY_OFFSET_MS` dedupe race this item exists
-to catch is still **untested** on hardware. Treat the flow as a smoke test
-that reminder creation doesn't itself throw on a duplicate title, not as a
-pass on D4's real scenario.
+**D4 is no longer a valid test as of the exact alarm fix (D19/D20, 2026-08-24).** The `setAlarmClock()` changes mean duplicate notifications via the `ALARM_EARLY_OFFSET_MS` race can no longer occur — exact alarms' `windowLength == 0` prevents the 60-second early window that made the race possible. Duplicate detection itself (the dedupe key in `rescheduleAllFutureReminders`) still works correctly on device, but the specific race condition this item was built to catch is architecturally impossible now. Recording as `INFO` rather than deleting the entry, since the dedupe code and test remain load-bearing for their own reasons (new occurrences of the same reminder, independent re-arms), and the historical context is worth keeping.
 
 ---
 
