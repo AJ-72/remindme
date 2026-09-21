@@ -9,6 +9,22 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-21 — B23 pill edits: Android stacked its own edit sheet under the native picker, `pinnedDate`/`pinnedTime` never composed, and `jest.replaceProperty(Platform, "OS", ...)` leaked across the whole test file
+
+**WHAT:** Three compounding bugs found building/fixing "tap a date/time/repeat chip to edit it in place" in `QuickAddInput.tsx`.
+
+(1) **Double modal on Android.** `handleDatePillPress`/`handleTimePillPress` set both `showNoTimeSheet(true)` (the custom "Edit date"/"Edit time" bottom sheet, built for the separate "no time found" save-time flow) AND `pickerMode(...)`, which independently renders Android's native picker dialog in a block keyed only on `pickerMode !== null`. Both mounted at once — the native OS dialog appeared stacked on top of the app's own sheet. Reported live by the user after the feature shipped jest-green. Fixed by skipping `setShowNoTimeSheet` for a pill edit on Android (`if (Platform.OS !== "android") setShowNoTimeSheet(true)`) — the native dialog is self-contained with its own OK/Cancel, nothing else needs to render under it.
+
+(2) **Time-only edits silently dropped from save.** `pinnedDate` and `pinnedTime` were each a full independent `Date` override, but `effectiveDate` (what `performSave` actually reads) only ever consulted `pinnedDate ?? parsedDate` — pinning only the time chip pinned a `Date` that nothing on the save path looked at. Fixed by composing one `effectiveDate` that takes the date-part from `pinnedDate ?? parsedDate` and the time-part from `pinnedTime ?? parsedDate`, so either pin alone (or both) correctly lands in the saved payload.
+
+(3) **Test-file-wide Platform.OS leak.** All of this repo's Jest runs default to `Platform.OS === "ios"` (`react-native/jest-preset`'s `defaultPlatform`), so the Android-only code paths above had zero coverage — this is *why* bug (1) shipped green. Writing Android-specific regression tests (`Platform.OS = "android"` + a manual `mock-date-time-picker` firing a real `onChange`) surfaced a second, pre-existing, unrelated bug: a describe block earlier in the same test file (`"the listening surface"`, mic/dictation tests) calls `jest.replaceProperty(Platform, "OS", "android")` in its own `beforeEach` but the file's cleanup only calls `jest.clearAllMocks()` — which clears call history, not a `replaceProperty`'s original value. `Platform.OS` stayed `"android"` for every test declared afterward in the file. Fixed with a scoped `afterEach(() => jest.restoreAllMocks())` on that one describe block, rather than a blanket change to the file's shared `beforeEach` (which would also fully restore unrelated `jest.spyOn` mocks elsewhere, a much larger blast radius).
+
+**WHY:** (1) and (2) are the class of bug that a component-scoped "does it render/save something" test won't catch, because the previous test suite's save-payload assertions were `toBeTruthy()` rather than an exact value check, and no test exercised the real native-picker `onChange` callback at all — only the sheet's own Cancel/Confirm buttons, which read component state directly. (3) is the more durable lesson for this file: `jest.replaceProperty` requires `jest.restoreAllMocks()` (not `clearAllMocks()`, and not `resetAllMocks()`) to auto-revert, and a leak from one describe block silently changes which platform branch every *later* test in the same file exercises — with no error, just quietly wrong coverage. Any future `Platform.OS` override in this file must be paired with its own `afterEach` restore, scoped to that describe block.
+
+**WHERE:** `artifacts/mobile/components/QuickAddInput.tsx` (`handleDatePillPress`/`handleTimePillPress`, the composed `effectiveDate`/`effectiveTime` derivation, `handlePickerConfirmWith` taking an explicit value instead of reading `suggestedTime` from closure — a related stale-closure fix in the same pass). New manual mock: `artifacts/mobile/__mocks__/@react-native-community/datetimepicker.tsx` (`testID="mock-date-time-picker"`, first native-picker `onChange` simulation in this repo). Tests: `artifacts/mobile/__tests__/components/QuickAddInput.test.tsx`, `B23` describe block — two Android-specific tests plus the `jest.restoreAllMocks()` fix inside `"the listening surface"` describe block. Device confirmation: `device-tests/feature-e2e.md#d95`.
+
+---
+
 ## 2026-09-19 — Adversarial testing pass on M2 recurrence: catch-up drift compounds a monthly/yearly day-of-month clamp, and the detail screen's "Next 3" preview used the wrong anchor
 
 **WHAT:** Two real, previously-uncaught bugs found via adversarial testing of `advanceRecurringReminder` and `reminder-detail.tsx`, both fixed with a new `computeNthOccurrence(rule, anchor, periods)` export in `utils/recurrence.ts`:
@@ -177,15 +193,13 @@ Also confirmed in the same commit: `parseNaturalLanguage.ts` has an early return
 
 ---
 
-## 2026-09-12 — Deepened ReminderService's re-arm sequence and QuickAddInput's mic/dictation seam; centralized the dictation-readiness dance
+## 2026-09-12 — Deepened ReminderService's re-arm sequence and centralized the dictation-readiness dance (QuickAddInput hook extraction part of this entry reverted 2026-09-17 — see that entry)
 
-**WHAT:** Three related architecture-review follow-ups on `main`: (1) `ReminderService.ts` — collapsed the hand-rolled cancel→schedule sequence duplicated across `toggleComplete`, `snoozeReminder`, `rescheduleAllFutureReminders`, and `setAlarmForPendingReminders` into one `rearmReminder(reminder, {guard, schedule})` primitive; applied the "still in the future" guard to `snoozeReminder` too (previously the only one of the four with no past-date guard — a snooze target already in the past now leaves the reminder overdue/unscheduled like the other three, instead of silently registering a dead notification). (2) `QuickAddInput.tsx` — removed three `console.log("[TEMP-DIAG2]...")` debug lines shipped in a same-day commit, and extracted the mic/dictation state+handlers (listening, notice, pulse animation, the live-vs-shared-audio mutex) into a new hook, `hooks/useSharedAwareDictation.ts`, keeping the component's JSX/testIDs untouched. **(2) SUPERSEDED 2026-09-17 — the hook was deleted and this extraction reverted; see the 2026-09-17 entry. Parts (1) and (3) still stand.)** (3) `SpeechService.ts` — added `resolveDictationReadiness(locale)`, a shared wrapper around `ensureOfflineModelReady` that gives both dictation call sites (`useSharedAwareDictation`'s live mic, `SharedTextContext`'s shared-audio transcription) the same three-way verdict (`status`/`onDevice`/`shouldBail`) instead of each computing `onDevice` independently; `SharedTextContext` previously proceeded with online recognition while the offline model was still downloading (no "preparing" special-case at all) where the live-mic path bailed with a notice — now both explicitly decide what "preparing" means for their own case (live mic still falls back to online since a user is waiting; shared-audio now bails to the filename fallback, since pre-recorded audio isn't worth guessing at).
+**WHAT:** Two architecture-review follow-ups on `main` that still stand: (1) `ReminderService.ts` — collapsed the hand-rolled cancel→schedule sequence duplicated across `toggleComplete`, `snoozeReminder`, `rescheduleAllFutureReminders`, and `setAlarmForPendingReminders` into one `rearmReminder(reminder, {guard, schedule})` primitive; applied the "still in the future" guard to `snoozeReminder` too (previously the only one of the four with no past-date guard — a snooze target already in the past now leaves the reminder overdue/unscheduled like the other three, instead of silently registering a dead notification). (2) `SpeechService.ts` — added `resolveDictationReadiness(locale)`, a shared wrapper around `ensureOfflineModelReady` giving both dictation call sites the same three-way verdict (`status`/`onDevice`/`shouldBail`) instead of each computing `onDevice` independently; `SharedTextContext` previously proceeded with online recognition while the offline model was still downloading, where the live-mic path bailed with a notice — now both explicitly decide what "preparing" means for their own case.
 
-**WHY:** Every scheduling bug-fix commit in this repo's history (re-arm on launch, un-complete scheduling, silent reminders delivered late, exact-alarm setAlarmClock) had fixed one of the four ReminderService call sites in isolation, which is exactly why they'd drifted — the missing snooze guard was found this way, not by inspection alone. The debug logs and the mic/invite/date-picker scope creep in QuickAddInput were flagged by the same review; a full render-tree component split was rejected in favor of hook extraction specifically to keep `QuickAddInput.test.tsx`'s existing testID-based assertions passing unmodified (verified: all 39 of its tests pass with zero changes to the test file).
+**WHY:** Every scheduling bug-fix commit in this repo's history (re-arm on launch, un-complete scheduling, silent reminders delivered late, exact-alarm setAlarmClock) had fixed one of the four ReminderService call sites in isolation, which is exactly why they'd drifted — the missing snooze guard was found this way, not by inspection alone.
 
-**WHERE:** `artifacts/mobile/services/ReminderService.ts` (`rearmReminder`, `toggleComplete`, `snoozeReminder`, `rescheduleAllFutureReminders`, `setAlarmForPendingReminders`), `artifacts/mobile/hooks/useSharedAwareDictation.ts` (new), `artifacts/mobile/services/SpeechService.ts` (`resolveDictationReadiness`), `artifacts/mobile/contexts/SharedTextContext.tsx`. Same-module `jest.spyOn` on an internal call does NOT intercept it (confirmed again here: spying on `ensureOfflineModelReady` from a `SharedTextContext` test that calls the new `resolveDictationReadiness` wrapper had no effect, since both live in `SpeechService.ts` — Babel's CJS transform makes the internal call direct, bypassing the spy; had to spy on `resolveDictationReadiness` itself instead, matching the pre-existing pattern in `SpeechService.test.ts`'s own suite).
-
-**SUPERSEDED (2026-09-12, same day):** this entry originally claimed the "worker process failed to exit gracefully" warning below was unreproducible/likely-flaky. That was wrong — it reproduced 100% of the time (3/3 runs) once actually repeated, and 0% on baseline (3/3 runs) — a deterministic regression, not flakiness, that the first pass simply hadn't tested enough times to see clearly. See the entry immediately below for the real root cause and fix.
+**WHERE:** `artifacts/mobile/services/ReminderService.ts` (`rearmReminder`, `toggleComplete`, `snoozeReminder`, `rescheduleAllFutureReminders`, `setAlarmForPendingReminders`), `artifacts/mobile/services/SpeechService.ts` (`resolveDictationReadiness`), `artifacts/mobile/contexts/SharedTextContext.tsx`. Same-module `jest.spyOn` on an internal call does NOT intercept it (confirmed again here: spying on `ensureOfflineModelReady` from a `SharedTextContext` test that calls `resolveDictationReadiness` had no effect, since both live in `SpeechService.ts` — Babel's CJS transform makes the internal call direct, bypassing the spy; had to spy on `resolveDictationReadiness` itself instead).
 
 ---
 
@@ -198,16 +212,6 @@ Also confirmed in the same commit: `parseNaturalLanguage.ts` has an early return
 **WHERE:** `artifacts/mobile/hooks/useSharedAwareDictation.test.ts`, test "starts listening on mic press when permission and model are ready." Verified clean across 5 consecutive full-suite runs post-fix (0/5 warning, 973/973 passing every time), vs. 3/3 warning pre-fix. Typecheck clean.
 
 **Unrelated, pre-existing flake found while investigating:** `__tests__/screens/send-reminder.test.tsx`'s "opens WhatsApp with a wa.me link carrying the message" test fails intermittently (seen 2/11 full-suite runs, both on `main` baseline AND with this session's changes in) — the captured `wa.me` URL's `text=` param is sometimes empty. Confirmed present on unmodified `main`, so it predates and is unrelated to this session's work; not fixed here, flagged for whoever picks it up next.
-
----
-
-## 2026-09-11 — PRs #6 and #7 merged `claude/remind-push-notifications-bbrc5y` into `main`; the M4 Tier 2 "remind someone else" feature is now on `main`, not just a feature branch
-
-**WHAT:** Two GitHub merges (outside any agent session — done via the GitHub UI) landed the entire `claude/remind-push-notifications-bbrc5y` branch onto `main`: `fcdd2a4` (PR #6, base feature — bind-invite, register-number, invitation-preview screens, Supabase client wiring, QuickAddInput invite integration) and `2e3ba40` (PR #7, B15 follow-up — pending-invitations list screen, client-side push grouping, register-number invitation-claim fix). Every individual fix/decision inside these commits already has its own dated entry in this ledger from when it was built on the branch (see entries below, e.g. the B15 entry immediately following this one, the FCM credential entry, the bind_via_invite_token cross-account fix, etc.) — this entry exists only to mark the merge event itself, not to re-document already-documented work.
-
-**WHY:** An architecture-review session run against `main` right after these merges landed was working from a stale mental model (assumed the M4 backend work was still branch-only) until a direct `grep` on `main` confirmed the invitation/dictation code was already present pre-merge and fully present after. Anyone auditing "what's on `main`" from this point forward should treat CLAUDE.md's "M4 Tier 2 backend is deployed" section as describing `main`'s actual state, not just a feature branch's.
-
-**WHERE:** `git log --oneline` on `main` from `2e3ba40` back to `fcdd2a4`; the pre-merge per-fix entries are scattered through this file under their original 2026-09-xx dates.
 
 ---
 
@@ -255,13 +259,7 @@ Also confirmed in the same commit: `parseNaturalLanguage.ts` has an early return
 
 ## 2026-09-11 — "Not reachable" badge on a real recipient was a phone-number normalization mismatch, not a push/backend bug — recurrence of the region-guessing issue
 
-**WHAT:** After the push-delivery fixes (entry below), one direction still looked broken: Padma's device showed no "has the app" bolt badge for Anand as a recipient, even though his account/device were fully registered server-side (confirmed via direct `users`/`devices` query). Root cause was the same class of bug already documented in `CLAUDE.md`'s three-bugs entry, just hitting the other direction: Anand's number was saved in Padma's contacts as local digits with no leading `+`, so `normalizeForIdentity()` (`artifacts/mobile/utils/phoneNumber.ts`) had to guess a region from Padma's device locale to build an E.164 number — guessed wrong (or guessed differently than whatever Anand actually typed into `register-number.tsx`), producing a different `phone_hash` than his real registration. The `lookup` Edge Function correctly returned `{exists:false}` for that wrong hash — not a bug in `lookup`/`hash_lookup` itself, just a client-side input mismatch presented as if it were a real "no app" answer, since the two are indistinguishable by design (see `recipientReachability.ts`'s own doc comment on why a miss can't be cached long). Fixed live by re-registering Anand's number with an explicit `+91` prefix, which matched what was then typed into Padma's contact entry.
-
-**WHY non-obvious:** `200 OK` on every `lookup` call gave no signal anything was wrong — a definitive "no" and an ambiguous-input "no" both return the same shape (`exists: false`), so nothing in server logs or network traffic distinguished "genuinely not reachable" from "asked about the wrong number entirely." Diagnosed by checking `checkReachability()`'s call chain down to `normalizeForIdentity`, confirming its `hasPlus` branch is the only unambiguous path, and confirming with the user that the contact was saved without a leading `+` — not by guessing at a fix first per the debugging-skill's evidence-before-fix discipline. Backlog item **B9** added (`backlog.md`) since the underlying gap (`normalizeForIdentity` guesses once from device locale and gives up on ambiguous input, rather than retrying plausible alternates) is real product debt, not something this session's live-test fix actually resolved — only this one instance was worked around.
-
-Also confirmed during the same session: a "stuck on splash screen" symptom on both devices was exactly the already-documented `adb reverse` gotcha (CLAUDE.md's Android/Expo device workflow section) — Metro's port forward had dropped after being stopped/devices reconnecting, unrelated to any of the day's actual code changes. Re-running `adb reverse tcp:3011 tcp:3011` per device and restarting Metro resolved it immediately; not a new bug, just a reminder the fix is always this first before investigating further.
-
-**WHERE:** No code changed for the phone-number issue itself (fixed by re-registering with an explicit `+`, not a code fix) — see `backlog.md` **B9** for the real fix still needed in `artifacts/mobile/utils/phoneNumber.ts`'s `normalizeForIdentity` and `supabase/functions/lookup/index.ts`'s hash-matching. 
+**WHAT:** Same class of bug as CLAUDE.md's three-bugs entry, hitting the other direction: a contact saved without a leading `+` forces `normalizeForIdentity()` to guess a region from device locale, producing a different `phone_hash` than the real registration — `lookup` correctly (and indistinguishably) returns `{exists:false}` for the wrong hash, looking exactly like "no app installed." `200 OK` on every call gives no signal anything's wrong, since a genuine miss and an ambiguous-input miss share the same response shape. Worked around live by re-registering with an explicit `+91`. The real fix (retry plausible alternates instead of guessing once) is tracked as **B9** in `backlog.md`, not yet done.
 
 ## 2026-09-11 — Android push (FCM) fully wired and confirmed live end-to-end — two separate credentials were needed, not one
 
@@ -496,7 +494,7 @@ Independent of root cause, this is at minimum the **same failure shape as T1.9's
 
 **Also note:** the notification-channel `lightColor` change does **not** reach existing installs. Android caches channel config by ID for the life of the install (the same immutability already documented around the `reminders-alarm` channel IDs), so only a fresh install picks up the new LED colour.
 
-**WHERE:** [artifacts/mobile/constants/colors.ts](artifacts/mobile/constants/colors.ts), [app.json](artifacts/mobile/app.json), [services/ReminderService.ts](artifacts/mobile/services/ReminderService.ts), [components/ReminderCard.tsx](artifacts/mobile/components/ReminderCard.tsx), [components/QuickAddInput.tsx](artifacts/mobile/components/QuickAddInput.tsx). Device verification pending as D27 in [device-tests/visual-layout.md](device-tests/visual-layout.md) — Jest asserts token values, never rendered colour.
+**WHERE:** [artifacts/mobile/constants/colors.ts](artifacts/mobile/constants/colors.ts), [app.json](artifacts/mobile/app.json), [services/ReminderService.ts](artifacts/mobile/services/ReminderService.ts), [components/ReminderCard.tsx](artifacts/mobile/components/ReminderCard.tsx), [components/QuickAddInput.tsx](artifacts/mobile/components/QuickAddInput.tsx). Device verification pending as D94 in [device-tests/visual-layout.md](device-tests/visual-layout.md) — Jest asserts token values, never rendered colour.
 
 ---
 
@@ -1596,20 +1594,9 @@ and in the same function: `if (!isAppInForeground()) { runTaskManagerTasks(...) 
 
 ---
 
-## 2026-08-04 — EAS cloud build failing: local `android/` dir leaking into the upload
+## 2026-08-04 — EAS cloud build failing: local `android/` dir leaking into the upload (partial fix — see 2026-08-05 for the real root cause)
 
-**Symptom:** `eas build` from `artifacts/mobile` failed with two errors: (1) `android/local.properties` (Windows-specific SDK path) flagged as leaking into the EAS upload, and (2) Gradle "No matching variant" / "No variants exist" errors for `react-native-community/datetimepicker`, `async-storage`, `gesture-handler`, `keyboard-controller` — as if the build was resolving against stale cached autolinking metadata instead of a fresh one.
-
-**ROOT CAUSE:** this project uses Continuous Native Generation — `artifacts/mobile/android/` is never committed (gitignored) and is meant to be regenerated fresh by `expo prebuild` on EAS's servers every build. But local Windows native builds (`npx expo run:android`, see 2026-08-02/03 entries below) leave a real `android/` dir on disk, including machine-specific `local.properties` and stale `android/build`, `android/app/build` Gradle output from earlier CMake/library versions. With no `.easignore` present, eas-cli's upload step included this local directory, so EAS built against a stale, Windows-specific native tree instead of generating its own — hence both the leaked-path warning and the bogus variant-resolution failures (cached metadata not matching what's actually in `node_modules` on EAS's build server).
-
-**FIX:** added `artifacts/mobile/.easignore`:
-```
-/android
-/ios
-```
-This forces EAS to always ignore any locally-generated native folders and prebuild fresh, regardless of what's sitting on disk from local Windows builds.
-
-**UPDATE — `.easignore` alone did NOT fix it; real root cause found (see next entry below, 2026-08-05).** Do not stop at this entry's fix.
+**Symptom/first fix:** `eas build` leaked the local, Windows-specific `artifacts/mobile/android/` dir (Continuous Native Generation means it's gitignored and meant to be regenerated fresh on EAS's servers) into the upload, causing a `local.properties` warning plus bogus Gradle "No matching variant" errors from stale cached autolinking metadata. Added `artifacts/mobile/.easignore` (`/android`, `/ios`) to force EAS to always prebuild fresh — this fix is real and still in place, but did **not** fully resolve the issue; the actual root cause (a stray root-level `eas.json`) is in the next entry.
 
 ---
 
@@ -1678,17 +1665,9 @@ This forces EAS to always ignore any locally-generated native folders and prebui
 
 ## 2026-08-03 — Added Stop hook to enforce this ledger gets updated after commits
 
-**Context:** user wants this file kept current automatically, specifically for a smaller/less capable model reading it later — so entries in this file must stay short, imperative, and scannable (WHAT/WHY/WHERE per entry), not prose.
+**WHAT:** `.claude/settings.json`'s `Stop` hook runs `.claude/check-learnings-updated.sh`, which compares `HEAD` against a marker file (`.claude/.last-learnings-commit`, gitignored) and blocks stop with a reason if new commits landed without touching `system_learnings.md`. A Claude Code `Stop` hook (not a git `post-commit` hook) is used deliberately — it fires in-session, while Claude still has context to write a *reasoned* entry, not a mechanical commit-hash dump. Does NOT catch manual `git commit` outside a Claude Code session.
 
-**WHAT:** added `.claude/settings.json` with a `Stop` hook running `.claude/check-learnings-updated.sh`. On every Claude Code stop, the script compares current git `HEAD` against a marker file (`.claude/.last-learnings-commit`, gitignored — local session state, not committed). If new commits landed since the marker and none of them touched `system_learnings.md`, the hook blocks stop and injects a reason listing the unlogged commits, prompting Claude to add an entry before finishing. If `system_learnings.md` was already touched, or there's nothing new, it's a silent no-op (exit 0).
-
-**WHY:** a static git `post-commit` hook can only run a fixed script — it can't reason about *why* a change mattered, so it can't write a good ledger entry. A Claude Code `Stop` hook fires in-session, after Claude (which has full context on what it just did) would otherwise finish, so it can actually produce a reasoned entry rather than a mechanical commit-hash dump.
-
-**LIMITATION:** this only fires when Claude Code itself is the one committing and then stopping. It does NOT catch manual `git commit` runs from a plain terminal outside a Claude Code session — that would need a separate real git `post-commit` hook (a mechanical stub log, not a reasoned entry) layered on top if ever wanted. Not implemented as of this entry.
-
-**GOTCHA:** the hook's JSON output must be built carefully — the `reason` field can contain a multi-line git log, and naive `cat <<EOF` embedding of raw newlines into a JSON string produces invalid JSON. `jq` was unavailable in this repo's Git Bash environment, so the script manually escapes backslashes/quotes and converts real newlines to `\n` via `sed`+`awk` before printing the JSON line. Validated with `node -e "JSON.parse(...)"` since `jq`/`python` weren't reliably available either.
-
-**GOTCHA:** a newly-created `.claude/settings.json` is not picked up by the running session's file watcher automatically — needs `/hooks` (reload) or a session restart to activate for hooks created mid-session.
+**GOTCHAS:** the hook's JSON `reason` field can hold a multi-line git log — build it with manual backslash/quote escaping + newline-to-`\n` conversion (no `jq` in this repo's Git Bash), and validate with `node -e "JSON.parse(...)"`. A newly-created `.claude/settings.json` needs `/hooks` (reload) or a session restart to activate mid-session.
 
 ---
 
@@ -1707,41 +1686,17 @@ FIX FOR NEXT TIME: try building from `C:\p\artifacts\mobile` first before copyin
 
 ---
 
-## 2026-08-02/03 — Local Android build on Windows: confirmed working end-to-end
+## 2026-08-02/03 — Local Android build on Windows: two false alarms, neither a real bug
 
-**Outcome:** after fixes #1 and #2 below, `npx expo run:android` completed with `BUILD SUCCESSFUL`, APK installed, and `com.reminders/.MainActivity` was confirmed as the foreground focused activity on the Pixel 10 emulator via `adb shell dumpsys window | grep mCurrentFocus`. The local-build path is fully validated, not just theoretically fixed.
+**Metro false alarm:** right after a successful native build, Metro can fail to bundle with `Unable to resolve "expo-router/entry" from "artifacts\mobile\index.ts"` (looks like `metro.config.js`/projectRoot confusion, but both were verified correct). Just re-run `npx expo run:android` from the correct cwd before assuming a real config problem — it resolves on retry (cached, ~24s).
 
-**One extra transient failure encountered along the way (not a real bug, no fix needed):** after the native build succeeded the first time, Metro failed to bundle with `Unable to resolve "expo-router/entry" from "artifacts\mobile\index.ts"` — looked like Metro's projectRoot got confused (import stack showed paths resolving as if relative to repo root instead of `artifacts/mobile`). `metro.config.js` and the `expo-router` symlink were both verified correct. Simply re-running `npx expo run:android` from the correct cwd fixed it on the next attempt (build was mostly cached, finished in 24s). Conclusion: if you hit `expo-router/entry` unresolved right after a successful native build, just retry before assuming a real config problem.
-
-**Process note — background task interruption:** a background build task can show status "stopped" with "No completion record found" if the Claude Code process/session ends while it's still running (not a build failure). Always check the task's `.output` log file directly for actual progress/result before assuming the build failed — in this case the log showed `BUILD SUCCESSFUL` had already happened before the interruption.
+**Background-task false alarm:** a background build task can show status "stopped" with "No completion record found" if the Claude Code process/session ends while it's still running — not a build failure. Check the task's `.output` log directly for the actual result (e.g. `BUILD SUCCESSFUL` may have already happened) before assuming the build failed.
 
 ---
 
-## 2026-08-02 — Local Android build on Windows: fixed three separate blockers
+## 2026-08-02 — Local Android build on Windows: first-pass JDK/CMake/pnpm findings (superseded — see the 2026-08-03 "was INCOMPLETE" entry above and CLAUDE.md's "Local Android builds on Windows" for the complete, current fix)
 
-**PARTIALLY SUPERSEDED by the 2026-08-03 "CMake/Ninja Windows fix ... was INCOMPLETE" entry above** — item #2's fix below (CMake pin in `app/build.gradle` only) is necessary but not sufficient; see that entry for the complete fix covering all native modules, not just `:app`.
-
-**Context:** user wanted `npx expo run:android` to work locally (avoid burning EAS free-tier build quota). Hit three unrelated failures in sequence. All three must be fixed together for a clean Windows build.
-
-1. **JDK version.** System `java` on PATH was JDK 26. RN/Kotlin Gradle plugin does not support it — fails with misleading error `Error resolving plugin [id: 'com.facebook.react.settings'] > 26.0.2` (that "26.0.2" is the Java version, not a plugin version — Kotlin's `JavaVersion.parse` chokes on it).
-   FIX: set `JAVA_HOME` to Android Studio's bundled JBR (`C:\Program Files\Android\Android Studio\jbr`, JDK 21) before running any gradle/expo build command.
-
-2. **CMake/Ninja Windows long-path bug.** AGP defaults to CMake 3.22.1, which bundles Ninja 1.10. Ninja 1.10 has a real bug in Windows long-path handling, fixed only in Ninja 1.12+ (see ninja-build/ninja#1900). Windows registry `LongPathsEnabled=1` does NOT fix this — it's Ninja's own internal 260-char check, unrelated to the OS long-path opt-in.
-   Symptom: build runs for minutes, gets deep into native module compilation, then fails with `ninja: error: Stat(...): Filename longer than 260 characters` or `manifest 'build.ninja' still dirty after 100 tries`, usually on modules with long file trees (react-native-keyboard-controller, react-native-worklets, expo-modules-core).
-   FIX: install newer CMake (4.1.2 used here) via Android Studio SDK Manager, then explicitly pin it in `artifacts/mobile/android/app/build.gradle`:
-   ```
-   android { externalNativeBuild { cmake { version "4.1.2" } } }
-   ```
-   IMPORTANT: setting the `CMAKE_VERSION` env var alone is NOT enough — some individual native modules (e.g. react-native-worklets) read `CMAKE_VERSION` from their own `android/build.gradle`, but the top-level `:app` module does NOT read this env var and silently keeps using CMake 3.22.1 unless the version is set explicitly in `app/build.gradle` as above.
-   `android/` is prebuild-generated — this edit may be wiped by a future `expo prebuild` and need reapplying.
-   After any CMake version change, delete stale build caches or old absolute paths / broken ninja manifests persist and cause confusing failures: delete `android/app/.cxx`, `android/app/build`, `android/build`, `android/.gradle`.
-
-3. **pnpm store path nesting.** Not a root cause on its own, but pnpm's `.pnpm/<pkg>@<version>_<hash>/node_modules/<pkg>` layout adds ~40-60 extra characters versus npm/yarn's flatter layout. This can tip a marginal path over Ninja's 260-char limit when the underlying Ninja bug (see #2) is present. Once CMake/Ninja is upgraded past 1.12, this stops mattering — do not try to "fix" pnpm nesting as a primary solution; it is a red herring if #2 isn't fixed first.
-   (We tried relocating the pnpm virtual-store-dir to a short path `C:/ps` via `.npmrc` `virtual-store-dir=C:/ps` as a workaround before finding the real fix in #2 — this bought some headroom but did not fully solve it. Not necessary once CMake is upgraded.)
-
-**Correct order of operations for a clean Windows local build:** fix JDK (#1) → fix CMake/Ninja version (#2) → delete stale `.cxx`/`build` caches → run `npx expo run:android`.
-
-**Do NOT conclude pnpm itself is broken or unsupported on Windows** — this was raised and correctly pushed back on. The actual bug is in the bundled Ninja version, which affects npm/yarn users too; pnpm just makes marginal cases fail slightly more often.
+**One thing not captured elsewhere:** pnpm's `.pnpm/<pkg>@<version>_<hash>/node_modules/<pkg>` path nesting is a red herring, not a root cause — it only tips marginal paths over Ninja's 260-char limit *because* the CMake/Ninja bug is present. Do not conclude pnpm itself is broken on Windows or try to fix path nesting before fixing the CMake/Ninja version; once that's upgraded, pnpm's extra nesting stops mattering.
 
 ---
 
