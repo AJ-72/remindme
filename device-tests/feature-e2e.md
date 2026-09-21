@@ -18,8 +18,9 @@
 | [D84](#d84) | Switching dictation language mid-session | `PENDING` | — | MANUAL |
 | [D91](#d91) | Recurring reminder "Next 3" preview after repeated snoozes | `PASS` | 2026-09-19 | MANUAL |
 | [D92](#d92) | Home screen: recurrence preview cards for next occurrences | `PASS` | 2026-09-20 | MANUAL |
-| [D95](#d95) | Parsed date/time/recurrence chips are editable in place | `PENDING` | — | SEMI |
+| [D95](#d95) | Parsed date/time/recurrence chips are editable in place | `PASS` | 2026-09-21 | MANUAL |
 | [D96](#d96) | Skip today's occurrence of a recurring reminder vs. delete the series | `PASS` | 2026-09-20 | MANUAL |
+| [D97](#d97) | Same-weekday reminders/previews merge into one home-list group | `PASS` | 2026-09-20 | MANUAL |
 
 ---
 
@@ -1394,11 +1395,50 @@ series without removing it, delete-series still removes it entirely.
 
 ---
 
-<a id="d95"></a>
-## D95 — Parsed date/time/recurrence chips are editable in place · `PENDING`
+<a id="d97"></a>
+## D97 — Same-weekday reminders/previews merge into one home-list group · `PASS` (2026-09-20, manual)
 
-*Added 2026-09-20 with [B23](../backlog.md). Not yet built — this check exists
-before the feature, so it cannot be run until B23 lands.*
+*Added 2026-09-20.* Reported by the user: adding multiple recurring
+reminders, or a recurring + non-recurring reminder, landing on the same
+day 2-6 days out showed **two separate headers for the same weekday**
+(e.g. two "Tuesday" sections) instead of one, splitting same-day items
+across them.
+
+**Root cause.** `groupByDate()` (`utils/groupByDate.ts`) bucketed
+Today/Tomorrow/Later correctly as single groups, but emitted the
+"this-week" bucket as **one group per item** rather than one group per
+calendar day — any two items sharing a weekday got their own duplicate
+header instead of being merged into it.
+
+**Fix.** "This-week" items are now grouped by calendar day (`startOfDay`
+key) before being turned into `DateGroup`s, matching how Today/Tomorrow
+already merge same-day items.
+
+**Steps.**
+1. Add two or more reminders (recurring, non-recurring, or a mix,
+   including recurrence-preview cards) that land on the same weekday
+   2-6 days from today.
+2. View the home screen's Upcoming list.
+
+**Pass.** All same-day items appear under one weekday header, in
+datetime order.
+
+**Fails if.** The same weekday name appears as two or more separate
+header blocks with items split between them.
+
+**Result (2026-09-20):** Confirmed live on device — same-weekday items
+now merge under one header. **PASS.**
+
+---
+
+<a id="d95"></a>
+## D95 — Parsed date/time/recurrence chips are editable in place · `PASS` (2026-09-21, Android, manual)
+
+*Added 2026-09-20 with B23. Built and jest-verified 2026-09-21
+(`docs/shipped.md`). Confirmed on-device 2026-09-21 after fixing a live
+Android regression found during this pass (the native date/time dialog was
+appearing stacked on top of the app's own edit sheet) — see the Android note
+under Pass below.*
 
 The pill row under the quick-add box is `pointerEvents: "none"` today, so this
 is a check that a **new** affordance works, and specifically that it does not
@@ -1425,6 +1465,13 @@ that tapping near it does not steal focus from the input.
 **Pass.**
 - Each chip opens its own editor: date → date picker, time → time picker,
   repeat → the recurrence sheet. Not one combined sheet.
+- On Android specifically, tapping a date/time chip shows **only** the native
+  OS date/time dialog — not the app's own "Edit date"/"Edit time" bottom sheet
+  underneath it. (Regression found live 2026-09-21: both used to mount at
+  once, so the native dialog appeared stacked on top of the custom sheet.
+  Fixed by skipping the custom sheet for a pill edit on Android, since the
+  native dialog is self-contained. Confirmed in Jest via a mocked picker;
+  this is the device confirmation that no visual double-modal remains.)
 - After step 3, the time still reads **2:30 PM** — the keystrokes did not
   re-parse over the explicit edit.
 - The saved reminder in step 6 carries every edited value, and its notification

@@ -47,7 +47,22 @@ skip just today's occurrence and keep the series going, or delete the
 whole thing. Skipping doesn't count against your completion stats — it's
 neither a "done" nor a "missed".
 
-Device-confirmed, [device-tests/feature-e2e.md#d96](../device-tests/feature-e2e.md#d96).
+### Editable date/time/recurrence chips in quick add (B23) — 2026-09-21 · Announce-ready
+
+**User-facing:** If the app parses the wrong day, time, or repeat pattern from
+what you typed, you can now tap the chip under the box to fix it directly —
+no need to re-word the sentence or save and edit afterwards. Once you correct
+a chip, further typing won't silently overwrite your correction.
+
+Tapping a date/time chip opens the existing native picker; tapping the repeat
+chip opens the existing recurrence picker. Each is seeded with the current
+value and, once confirmed, "pinned" so later re-parses of the title don't
+reset it; cancelling leaves the prior value untouched, and saving or clearing
+the input resets all pins. A live Android regression (native picker appearing
+stacked on top of the app's own edit sheet) was found and fixed during device
+testing — see the RCA note under D95.
+
+Device-confirmed, [device-tests/feature-e2e.md#d95](../device-tests/feature-e2e.md#d95).
 
 ### Recurring reminder preview cards — 2026-09-20 · Announce-ready
 

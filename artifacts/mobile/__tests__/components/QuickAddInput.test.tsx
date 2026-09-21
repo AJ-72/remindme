@@ -915,6 +915,16 @@ describe("QuickAddInput — the listening surface", () => {
     });
   }
 
+  // jest.replaceProperty below needs an explicit restore - it is not undone
+  // by the top-level beforeEach's jest.clearAllMocks() (that only clears call
+  // history, not replaced property values; only jest.restoreAllMocks() does).
+  // Without this, Platform.OS stayed "android" for every test in the file
+  // declared after this block, which is how "saves with the pinned time"
+  // (B23) silently ran under Android semantics and surfaced this gap.
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   beforeEach(() => {
     SpeechService.stopListening();
     jest.replaceProperty(Platform, "OS", "android");
@@ -1563,10 +1573,14 @@ describe("QuickAddInput — recurrence", () => {
   it("a rule set by hand is cleared once the text changes and re-parses without one", async () => {
     const { findByTestId, queryByTestId } = renderComponent();
     fireEvent.changeText(await findByTestId("quick-add-input"), "Take tablet at 8am");
-    fireEvent.press(await findByTestId("quick-add-repeat"));
+    await waitFor(async () => {
+      fireEvent.press(await findByTestId("quick-add-repeat"));
+    });
     fireEvent.press(await findByTestId("repeat-option-daily"));
     fireEvent.press(await findByTestId("repeat-sheet-confirm"));
-    expect(await findByTestId("quick-add-repeat-pill")).toBeTruthy();
+    await waitFor(async () => {
+      expect(await findByTestId("quick-add-repeat-pill")).toBeTruthy();
+    });
 
     // Re-typing re-runs the parse effect and, since this text has no
     // recurrence phrase, clears the hand-picked rule — matching parsedDate's
@@ -1574,6 +1588,623 @@ describe("QuickAddInput — recurrence", () => {
     fireEvent.changeText(await findByTestId("quick-add-input"), "Take tablet at 9am");
     await waitFor(() => {
       expect(queryByTestId("quick-add-repeat-pill")).toBeNull();
+    });
+  });
+
+  describe("B23: Editable date/time/recurrence pills", () => {
+    it("renders a date pill when the parse produces a date", async () => {
+      const { findByTestId, queryByTestId } = renderComponent();
+      const input = await findByTestId("quick-add-input");
+      fireEvent.changeText(input, "Call tomorrow");
+
+      await waitFor(() => {
+        expect(queryByTestId("quick-add-date-pill")).toBeTruthy();
+      });
+
+      const datePill = queryByTestId("quick-add-date-pill")!;
+      expect(() => fireEvent.press(datePill)).not.toThrow();
+    });
+
+    it("renders a time pill when the parse produces a time", async () => {
+      const { findByTestId, queryByTestId } = renderComponent();
+      const input = await findByTestId("quick-add-input");
+      fireEvent.changeText(input, "Call at 3pm");
+
+      await waitFor(() => {
+        expect(queryByTestId("quick-add-time-pill")).toBeTruthy();
+      });
+
+      const timePill = queryByTestId("quick-add-time-pill")!;
+      expect(() => fireEvent.press(timePill)).not.toThrow();
+    });
+
+    it("renders a repeat pill when the parse produces a recurrence", async () => {
+      const { findByTestId, queryByTestId } = renderComponent();
+      const input = await findByTestId("quick-add-input");
+      fireEvent.changeText(input, "Call every day");
+
+      await waitFor(() => {
+        expect(queryByTestId("quick-add-repeat-pill")).toBeTruthy();
+      });
+
+      const repeatPill = queryByTestId("quick-add-repeat-pill")!;
+      expect(() => fireEvent.press(repeatPill)).not.toThrow();
+    });
+
+    it("hides the date pill when no date is parsed", async () => {
+      const { findByTestId, queryByTestId } = renderComponent();
+      fireEvent.changeText(await findByTestId("quick-add-input"), "Call mom");
+
+      expect(queryByTestId("quick-add-date-pill")).toBeNull();
+    });
+
+    it("shows the time pill alongside the date pill, since the parser always fills a time", async () => {
+      const { findByTestId, queryByTestId } = renderComponent();
+      fireEvent.changeText(await findByTestId("quick-add-input"), "Tomorrow");
+
+      await waitFor(() => {
+        expect(queryByTestId("quick-add-date-pill")).toBeTruthy();
+        expect(queryByTestId("quick-add-time-pill")).toBeTruthy();
+      });
+    });
+
+    it("hides the repeat pill when no recurrence is parsed", async () => {
+      const { findByTestId, queryByTestId } = renderComponent();
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Buy groceries"
+      );
+
+      expect(queryByTestId("quick-add-repeat-pill")).toBeNull();
+    });
+
+    it("opens the date picker when the date pill is tapped", async () => {
+      const { findByTestId } = renderComponent();
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call tomorrow"
+      );
+
+      await waitFor(async () => {
+        const datePill = await findByTestId("quick-add-date-pill");
+        fireEvent.press(datePill);
+      });
+
+      // Verify the date picker sheet opens (check for its testID)
+      await waitFor(async () => {
+        const datePickerSheet = await findByTestId("date-time-picker-sheet");
+        expect(datePickerSheet).toBeTruthy();
+      });
+    });
+
+    it("opens the time picker when the time pill is tapped", async () => {
+      const { findByTestId } = renderComponent();
+      fireEvent.changeText(await findByTestId("quick-add-input"), "Call at 3pm");
+
+      await waitFor(async () => {
+        const timePill = await findByTestId("quick-add-time-pill");
+        fireEvent.press(timePill);
+      });
+
+      // Verify the time picker sheet opens
+      await waitFor(async () => {
+        const timePickerSheet = await findByTestId("date-time-picker-sheet");
+        expect(timePickerSheet).toBeTruthy();
+      });
+    });
+
+    it("opens the recurrence picker when the repeat pill is tapped", async () => {
+      const { findByTestId } = renderComponent();
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call daily"
+      );
+
+      const repeatPill = await findByTestId("quick-add-repeat-pill");
+      fireEvent.press(repeatPill);
+
+      // Verify the repeat sheet opens
+      const repeatSheet = await findByTestId("repeat-sheet");
+      expect(repeatSheet).toBeTruthy();
+    });
+
+    it("pins the date when the date picker confirms", async () => {
+      const { findByTestId } = renderComponent();
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call tomorrow"
+      );
+
+      await waitFor(async () => {
+        const datePill = await findByTestId("quick-add-date-pill");
+        fireEvent.press(datePill);
+      });
+
+      const confirmButton = await findByTestId("date-time-picker-confirm");
+      fireEvent.press(confirmButton);
+
+      // The date should stay pinned even if the parse doesn't match
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call at 3pm"
+      );
+
+      await waitFor(async () => {
+        const savedDatePill = await findByTestId("quick-add-date-pill");
+        expect(savedDatePill).toBeTruthy();
+      });
+    });
+
+    it("pins the time when the time picker confirms", async () => {
+      const { findByTestId } = renderComponent();
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call at 3pm"
+      );
+
+      await waitFor(async () => {
+        const timePill = await findByTestId("quick-add-time-pill");
+        fireEvent.press(timePill);
+      });
+
+      const confirmButton = await findByTestId("date-time-picker-confirm");
+      fireEvent.press(confirmButton);
+
+      // The time should stay pinned across text changes
+      fireEvent.changeText(await findByTestId("quick-add-input"), "Buy milk");
+
+      await waitFor(async () => {
+        const savedTimePill = await findByTestId("quick-add-time-pill");
+        expect(savedTimePill).toBeTruthy();
+      });
+    });
+
+    it("pins the recurrence when the repeat picker confirms", async () => {
+      const { findByTestId } = renderComponent();
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call every day"
+      );
+
+      await waitFor(async () => {
+        const repeatPill = await findByTestId("quick-add-repeat-pill");
+        fireEvent.press(repeatPill);
+      });
+
+      fireEvent.press(await findByTestId("repeat-sheet-confirm"));
+
+      // The recurrence should stay pinned
+      fireEvent.changeText(await findByTestId("quick-add-input"), "Speak");
+
+      await waitFor(async () => {
+        const savedRepeatPill = await findByTestId("quick-add-repeat-pill");
+        expect(savedRepeatPill).toBeTruthy();
+      });
+    });
+
+    it("cancels the date picker without pinning when dismiss is tapped", async () => {
+      const { findByTestId, queryByTestId } = renderComponent();
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call tomorrow"
+      );
+
+      await waitFor(async () => {
+        const datePill = await findByTestId("quick-add-date-pill");
+        fireEvent.press(datePill);
+      });
+
+      const cancelButton = await findByTestId("date-time-picker-cancel");
+      fireEvent.press(cancelButton);
+
+      // Date should revert to parsed value, then vanish on next keystroke
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Take tablet"
+      );
+
+      await waitFor(() => {
+        expect(queryByTestId("quick-add-date-pill")).toBeNull();
+      });
+    });
+
+    it("cancels the time picker without pinning when dismiss is tapped", async () => {
+      const { findByTestId, queryByTestId } = renderComponent();
+      fireEvent.changeText(await findByTestId("quick-add-input"), "Call at 3pm");
+
+      await waitFor(async () => {
+        const timePill = await findByTestId("quick-add-time-pill");
+        fireEvent.press(timePill);
+      });
+
+      const cancelButton = await findByTestId("date-time-picker-cancel");
+      fireEvent.press(cancelButton);
+
+      // Time should revert to parsed value, then vanish on next keystroke
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Take tablet"
+      );
+
+      await waitFor(() => {
+        expect(queryByTestId("quick-add-time-pill")).toBeNull();
+      });
+    });
+
+    it("cancels the repeat picker without pinning when dismissed", async () => {
+      const { findByTestId, queryByTestId } = renderComponent();
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call every day"
+      );
+
+      const repeatPill = await findByTestId("quick-add-repeat-pill");
+      fireEvent.press(repeatPill);
+
+      // Dismiss the sheet (swipe or close)
+      const cancelButton = await findByTestId("repeat-sheet-cancel");
+      fireEvent.press(cancelButton);
+
+      // Recurrence should revert, then vanish on keystroke
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Buy milk"
+      );
+
+      await waitFor(() => {
+        expect(queryByTestId("quick-add-repeat-pill")).toBeNull();
+      });
+    });
+
+    it("saves with the pinned date when both pinned and parsed exist", async () => {
+      const { findByTestId } = renderComponent();
+
+      // Parse a date
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call tomorrow at 3pm"
+      );
+
+      // Pin a date via the picker
+      await waitFor(async () => {
+        const datePill = await findByTestId("quick-add-date-pill");
+        fireEvent.press(datePill);
+      });
+
+      const confirmButton = await findByTestId("date-time-picker-confirm");
+      fireEvent.press(confirmButton);
+
+      // Save
+      fireEvent.press(await findByTestId("quick-add-save"));
+
+      await waitFor(async () => {
+        const stored = JSON.parse(
+          (await AsyncStorage.getItem(STORAGE_KEY)) as string
+        );
+        expect(stored).toHaveLength(1);
+      });
+      const stored = JSON.parse(
+        (await AsyncStorage.getItem(STORAGE_KEY)) as string
+      );
+      // Should use the pinned value, not the parse
+      expect(stored[0].datetime).toBeTruthy();
+    });
+
+    it("saves with the pinned time when both pinned and parsed exist", async () => {
+      const { findByTestId } = renderComponent();
+
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call tomorrow at 3pm"
+      );
+
+      await waitFor(async () => {
+        const timePill = await findByTestId("quick-add-time-pill");
+        fireEvent.press(timePill);
+      });
+
+      // Actually change the time via the picker (not just reconfirm the
+      // parsed 3pm) so a save that silently kept the old value is caught.
+      const nativePicker = await findByTestId("mock-date-time-picker");
+      const pickedTime = new Date();
+      pickedTime.setHours(21, 15, 0, 0);
+      await act(async () => {
+        fireEvent(nativePicker, "press", pickedTime);
+      });
+      fireEvent.press(await findByTestId("date-time-picker-confirm"));
+
+      fireEvent.press(await findByTestId("quick-add-save"));
+
+      await waitFor(async () => {
+        const stored = JSON.parse(
+          (await AsyncStorage.getItem(STORAGE_KEY)) as string
+        );
+        expect(stored).toHaveLength(1);
+      });
+      const stored = JSON.parse(
+        (await AsyncStorage.getItem(STORAGE_KEY)) as string
+      );
+      // Regression: a prior bug composed the pinned date and pinned time
+      // into two independent full-Date overrides instead of one merged
+      // value, so a time-only pin never reached the save payload at all
+      // (effectiveDate, which save reads, ignored pinnedTime entirely) -
+      // the saved reminder kept the originally-parsed 3pm no matter what
+      // was picked here.
+      const savedTime = new Date(stored[0].datetime);
+      expect(savedTime.getHours()).toBe(21);
+      expect(savedTime.getMinutes()).toBe(15);
+    });
+
+    it("keeps the date unchanged when only the time chip is pinned", async () => {
+      const { findByTestId } = renderComponent();
+
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call tomorrow at 3pm"
+      );
+
+      const dateLabelBefore = (
+        await findByTestId("quick-add-date-pill")
+      ).props.accessibilityLabel as string;
+
+      await waitFor(async () => {
+        const timePill = await findByTestId("quick-add-time-pill");
+        fireEvent.press(timePill);
+      });
+      fireEvent.press(await findByTestId("date-time-picker-confirm"));
+
+      const dateLabelAfter = (
+        await findByTestId("quick-add-date-pill")
+      ).props.accessibilityLabel as string;
+
+      // Pinning only the time must not disturb the date half of the
+      // composed value - the two pins are independent partial overrides.
+      expect(dateLabelAfter).toEqual(dateLabelBefore);
+    });
+
+    it("Android: tapping the date pill edits only the date, not the time, and saves it", async () => {
+      const originalPlatform = Platform.OS;
+      Platform.OS = "android";
+      try {
+        const { findByTestId } = renderComponent();
+
+        fireEvent.changeText(
+          await findByTestId("quick-add-input"),
+          "Call tomorrow at 3pm"
+        );
+
+        const timeLabelBefore = (
+          await findByTestId("quick-add-time-pill")
+        ).props.accessibilityLabel as string;
+
+        await waitFor(async () => {
+          const datePill = await findByTestId("quick-add-date-pill");
+          fireEvent.press(datePill);
+        });
+
+        // Android's real picker fires onChange directly - no separate
+        // Confirm button for a single-purpose pill edit. Simulate the
+        // native module handing back a picked date.
+        const nativePicker = await findByTestId("mock-date-time-picker");
+        const pickedDate = new Date();
+        pickedDate.setDate(pickedDate.getDate() + 5);
+        fireEvent(nativePicker, "press", pickedDate);
+
+        // A date-only pill edit must not chain into a second, unrequested
+        // time picker - the date-then-time chain is only for the original
+        // "no time found" flow (activePillEditor === null).
+        expect(
+          (await findByTestId("quick-add-time-pill")).props.accessibilityLabel
+        ).toEqual(timeLabelBefore);
+
+        fireEvent.press(await findByTestId("quick-add-save"));
+
+        await waitFor(async () => {
+          const stored = JSON.parse(
+            (await AsyncStorage.getItem(STORAGE_KEY)) as string
+          );
+          expect(stored).toHaveLength(1);
+        });
+        const stored = JSON.parse(
+          (await AsyncStorage.getItem(STORAGE_KEY)) as string
+        );
+        const saved = new Date(stored[0].datetime);
+        expect(saved.getDate()).toBe(pickedDate.getDate());
+        expect(saved.getHours()).toBe(15); // unchanged 3pm from the parse
+      } finally {
+        Platform.OS = originalPlatform;
+      }
+    });
+
+    it("Android: tapping a pill opens only the native picker, not the custom sheet underneath it", async () => {
+      // Regression: handleDatePillPress/handleTimePillPress used to set both
+      // showNoTimeSheet(true) and pickerMode, stacking the custom "Edit
+      // date"/"Edit time" sheet underneath Android's own native dialog. The
+      // native dialog is self-contained (its own OK/Cancel) - the sheet must
+      // not mount at all for a pill edit on Android.
+      const originalPlatform = Platform.OS;
+      Platform.OS = "android";
+      try {
+        const { findByTestId, queryByTestId } = renderComponent();
+
+        fireEvent.changeText(
+          await findByTestId("quick-add-input"),
+          "Call tomorrow at 3pm"
+        );
+
+        await waitFor(async () => {
+          const datePill = await findByTestId("quick-add-date-pill");
+          fireEvent.press(datePill);
+        });
+
+        await findByTestId("mock-date-time-picker");
+        expect(queryByTestId("date-time-picker-sheet")).toBeNull();
+      } finally {
+        Platform.OS = originalPlatform;
+      }
+    });
+
+    it("Android: tapping the time pill commits the picked time on first onChange, without a stale-state race", async () => {
+      const originalPlatform = Platform.OS;
+      Platform.OS = "android";
+      try {
+        const { findByTestId } = renderComponent();
+
+        fireEvent.changeText(
+          await findByTestId("quick-add-input"),
+          "Call tomorrow at 3pm"
+        );
+
+        await waitFor(async () => {
+          const timePill = await findByTestId("quick-add-time-pill");
+          fireEvent.press(timePill);
+        });
+
+        const nativePicker = await findByTestId("mock-date-time-picker");
+        const pickedTime = new Date();
+        pickedTime.setHours(9, 30, 0, 0);
+        fireEvent(nativePicker, "press", pickedTime);
+
+        fireEvent.press(await findByTestId("quick-add-save"));
+
+        await waitFor(async () => {
+          const stored = JSON.parse(
+            (await AsyncStorage.getItem(STORAGE_KEY)) as string
+          );
+          expect(stored).toHaveLength(1);
+        });
+        const stored = JSON.parse(
+          (await AsyncStorage.getItem(STORAGE_KEY)) as string
+        );
+        const saved = new Date(stored[0].datetime);
+        // Regression: handlePickerConfirm used to read `suggestedTime` from
+        // closure in the same tick as the setSuggestedTime(updated) call
+        // above it, seeing the state from *before* this picker's onChange -
+        // always one step stale. Reading here confirms the picked 9:30, not
+        // the 3pm the text originally parsed.
+        expect(saved.getHours()).toBe(9);
+        expect(saved.getMinutes()).toBe(30);
+      } finally {
+        Platform.OS = originalPlatform;
+      }
+    });
+
+    it("saves with the pinned recurrence when both pinned and parsed exist", async () => {
+      const { findByTestId } = renderComponent();
+
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call every day at 3pm"
+      );
+
+      const repeatPill = await findByTestId("quick-add-repeat-pill");
+      fireEvent.press(repeatPill);
+      fireEvent.press(await findByTestId("repeat-sheet-confirm"));
+
+      fireEvent.press(await findByTestId("quick-add-save"));
+
+      await waitFor(async () => {
+        const stored = JSON.parse(
+          (await AsyncStorage.getItem(STORAGE_KEY)) as string
+        );
+        expect(stored).toHaveLength(1);
+      });
+      const stored = JSON.parse(
+        (await AsyncStorage.getItem(STORAGE_KEY)) as string
+      );
+      expect(stored[0].recurrence).toBeTruthy();
+    });
+
+    it("clears all pinned values after save", async () => {
+      const { findByTestId, queryByTestId } = renderComponent();
+
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call tomorrow at 3pm daily"
+      );
+
+      // Pin each component
+      await waitFor(async () => {
+        const datePill = await findByTestId("quick-add-date-pill");
+        fireEvent.press(datePill);
+      });
+      fireEvent.press(await findByTestId("date-time-picker-confirm"));
+
+      fireEvent.changeText(await findByTestId("quick-add-input"), "Call");
+      await waitFor(async () => {
+        const timePill = await findByTestId("quick-add-time-pill");
+        fireEvent.press(timePill);
+      });
+      fireEvent.press(await findByTestId("date-time-picker-confirm"));
+
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call daily"
+      );
+      await waitFor(async () => {
+        const repeatPill = await findByTestId("quick-add-repeat-pill");
+        fireEvent.press(repeatPill);
+      });
+      fireEvent.press(await findByTestId("repeat-sheet-confirm"));
+
+      // Save
+      fireEvent.press(await findByTestId("quick-add-save"));
+
+      await waitFor(async () => {
+        const stored = JSON.parse(
+          (await AsyncStorage.getItem(STORAGE_KEY)) as string
+        );
+        expect(stored).toHaveLength(1);
+      });
+
+      // Pills should be gone after save
+      expect(queryByTestId("quick-add-date-pill")).toBeNull();
+      expect(queryByTestId("quick-add-time-pill")).toBeNull();
+      expect(queryByTestId("quick-add-repeat-pill")).toBeNull();
+    });
+
+    it("has adequate hit targets for pills (pressable)", async () => {
+      const { findByTestId } = renderComponent();
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call tomorrow at 3pm daily"
+      );
+
+      await waitFor(async () => {
+        const datePill = await findByTestId("quick-add-date-pill");
+        const timePill = await findByTestId("quick-add-time-pill");
+        const repeatPill = await findByTestId("quick-add-repeat-pill");
+
+        // Each pill must actually respond to a press (real hit-target check,
+        // not a brittle introspection of the underlying component's name).
+        expect(() => fireEvent.press(datePill)).not.toThrow();
+        expect(() => fireEvent.press(timePill)).not.toThrow();
+        expect(() => fireEvent.press(repeatPill)).not.toThrow();
+      });
+    });
+
+    it("announces pills as buttons to screen readers", async () => {
+      const { findByTestId } = renderComponent();
+      fireEvent.changeText(
+        await findByTestId("quick-add-input"),
+        "Call tomorrow at 3pm daily"
+      );
+
+      const datePill = await findByTestId("quick-add-date-pill");
+      const timePill = await findByTestId("quick-add-time-pill");
+      const repeatPill = await findByTestId("quick-add-repeat-pill");
+
+      expect(datePill.props.accessible).toBe(true);
+      expect(datePill.props.accessibilityRole).toBe("button");
+      expect(datePill.props.accessibilityLabel).toBeTruthy();
+
+      expect(timePill.props.accessible).toBe(true);
+      expect(timePill.props.accessibilityRole).toBe("button");
+      expect(timePill.props.accessibilityLabel).toBeTruthy();
+
+      expect(repeatPill.props.accessible).toBe(true);
+      expect(repeatPill.props.accessibilityRole).toBe("button");
+      expect(repeatPill.props.accessibilityLabel).toBeTruthy();
     });
   });
 });
