@@ -1,146 +1,38 @@
-import { useEffect, useState, type ComponentType } from "react";
+import { useState } from "react";
+import { ArrowRight, Bell, Check, Clock3, Globe2, HeartHandshake, LockKeyhole, Menu, Mic, Repeat2, Sparkles, UsersRound, X } from "lucide-react";
 
-import { modules as discoveredModules } from "./.generated/mockup-components";
+const shot = (name: string) => `/screenshots/${name}`;
 
-type ModuleMap = Record<string, () => Promise<Record<string, unknown>>>;
-
-function _resolveComponent(
-  mod: Record<string, unknown>,
-  name: string,
-): ComponentType | undefined {
-  const fns = Object.values(mod).filter(
-    (v) => typeof v === "function",
-  ) as ComponentType[];
-  return (
-    (mod.default as ComponentType) ||
-    (mod.Preview as ComponentType) ||
-    (mod[name] as ComponentType) ||
-    fns[fns.length - 1]
-  );
-}
-
-function PreviewRenderer({
-  componentPath,
-  modules,
-}: {
-  componentPath: string;
-  modules: ModuleMap;
-}) {
-  const [Component, setComponent] = useState<ComponentType | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    setComponent(null);
-    setError(null);
-
-    async function loadComponent(): Promise<void> {
-      const key = `./components/mockups/${componentPath}.tsx`;
-      const loader = modules[key];
-      if (!loader) {
-        setError(`No component found at ${componentPath}.tsx`);
-        return;
-      }
-
-      try {
-        const mod = await loader();
-        if (cancelled) {
-          return;
-        }
-        const name = componentPath.split("/").pop()!;
-        const comp = _resolveComponent(mod, name);
-        if (!comp) {
-          setError(
-            `No exported React component found in ${componentPath}.tsx\n\nMake sure the file has at least one exported function component.`,
-          );
-          return;
-        }
-        setComponent(() => comp);
-      } catch (e) {
-        if (cancelled) {
-          return;
-        }
-
-        const message = e instanceof Error ? e.message : String(e);
-        setError(`Failed to load preview.\n${message}`);
-      }
-    }
-
-    void loadComponent();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [componentPath, modules]);
-
-  if (error) {
-    return (
-      <pre style={{ color: "red", padding: "2rem", fontFamily: "system-ui" }}>
-        {error}
-      </pre>
-    );
-  }
-
-  if (!Component) return null;
-
-  return <Component />;
-}
-
-function getBasePath(): string {
-  return import.meta.env.BASE_URL.replace(/\/$/, "");
-}
-
-function getPreviewExamplePath(): string {
-  const basePath = getBasePath();
-  return `${basePath}/preview/ComponentName`;
-}
-
-function Gallery() {
-  return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
-      <div className="text-center max-w-md">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-3">
-          Component Preview Server
-        </h1>
-        <p className="text-gray-500 mb-4">
-          This server renders individual components for the workspace canvas.
-        </p>
-        <p className="text-sm text-gray-400">
-          Access component previews at{" "}
-          <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
-            {getPreviewExamplePath()}
-          </code>
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function getPreviewPath(): string | null {
-  const basePath = getBasePath();
-  const { pathname } = window.location;
-  const local =
-    basePath && pathname.startsWith(basePath)
-      ? pathname.slice(basePath.length) || "/"
-      : pathname;
-  const match = local.match(/^\/preview\/(.+)$/);
-  return match ? match[1] : null;
+function Phone({ src, alt, className = "" }: { src: string; alt: string; className?: string }) {
+  return <div className={`phone ${className}`}><div className="phone-speaker" /><img src={src} alt={alt} /></div>;
 }
 
 function App() {
-  const previewPath = getPreviewPath();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const submit = (e: React.FormEvent) => { e.preventDefault(); if (email.trim()) setSubmitted(true); };
+  const buttonLabel = submitted ? <><Check size={16} /> You’re on the list</> : <>Join the waitlist <ArrowRight size={16} /></>;
+  return <main>
+    <nav className="nav shell"><a className="brand" href="#top"><span className="brand-mark"><Bell size={17} strokeWidth={2.6} /></span><span>Remind<span>Me</span></span></a><div className={`nav-links ${menuOpen ? "is-open" : ""}`}><a href="#features" onClick={() => setMenuOpen(false)}>Features</a><a href="#how-it-works" onClick={() => setMenuOpen(false)}>How it works</a><a href="#privacy" onClick={() => setMenuOpen(false)}>Privacy</a><a className="nav-cta" href="#waitlist" onClick={() => setMenuOpen(false)}>Join the waitlist <ArrowRight size={15} /></a></div><button className="menu-button" aria-label="Toggle menu" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button></nav>
 
-  if (previewPath) {
-    return (
-      <PreviewRenderer
-        componentPath={previewPath}
-        modules={discoveredModules}
-      />
-    );
-  }
+    <section className="hero shell" id="top"><div className="hero-copy"><div className="eyebrow"><span className="eyebrow-dot" /> Android early access · A reminder app that listens</div><h1>Say it once.<br />Keep it <em>close.</em></h1><p className="hero-lede">A smart, voice-first Android reminder app that sets the time, repeats what matters, and helps you remember for the people you love.</p><form className="waitlist-form hero-form" onSubmit={submit}><label className="sr-only" htmlFor="hero-email">Your email address</label><input id="hero-email" type="email" placeholder="Your email address" value={email} onChange={(e) => setEmail(e.target.value)} required /><button type="submit">{buttonLabel}</button></form>{submitted ? <p className="success-note"><Check size={13} /> You’re on the Android early-access list. We’ll email when invitations open.</p> : <p className="form-note"><LockKeyhole size={13} /> Android only, for now. No spam—just an invitation.</p>}</div><div className="hero-visual"><div className="sun-orb" /><div className="hero-note note-one"><span className="note-icon coral"><Mic size={14} /></span><span><b>Speak it</b><small>“Remind me to call Amma at 7”</small></span></div><div className="hero-note note-two"><span className="note-icon mint"><Sparkles size={14} /></span><span><b>It gets the details</b><small>Tomorrow · 7:00 PM</small></span></div><div className="hero-note note-three"><span className="note-icon peach"><UsersRound size={14} /></span><span><b>And the right people</b><small>Remind Amma · accepted</small></span></div><Phone src={shot("malayalam-voice.png")} alt="RemindMe voice input screen in Malayalam" className="hero-phone" /><div className="scribble scribble-a">made for real life</div><div className="scribble scribble-b">↗</div></div></section>
 
-  return <Gallery />;
+    <section className="trust-strip"><div className="shell trust-inner"><span>Malayalam available now</span><span>Send reminders to your people</span><span>Recurring reminders included</span><span>Private by default</span></div></section>
+
+    <section className="section shell" id="features"><div className="section-intro"><div className="eyebrow">More than a reminder</div><h2>The details disappear.<br /><span>The thought stays.</span></h2><p>RemindMe understands the small, human ways you already try to remember things—and makes them easier to keep.</p></div><div className="feature-grid"><article className="feature-card feature-main"><div className="feature-top"><span className="feature-number">SMART SCHEDULING</span><span className="feature-icon"><Sparkles size={19} /></span></div><h3>Say it once.<br />We’ll set the time.</h3><p>“Remind me to book the dentist tomorrow at 3.” RemindMe hears the date, time, and intention—so you don’t have to fill out a form.</p><div className="mini-reminder"><span className="mini-check"><Check size={12} /></span><span><b>Book dentist appointment</b><small>Tomorrow · 3:00 PM</small></span><Clock3 size={16} /></div></article><article className="feature-card feature-family"><div className="feature-top"><span className="feature-number">SHARED REMINDERS</span><span className="feature-icon"><HeartHandshake size={19} /></span></div><h3>Remember together.</h3><p>Send a reminder straight to someone who uses RemindMe. Helpful for medicine, appointments, and all the “don’t let me forget” moments.</p><div className="family-stack"><div className="avatar avatar-a">A</div><div className="avatar avatar-b">E</div><div className="avatar avatar-c">J</div><span>your people, in sync</span></div></article><article className="feature-card feature-language"><div className="feature-top"><span className="feature-number">LOCALES</span><span className="feature-icon"><Globe2 size={19} /></span></div><h3>Malayalam, available <br />right now.</h3><p>Speak or type in English and മലയാളം today. More languages are coming, so reminders can sound like you.</p><div className="language-pills"><span>English</span><span className="active">മലയാളം</span><span>More soon</span></div></article><article className="feature-card feature-insight"><div className="feature-top"><span className="feature-number">PERSONAL INSIGHTS</span><span className="feature-icon"><Repeat2 size={19} /></span></div><h3>Suggestions with <br />a reason.</h3><p>When your own completed reminders show a real pattern, RemindMe can recommend a better time.</p><div className="insight-readout"><span className="insight-dot" /><div><b>9:00–10:00 AM looks promising</b><small>Based on 18 completed reminders</small></div></div></article></div></section>
+
+    <section className="story-section" id="how-it-works"><div className="shell story-grid"><div className="story-copy"><div className="eyebrow">A little less to hold</div><h2>For the things you do <em>for each other.</em></h2><p>Set a medicine reminder for Dad. Send a nudge to your partner. Help your future self get to the dentist on time.</p><div className="story-list"><div><span><Check size={14} /></span><p><b>Share reminders directly</b><small>They arrive on the other person’s phone.</small></p></div><div><span><Check size={14} /></span><p><b>Accept or decline</b><small>Everyone stays in control of their own day.</small></p></div><div><span><Check size={14} /></span><p><b>Repeat what matters</b><small>Daily, weekly, monthly—or a rhythm of your own.</small></p></div></div><a className="text-link" href="#waitlist">See how RemindMe works <ArrowRight size={16} /></a></div><div className="story-visual"><div className="story-label label-top">for Amma <HeartHandshake size={13} /></div><Phone src={shot("recurring-home.png")} alt="RemindMe recurring reminder home screen" className="story-phone back-phone" /><Phone src={shot("recurring-options.png")} alt="RemindMe recurring reminder options" className="story-phone front-phone" /><div className="story-label label-bottom"><Repeat2 size={13} /> every day, at 9</div></div></div></section>
+
+    <section className="voice-section shell"><div className="voice-visual"><Phone src={shot("english-voice.png")} alt="English voice reminder on RemindMe" className="voice-phone phone-left" /><Phone src={shot("malayalam-reminder.png")} alt="Malayalam reminder on RemindMe" className="voice-phone phone-right" /><div className="voice-badge"><Mic size={15} /> English + മലയാളം now</div></div><div className="voice-copy"><div className="eyebrow">Your voice is enough</div><h2>Typing is optional.</h2><p>Speak in English or മലയാളം today. Pause when you are done, and RemindMe turns your words into a reminder you can trust.</p><div className="quote"><span>“</span><p>Remind me to call Amma at 7 tomorrow.</p><small>— exactly how you’d say it</small></div></div></section>
+
+    <section className="insight-section"><div className="shell insight-grid"><div className="insight-copy"><div className="eyebrow">Personal insights, carefully earned</div><h2>Advice you can <em>see.</em></h2><p>RemindMe does not invent a productivity score. It looks only at the reminders you have completed, waits for enough history, and explains the pattern behind every suggestion.</p><div className="insight-rules"><span><Check size={14} /> Uses your own completed reminders</span><span><Check size={14} /> Stays quiet when the pattern is weak</span><span><Check size={14} /> Explains why it made a suggestion</span></div></div><div className="insight-card"><div className="insight-card-head"><span>How you’re doing</span><small>Personal to you</small></div><div className="insight-window"><div><small>Best completion window</small><b>9:00–10:00 AM</b><p>You completed 8 of 9 morning reminders in this window.</p></div><span className="window-check"><Check size={15} /></span></div><div className="insight-days"><span>Mon<i className="soft" /></span><span>Tue<i className="strong" /></span><span>Wed<i className="strong" /></span><span>Thu<i className="soft" /></span><span>Fri<i className="strong" /></span><span>Sat<i className="mid" /></span><span>Sun<i className="mid" /></span></div><p className="insight-card-foot">A suggestion appears only after enough completed reminders show a meaningful pattern.</p></div></div></section>
+
+    <section className="privacy-section" id="privacy"><div className="shell privacy-inner"><div className="privacy-mark"><LockKeyhole size={23} /></div><div><div className="eyebrow">Quietly private</div><h2>Your reminders belong to you.</h2><p>The core of RemindMe works without an account. Your reminders stay on your device, with backup and restore when you want it.</p></div><div className="privacy-points"><span><Check size={13} /> No account required</span><span><Check size={13} /> No noisy social feed</span><span><Check size={13} /> Dark mode included</span></div></div></section>
+
+    <section className="waitlist-section shell" id="waitlist"><div className="waitlist-card"><div className="waitlist-copy"><div className="eyebrow">Android early access</div><h2>Make room for what matters.</h2><p>Join the early list for RemindMe on Android. We’ll email when invitations open.</p></div><div><form className="waitlist-form bottom-form" onSubmit={submit}><label className="sr-only" htmlFor="bottom-email">Your email address</label><input id="bottom-email" type="email" placeholder="Your email address" value={email} onChange={(e) => setEmail(e.target.value)} required /><button type="submit">{buttonLabel}</button></form>{submitted && <p className="success-note bottom-success"><Check size={13} /> You’re on the Android early-access list.</p>}</div></div></section>
+    <footer className="footer shell"><a className="brand" href="#top"><span className="brand-mark"><Bell size={15} strokeWidth={2.6} /></span><span>Remind<span>Me</span></span></a><span>Made with care for everyday life.</span><span>© 2026 CuriousMind Labs</span></footer>
+  </main>;
 }
 
 export default App;
