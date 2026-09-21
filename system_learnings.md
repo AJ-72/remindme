@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-21 — waitlist signup: `join-waitlist` Edge Function deliberately skips JWT verification, unlike every other function in this repo
+
+**WHAT:** Added `waitlist_signups` (RLS-locked, no policy grants access to `authenticated`) and a `join-waitlist` Edge Function as its only write path. `supabase/config.toml` sets `verify_jwt = false` for this one function — every other function in `supabase/functions/` requires a caller JWT (`_shared/supabaseClient.ts`'s `getAuthedClient`). This is intentional, not an oversight: a landing-page visitor filling in an email has no app account and no JWT to present, so requiring one would make the feature impossible to call from the public website at all.
+
+**WHY:** Skipping JWT verification means the function itself is the entire trust boundary, not RLS — so it validates and normalizes the email server-side, checks an invisible honeypot field, and writes via the service-role key (`SUPABASE_SERVICE_ROLE_KEY`) rather than a per-caller client, the one other place in this codebase that pattern is deliberately used (matching `expire-invitations-cron`'s documented rationale in CLAUDE.md). Anyone auditing "why does this function skip auth" should not assume it's a gap — check the in-body validation before flagging it.
+
+**WHERE:** `supabase/functions/join-waitlist/index.ts`, `supabase/config.toml` (`[functions.join-waitlist]` block), `lib/db/src/schema/waitlistSignups.ts`. **Not yet deployed** — schema/function code is committed (`4fefbd5`) but `drizzle-kit push` + `push:sql` against `remindme-tier2` and the Edge Function deploy itself still need to run before this is live.
+
+---
+
 ## 2026-09-21 — B22 skip-occurrence: notification-received was advancing a recurring series before the user had tapped anything
 
 **WHAT:** `NotificationResponseHandler`'s notification-received listener called `advanceRecurringById()` immediately when a recurring reminder's notification landed, as a "best-effort" latency optimization on top of the real correctness path (`rescheduleAllFutureReminders`'s mount-time catch-up sweep, which already covers the killed-app case). Building B22 (skip-occurrence + recurrence preview cards) surfaced why that early call was actively wrong, not just redundant: it advanced the series to the *next* occurrence before the user had opened the reminder at all, so `reminder-detail.tsx` and the notification tray's own Snooze action (which reads `reminder.datetime` as its snooze base) ended up acting on the occurrence *after* the one that had just fired. Fixed by removing the early `advanceRecurringById` call entirely — the mount-time sweep, which runs on every app open/foreground, is the one path this feature's correctness has ever actually depended on.
