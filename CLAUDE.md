@@ -14,6 +14,16 @@ Skip this for trivial one-shot asks (a single question, a one-line lookup).
 
 **Why:** token spend should be a visible, agreed-on tradeoff, not an invisible default — even though the estimate is necessarily approximate (no live token metering is available mid-task) and the model itself can't be switched by the agent (`/model` is a user action; report actual spend via `/cost`).
 
+## Test suite must be green, regardless of cause
+
+Before reporting any task done, the full test suite (`pnpm --filter @workspace/mobile run test`, plus `pnpm run typecheck`) must pass. A failing test blocks completion even if it fails for a reason unrelated to the current change — a stale fixture, a hardcoded date/timezone assumption, a pre-existing flake. Fix it in the same session rather than deferring or excluding it, and say so explicitly when the fix is unrelated to the task's own diff.
+
+Two failure shapes have recurred here and are cheap to recognize:
+- **Hardcoded absolute dates as test fixtures.** A fixture date can silently become "today" or "the past" as real time passes, changing behavior that depends on `now` (e.g. `RemindersProvider`'s mount-time `rescheduleAllFutureReminders()` sweep advances any recurring reminder whose `datetime` has passed). Prefer dates computed relative to `new Date()` at test-run time, as `reminder-detail.test.tsx`'s anchor-Monday test already does.
+- **Hardcoded UTC/local-time assumptions.** A test asserting an exact ISO string for a value computed via local-time APIs (e.g. `quietHoursEndAfter`, which uses `Date#setHours`) only passes on a UTC machine. Compute the expected value with the same helper the production code uses, not a literal string, so the assertion holds under any `TZ`.
+
+**Why:** a fix landed for one reported failure while a second, unrelated pre-existing failure was left in place; the user asked for both fixed and for this rule captured so future sessions don't stop at "the test I was asked about now passes."
+
 ## What this is
 
 **Reminders** — a mobile app (React Native/Expo) for scheduling reminders with local notifications. Reminders are stored locally on-device via AsyncStorage. A Supabase backend for the "remind someone else" Tier 2 work (M4) is now deployed and live — see "The M4 Tier 2 backend is deployed" below for what that covers and what's still local-only. Supports voice dictation (English/Malayalam, user-selectable in Settings) and Malayalam-script text input/rendering throughout.
@@ -260,9 +270,39 @@ Expo Router with file-based routing under `artifacts/mobile/app/`. Screens impor
 - expo.dev's GitHub App integration (triggering builds from the dashboard instead of the `eas-cli` CLI) fails with `ERR_PNPM_NO_LOCKFILE` when "Base directory" is set to `artifacts/mobile` — it only exposes that subdirectory to the build, but `pnpm-lock.yaml`/`pnpm-workspace.yaml` live at the repo root (pnpm workspace). Build from the CLI (`eas-cli build`, see above) instead; this is a known rough edge (matches expo/eas-cli#3247), not something fixable via eas.json/app.json config.
 - Android speech recognition needs a per-locale offline model; switching the dictation-language setting to a locale used for the first time triggers a download prompt (`ensureOfflineModelReady` in `SpeechService.ts`) — expect a "Preparing voice recognition" state on first use.
 
+## Work tracking
+
+Four files, one genre each. Split out of a single 452-line `backlog.md` on
+2026-09-20 — **do not fold them back together**, and do not add a fifth.
+
+| File | Holds | Does NOT hold |
+| --- | --- | --- |
+| `backlog.md` | Open work only, with stable `B#`/`M#` IDs. | Anything shipped. Design essays. |
+| `docs/features.md` | What the app can do today, with a proof level per capability. | Future work. |
+| `docs/shipped.md` | Everything that landed, newest first, with a plain-language "user-facing" line per entry. **This is the release-notes source.** | Root causes (those go to `system_learnings.md`). |
+| `docs/roadmap.md` | Design reasoning for the headline `M#` features. | Status — backlog/features win if they disagree. |
+
+**The rule that keeps `backlog.md` short: when an item ships, delete its row
+from `backlog.md` and add an entry to `docs/shipped.md` in the same commit.**
+Do not leave `DONE` rows behind for traceability — that is what git is for
+(`git log --grep B17`). If the shipped work changed what the app can do, update
+`docs/features.md` too; if it taught you something non-obvious, that goes to
+`system_learnings.md`.
+
+Entries in `docs/shipped.md` marked `jest only` are code-complete but unproven
+on hardware — never advertise these until a device run logs a pass in
+`device-tests/`. Mark an entry **Announce-ready** only once that is true.
+
+A standalone SQLite/Express tracker (`tracker/`, port 4100) was built
+2026-09-06 and **deliberately killed 2026-09-20** — Markdown loads into an
+agent's context for free and shows up in code review; a localhost DB does
+neither. The branch `feature/work-tracker` still holds it. Do not revive it
+without a decision.
+
 ## Pointers
 
 - `README.md` is the public-facing entry point, aimed at someone evaluating the repo (including how it was built with AI). This file (`CLAUDE.md`) remains the canonical run/operate reference — keep run instructions here, not there. A `replit.md` template was removed on 2026-08-09; ignore any lingering references to it.
+- `backlog.md`, `docs/features.md`, `docs/shipped.md`, `docs/roadmap.md` — see **Work tracking** above for which belongs where.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` hold design specs and implementation plans for past features (dated filenames) — useful history/precedent when working in an area they cover.
 - `handoffs/` holds dated handoff docs for some past features.
 - `system_learnings.md` — a running ledger of non-obvious fixes and config changes made while working in this repo, with root causes. Check it before debugging something that smells like it may have been hit before.
