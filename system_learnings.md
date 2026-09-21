@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-21 — B22 skip-occurrence: notification-received was advancing a recurring series before the user had tapped anything
+
+**WHAT:** `NotificationResponseHandler`'s notification-received listener called `advanceRecurringById()` immediately when a recurring reminder's notification landed, as a "best-effort" latency optimization on top of the real correctness path (`rescheduleAllFutureReminders`'s mount-time catch-up sweep, which already covers the killed-app case). Building B22 (skip-occurrence + recurrence preview cards) surfaced why that early call was actively wrong, not just redundant: it advanced the series to the *next* occurrence before the user had opened the reminder at all, so `reminder-detail.tsx` and the notification tray's own Snooze action (which reads `reminder.datetime` as its snooze base) ended up acting on the occurrence *after* the one that had just fired. Fixed by removing the early `advanceRecurringById` call entirely — the mount-time sweep, which runs on every app open/foreground, is the one path this feature's correctness has ever actually depended on.
+
+**WHY:** this is the class of bug that only shows up once you build something that reads `reminder.datetime` shortly after a notification fires — the original "best-effort, latency only" framing was itself the mistake, since a working correctness path plus a redundant-when-successful shortcut is not actually safe if the shortcut can be observably wrong before the correctness path runs. A regression test now pins "does not advance a recurring series on notification-received" so this can't quietly come back.
+
+**WHERE:** `artifacts/mobile/components/NotificationResponseHandler.tsx` (removed the `advanceRecurringById` import and call in the notification-received listener). Test: `artifacts/mobile/components/NotificationResponseHandler.test.tsx` ("does not advance a recurring series on notification-received", replacing the old test that asserted the opposite).
+
+---
+
 ## 2026-09-21 — B23 pill edits: Android stacked its own edit sheet under the native picker, `pinnedDate`/`pinnedTime` never composed, and `jest.replaceProperty(Platform, "OS", ...)` leaked across the whole test file
 
 **WHAT:** Three compounding bugs found building/fixing "tap a date/time/repeat chip to edit it in place" in `QuickAddInput.tsx`.
