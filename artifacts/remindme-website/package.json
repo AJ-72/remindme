@@ -1,11 +1,12 @@
 {
-  "name": "@workspace/mockup-sandbox",
+  "name": "@workspace/remindme-website",
   "version": "2.0.0",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
+    "build:pages": "node -e \"process.env.PORT='4173';process.env.BASE_PATH='/';require('child_process').execSync('vite build',{stdio:'inherit'})\"",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

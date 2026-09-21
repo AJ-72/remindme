@@ -29,9 +29,9 @@ h1 em,h2 em { font-family:Fraunces, Georgia, serif; font-weight:500; color:var(-
 .waitlist-form { display:flex; gap:8px; max-width:470px; }
 .waitlist-form input { min-width:0; flex:1; border:1px solid var(--line); background:#fff; border-radius:11px; padding:14px 16px; outline:none; color:var(--ink); box-shadow:0 4px 15px #313c5106; }
 .waitlist-form input:focus { border-color:var(--coral); box-shadow:0 0 0 3px #f15a4320; }
-.waitlist-form button { border:0; background:var(--coral); color:white; border-radius:11px; padding:0 18px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; }
+.waitlist-form button { border:0; background:var(--coral); color:white; border-radius:11px; padding:0 18px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; }.waitlist-form button:disabled { cursor:default; opacity:.72; transform:none; }
 .waitlist-form button:hover { background:var(--coral-dark); transform:translateY(-1px); }
-.form-note,.success-note { font-size:11px; display:flex; align-items:center; gap:6px; margin-top:12px; }.form-note { color:#89909b; }.success-note { color:#43816a; font-weight:600; }.bottom-success { justify-content:center; }
+.form-note,.success-note,.error-note { font-size:11px; display:flex; align-items:center; gap:6px; margin-top:12px; }.form-note { color:#89909b; }.success-note { color:#43816a; font-weight:600; }.error-note { color:#b84535; }.bottom-success { justify-content:center; }.honeypot { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; padding:0; margin:-1px; }
 .hero-visual { min-height:540px; position:relative; display:flex; align-items:center; justify-content:center; }
 .sun-orb { position:absolute; width:420px; height:420px; border-radius:50%; background:radial-gradient(circle at 45% 38%, #ffebe4 0, #fae0dc 44%, #efcccc 100%); opacity:.72; }
 .phone { position:relative; background:#101317; border:6px solid #171a20; border-radius:27px; box-shadow:0 20px 45px #27344321; overflow:hidden; }
