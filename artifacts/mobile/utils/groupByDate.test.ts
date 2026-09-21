@@ -32,12 +32,20 @@ describe("groupByDate", () => {
     expect(groups[0]).toMatchObject({ key: "tomorrow", label: "Tomorrow" });
   });
 
-  it("labels days 2-6 out with their weekday name, one group per item", () => {
+  it("labels days 2-6 out with their weekday name, one group per day", () => {
     const items = [at(2), at(3)];
     const groups = groupByDate(items, getDate, NOW);
     expect(groups.every((g) => g.key === "this-week")).toBe(true);
     expect(groups.map((g) => g.label)).toEqual(["Friday", "Saturday"]);
     expect(groups.every((g) => g.items.length === 1)).toBe(true);
+  });
+
+  it("merges multiple same-day items within the week into one weekday group", () => {
+    const items = [at(2, 8), at(2, 20)];
+    const groups = groupByDate(items, getDate, NOW);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ key: "this-week", label: "Friday" });
+    expect(groups[0].items).toHaveLength(2);
   });
 
   it("puts a 7-or-more-days-out item in Later", () => {

@@ -18,7 +18,7 @@ import { useReminders } from "@/contexts/RemindersContext";
 import { applySuggestedHour, formatHourRange } from "@/utils/adherenceCopy";
 import { computeAdherenceStats, STUCK_SNOOZE_THRESHOLD } from "@/utils/adherenceStats";
 import { useColors } from "@/hooks/useColors";
-import { isSendReminder } from "@/services/ReminderService";
+import { isRecurring, isSendReminder } from "@/services/ReminderService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { describeRecurrence, upcomingOccurrences } from "@/utils/recurrence";
@@ -41,6 +41,7 @@ export default function ReminderDetailScreen() {
     toggleComplete,
     snoozeReminder,
     deleteReminder,
+    skipOccurrence,
     snoozePreset,
     setSnoozePreset,
     editReminder,
@@ -155,6 +156,14 @@ export default function ReminderDetailScreen() {
     setConfirmingDelete(false);
     await deleteReminder(id);
     goBack();
+  };
+
+  // B22: skipping one occurrence advances the series rather than ending
+  // it, so - unlike a real delete - this deliberately does NOT goBack():
+  // the same reminder is still here, just moved to its next occurrence.
+  const handleSkipOccurrence = async () => {
+    setConfirmingDelete(false);
+    await skipOccurrence(id);
   };
 
   const handleCancelDelete = () => {
@@ -565,11 +574,17 @@ export default function ReminderDetailScreen() {
       <ConfirmSheet
         visible={confirmingDelete}
         title="Delete Reminder"
-        message="Are you sure you want to delete this reminder?"
-        confirmLabel="Delete"
+        message={
+          reminder && isRecurring(reminder)
+            ? "This reminder repeats. Skip just today's occurrence, or delete the whole series?"
+            : "Are you sure you want to delete this reminder?"
+        }
+        confirmLabel={reminder && isRecurring(reminder) ? "Delete Series" : "Delete"}
         destructive
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
+        extraLabel={reminder && isRecurring(reminder) ? "Skip This Occurrence" : undefined}
+        onExtra={reminder && isRecurring(reminder) ? handleSkipOccurrence : undefined}
       />
 
       <SnoozeSheet

@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ConfirmSheet from "@/components/ConfirmSheet";
 import QuickAddInput from "@/components/QuickAddInput";
 import ReminderCard from "@/components/ReminderCard";
+import RecurrencePreviewCard from "@/components/RecurrencePreviewCard";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { tabBarContentInset } from "@/constants/tabBar";
 import { useReminders, type Reminder } from "@/contexts/RemindersContext";
@@ -21,10 +22,12 @@ import {
   clearPendingInviteNameAsk,
   getPendingInviteNameAsk,
   incrementRegisterPromptCount,
+  isRecurring,
   isSendReminder,
   markRegisterPromptShown,
   shouldOfferNumberRegistration,
 } from "@/services/ReminderService";
+import { buildRecurrencePreviews, type RecurrencePreview } from "@/utils/recurrencePreviews";
 import { useColors } from "@/hooks/useColors";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
 import { buildGreeting, greetingName, initialsFor } from "@/utils/greeting";
@@ -48,11 +51,27 @@ type PendingDelete = { kind: "single"; id: string } | { kind: "clear-completed" 
  */
 export const REMINDERS_BEFORE_NUMBER_OFFER = 3;
 
+/** How many upcoming occurrences a recurring series previews on the home screen. */
+export const PREVIEW_COUNT = 2;
+
+type UpcomingItem = Reminder | RecurrencePreview;
+
+function isPreviewItem(item: UpcomingItem): item is RecurrencePreview {
+  return "kind" in item && item.kind === "recurrence-preview";
+}
+
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { reminders, deleteReminder, deleteReminders, loading, userName, setUserName } =
-    useReminders();
+  const {
+    reminders,
+    deleteReminder,
+    deleteReminders,
+    skipOccurrence,
+    loading,
+    userName,
+    setUserName,
+  } = useReminders();
   const [refreshing, setRefreshing] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [nameSheetVisible, setNameSheetVisible] = useState(false);
@@ -70,10 +89,22 @@ export default function HomeScreen() {
     const completed = reminders
       .filter((r) => r.completed)
       .sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
+
+    // Read-only preview cards for a recurring series' next couple of
+    // occurrences — generated for every recurring reminder regardless of
+    // whether today's occurrence is still pending or was just completed, so
+    // the series doesn't visually vanish from the calendar the moment it's
+    // checked off for the day. See utils/recurrencePreviews.ts.
+    const recurringSources = reminders.filter((r) => isRecurring(r) && !isSendReminder(r));
+    const previews = recurringSources.flatMap((r) => buildRecurrencePreviews(r, PREVIEW_COUNT));
+
     // Today / Tomorrow / named weekdays for the rest of the week / Later —
     // an ever-growing flat list stopped scanning like a calendar once there
     // were more than a handful of reminders.
-    const upcomingGroups = groupByDate(upcoming, (r) => new Date(r.datetime));
+    const upcomingGroups = groupByDate<UpcomingItem>(
+      [...upcoming, ...previews],
+      (item) => new Date(item.datetime)
+    );
     return { upcomingGroups, upcomingCount: upcoming.length, sending, completed };
   }, [reminders]);
 
@@ -97,9 +128,27 @@ export default function HomeScreen() {
     setPendingDelete(null);
   };
 
+  // B22: for a recurring reminder, "skip this occurrence" is a distinct
+  // choice from deleting the whole series - it advances the series past
+  // today rather than ending it. Only reachable when pendingDelete is
+  // "single" and that reminder is recurring (see the ConfirmSheet's
+  // extraLabel/onExtra below, which only render together).
+  const handleSkipOccurrence = async () => {
+    if (pendingDelete?.kind === "single") {
+      await skipOccurrence(pendingDelete.id);
+    }
+    setPendingDelete(null);
+  };
+
   const handleCancelDelete = () => {
     setPendingDelete(null);
   };
+
+  const pendingDeleteReminder =
+    pendingDelete?.kind === "single"
+      ? reminders.find((r) => r.id === pendingDelete.id)
+      : undefined;
+  const pendingDeleteIsRecurring = !!pendingDeleteReminder && isRecurring(pendingDeleteReminder);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -473,7 +522,7 @@ export default function HomeScreen() {
           </View>
         ) : (
           <>
-            {upcomingCount > 0 && (
+            {upcomingGroups.length > 0 && (
               <>
                 <View style={styles.sectionHeaderRow}>
                   <Text style={styles.sectionHeaderLabel}>Upcoming</Text>
@@ -487,9 +536,13 @@ export default function HomeScreen() {
                 {upcomingGroups.map((group) => (
                   <View key={`${group.key}-${group.items[0]?.id}`}>
                     <Text style={styles.dateGroupLabel}>{group.label}</Text>
-                    {group.items.map((r) => (
-                      <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
-                    ))}
+                    {group.items.map((item) =>
+                      isPreviewItem(item) ? (
+                        <RecurrencePreviewCard key={item.id} preview={item} />
+                      ) : (
+                        <ReminderCard key={item.id} reminder={item} onDelete={handleDelete} />
+                      )
+                    )}
                   </View>
                 ))}
               </>
@@ -582,12 +635,16 @@ export default function HomeScreen() {
         message={
           pendingDelete?.kind === "clear-completed"
             ? `Are you sure you want to delete all ${completed.length} completed reminder${completed.length === 1 ? "" : "s"}? This can't be undone.`
-            : "Are you sure you want to delete this reminder?"
+            : pendingDeleteIsRecurring
+              ? "This reminder repeats. Skip just today's occurrence, or delete the whole series?"
+              : "Are you sure you want to delete this reminder?"
         }
-        confirmLabel="Delete"
+        confirmLabel={pendingDeleteIsRecurring ? "Delete Series" : "Delete"}
         destructive
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
+        extraLabel={pendingDeleteIsRecurring ? "Skip This Occurrence" : undefined}
+        onExtra={pendingDeleteIsRecurring ? handleSkipOccurrence : undefined}
       />
     </View>
   );

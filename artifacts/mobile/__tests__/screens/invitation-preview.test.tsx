@@ -8,6 +8,7 @@ import { RemindersProvider } from "@/contexts/RemindersContext";
 import * as SessionService from "@/services/SessionService";
 import * as InvitationService from "@/services/InvitationService";
 import * as ReminderService from "@/services/ReminderService";
+import { quietHoursEndAfter, DEFAULT_QUIET_HOURS } from "@/utils/quietHours";
 
 jest.mock("expo-haptics");
 jest.mock("@/services/SessionService");
@@ -336,10 +337,16 @@ describe("InvitationPreviewScreen", () => {
       await waitFor(() => expect(addReminderSpy).toHaveBeenCalled());
       // Default quiet hours end at 08:00 local, the day after the chosen
       // 23:00 - moved forward one calendar day, same as QuickAddInput's own
-      // quietHoursEndAfter behavior.
-      expect(respondSpy).toHaveBeenCalledWith("inv-1", "accepted", "2026-09-10T08:00:00.000Z");
+      // quietHoursEndAfter behavior. Computed via the same helper (rather
+      // than a hardcoded UTC string) so the test passes regardless of the
+      // machine's local timezone.
+      const expected = quietHoursEndAfter(
+        new Date("2026-09-09T23:00:00.000Z"),
+        DEFAULT_QUIET_HOURS
+      ).toISOString();
+      expect(respondSpy).toHaveBeenCalledWith("inv-1", "accepted", expected);
       const [, data] = addReminderSpy.mock.calls[0];
-      expect(data.datetime).toBe("2026-09-10T08:00:00.000Z");
+      expect(data.datetime).toBe(expected);
     });
   });
 });

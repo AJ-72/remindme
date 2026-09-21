@@ -116,22 +116,17 @@ describe("NotificationResponseHandler", () => {
     expect(ReminderService.markNotifiedById).not.toHaveBeenCalled();
   });
 
-  // Best-effort recurring advance: a series should move on the moment its
-  // notification lands, while the app is alive - not wait for the next
-  // mount-time sweep. See advanceRecurringById's own doc comment for why
-  // this is latency, not correctness (rescheduleAllFutureReminders' sweep
-  // covers a killed app).
-  it("advances a recurring series' notification alongside stamping notifiedAt", async () => {
+  // Deliberately does NOT advance a recurring series on notification-received
+  // (regression coverage - it used to). Advancing here ran before the user
+  // had tapped anything, so reminder-detail.tsx and the tray's own Snooze
+  // action (which reads reminder.datetime as its snooze base) ended up
+  // showing/acting on the NEXT occurrence instead of the one that just
+  // fired. rescheduleAllFutureReminders' mount-time catch-up sweep is the
+  // one path this feature's correctness depends on and still covers it.
+  it("does not advance a recurring series on notification-received", async () => {
     render(<NotificationResponseHandler />);
     const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
     await onReceived({ request: { content: { data: { reminderId: "r1" } } } });
-    expect(ReminderService.advanceRecurringById).toHaveBeenCalledWith("r1");
-  });
-
-  it("does not call advanceRecurringById for a received notification carrying no reminderId", async () => {
-    render(<NotificationResponseHandler />);
-    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
-    await onReceived({ request: { content: { data: { type: "invitation" } } } });
     expect(ReminderService.advanceRecurringById).not.toHaveBeenCalled();
   });
 

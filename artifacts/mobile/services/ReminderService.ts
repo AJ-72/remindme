@@ -1321,6 +1321,12 @@ export async function editReminder(
   options: { moveAnchor?: boolean } = {}
 ): Promise<Reminder[]> {
   const old = current.find((r) => r.id === id);
+  // Sweeps by payload AND cancels by stored id, like rearmReminder - a
+  // reminder that picked up an orphan notification (e.g. a snooze whose
+  // write hadn't landed in the copy this edit started from) has a pending
+  // trigger the stored id alone can't reach, which would otherwise survive
+  // this edit and fire alongside - or instead of - the newly scheduled one.
+  await cancelScheduledForReminder(id);
   await cancelNotification(old?.notificationId);
   const notificationId = await scheduleNotification(data, id);
   const reminders = current.map((r) => {
@@ -1390,6 +1396,63 @@ export async function deleteReminders(
   const targets = current.filter((r) => idSet.has(r.id));
   await Promise.all(targets.map((r) => cancelNotification(r.notificationId)));
   const reminders = current.filter((r) => !idSet.has(r.id));
+  await saveReminders(reminders);
+  return reminders;
+}
+
+/**
+ * B22: removes the CURRENTLY SHOWING occurrence of a recurring reminder
+ * from the schedule WITHOUT ending the series and WITHOUT tallying an
+ * outcome - unlike completeOccurrence (Mark Done), a skipped occurrence
+ * was neither completed nor missed, it was deliberately taken off the
+ * calendar.
+ *
+ * Reuses advanceRecurringReminder for the anchor-based catch-up math
+ * completeOccurrence relies on, but NOT with the real current time: that
+ * function's guard treats a still-future `datetime` as "nothing to
+ * advance to yet" (correct for its own caller, the past-due catch-up
+ * sweep), whereas "skip" must advance past the current occurrence
+ * whether it's overdue or still ahead - the user is looking at it right
+ * now, on the detail/list screen, asking to remove exactly this one.
+ * Passing the reminder's own `datetime` as `now` satisfies that guard
+ * (currentDue > now is then false) while leaving the anchor-based
+ * catch-up loop itself untouched, so a reminder that's ALSO several
+ * periods stale still lands correctly on the next strictly-future
+ * occurrence rather than the one right after the current (already-past)
+ * datetime.
+ *
+ * Falls back to a full deleteReminder when there's nothing to advance to:
+ * a non-recurring reminder (advanceRecurringReminder returns null by
+ * definition), or a recurring one whose catch-up loop is exhausted
+ * (MAX_ADVANCE_ITERATIONS) - in both cases there is no "next occurrence"
+ * to leave behind, so skipping degrades to deleting rather than leaving
+ * the reminder stuck.
+ */
+export async function skipOccurrence(
+  current: Reminder[],
+  id: string
+): Promise<Reminder[]> {
+  const target = current.find((r) => r.id === id);
+  if (!target) return current;
+
+  const asOfCurrentOccurrence = new Date(target.datetime);
+  const now = new Date();
+  const advanceFrom = asOfCurrentOccurrence.getTime() > now.getTime() ? asOfCurrentOccurrence : now;
+  const advanced = advanceRecurringReminder(target, advanceFrom);
+  if (!advanced) return deleteReminder(current, id);
+
+  await cancelNotification(target.notificationId);
+  const untallied: Reminder = {
+    ...advanced,
+    occurrencesCompleted: target.occurrencesCompleted,
+    occurrencesMissed: target.occurrencesMissed,
+  };
+  const notificationId = await rearmReminder(untallied, {
+    schedule: () => scheduleNotification(untallied, id),
+  });
+  const reminders = current.map((r) =>
+    r.id === id ? { ...untallied, notificationId } : r
+  );
   await saveReminders(reminders);
   return reminders;
 }

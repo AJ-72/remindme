@@ -16,6 +16,7 @@ import {
   attachInvitationId as serviceAttachInvitationId,
   deleteReminder as serviceDelete,
   deleteReminders as serviceDeleteMany,
+  skipOccurrence as serviceSkipOccurrence,
   editReminder as serviceEdit,
   getDefaultAlarmEnabled,
   getDefaultExactTimingEnabled,
@@ -89,6 +90,7 @@ interface RemindersContextType {
   ) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
   deleteReminders: (ids: string[]) => Promise<void>;
+  skipOccurrence: (id: string) => Promise<void>;
   toggleComplete: (id: string) => Promise<void>;
   markOpened: (id: string) => Promise<void>;
   snoozeReminder: (id: string, preset?: SnoozePreset) => Promise<void>;
@@ -413,6 +415,15 @@ export function RemindersProvider({
     [reminders]
   );
 
+  const skipOccurrence = useCallback(
+    async (id: string) => {
+      const updated = await serviceSkipOccurrence(reminders, id);
+      setReminders(updated);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    },
+    [reminders]
+  );
+
   const toggleComplete = useCallback(
     async (id: string) => {
       const before = reminders.find((r) => r.id === id);
@@ -493,6 +504,7 @@ export function RemindersProvider({
         editReminder,
         deleteReminder,
         deleteReminders,
+        skipOccurrence,
         toggleComplete,
         markOpened,
         snoozeReminder,

@@ -9,7 +9,6 @@ import {
   loadReminderById,
   markDoneById,
   markNotifiedById,
-  advanceRecurringById,
   scheduleSnoozeNotification,
   updateSnoozeById,
 } from "@/services/ReminderService";
@@ -183,19 +182,20 @@ export default function NotificationResponseHandler() {
           // different facts, and this only needs the first - see
           // Reminder.notifiedAt for the real limitation (this listener only
           // runs while the app process is alive).
+          //
+          // Deliberately does NOT call advanceRecurringById here. It used to,
+          // to move a recurring series on the moment its notification landed
+          // rather than waiting for the next mount-time sweep - but that ran
+          // before the user had tapped anything, so reminder-detail.tsx (and
+          // the tray's own Snooze action, which reads reminder.datetime as
+          // its snooze base) ended up showing/acting on the NEXT occurrence
+          // instead of the one that just fired. rescheduleAllFutureReminders'
+          // mount-time catch-up pass is the one path this feature's
+          // correctness actually depends on (see its own comment) and already
+          // runs on every app open/foreground, so the series still advances
+          // promptly without this early call.
           if (data?.reminderId) {
             await markNotifiedById(data.reminderId);
-            // Best-effort: advance a recurring series the moment its
-            // notification lands, so it moves on immediately while the app
-            // is alive rather than waiting for the next mount-time sweep.
-            // Latency only - rescheduleAllFutureReminders' own catch-up
-            // pass is what makes this correct even if the app is killed
-            // before this listener ever runs. Called after markNotifiedById
-            // deliberately: this stamps the occurrence that just fired,
-            // advancing then resets notifiedAt on the NEW occurrence it
-            // creates (which has not itself been notified) - the fired
-            // occurrence's stamp is not meant to carry forward.
-            await advanceRecurringById(data.reminderId);
           }
 
           if (data?.type !== "invitation") return;

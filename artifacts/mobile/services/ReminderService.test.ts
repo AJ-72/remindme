@@ -31,6 +31,7 @@ import {
   VIBRATION_KEY,
   deleteReminder,
   deleteReminders,
+  skipOccurrence,
   editReminder,
   SNOOZE_PRESET_KEY,
   getDefaultAlarmEnabled,
@@ -312,6 +313,73 @@ describe("deleteReminders", () => {
   });
 });
 
+describe("skipOccurrence", () => {
+  const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+
+  it("advances a recurring reminder to its next occurrence instead of removing it", async () => {
+    const r = makeReminder({
+      id: "r1",
+      datetime: PAST,
+      recurrenceAnchor: PAST,
+      recurrence: dailyRule,
+    });
+    const result = await skipOccurrence([r], "r1");
+    const updated = result.find((x) => x.id === "r1");
+    expect(updated).toBeDefined();
+    expect(new Date(updated!.datetime).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  // The whole point of "skip" vs "mark done": today's occurrence must not
+  // read as completed, and must not read as missed either - it was
+  // deliberately removed from the schedule, not avoided.
+  it("does not tally the skipped occurrence as completed or missed", async () => {
+    const r = makeReminder({
+      id: "r1",
+      datetime: PAST,
+      recurrenceAnchor: PAST,
+      recurrence: dailyRule,
+      occurrencesCompleted: 2,
+      occurrencesMissed: 1,
+    });
+    const result = await skipOccurrence([r], "r1");
+    const updated = result.find((x) => x.id === "r1");
+    expect(updated!.occurrencesCompleted).toBe(2);
+    expect(updated!.occurrencesMissed).toBe(1);
+  });
+
+  it("falls back to deleting the reminder entirely for a non-recurring reminder", async () => {
+    const r = makeReminder({ id: "r1" });
+    const result = await skipOccurrence([r], "r1");
+    expect(result.find((x) => x.id === "r1")).toBeUndefined();
+  });
+
+  it("falls back to deleting the reminder entirely when there is no future occurrence to advance to", async () => {
+    // Same iteration-cap-exhaustion technique as
+    // advanceRecurringReminder's own "genuinely hit" test above: force
+    // computeNthOccurrence to never progress past the anchor, so
+    // advanceRecurringReminder returns null and skipOccurrence must fall
+    // back to a full delete rather than leaving the reminder stuck.
+    const spy = jest
+      .spyOn(recurrenceModule, "computeNthOccurrence")
+      .mockImplementation((_rule, anchor) => anchor);
+    const r = makeReminder({
+      id: "r1",
+      datetime: PAST,
+      recurrenceAnchor: PAST,
+      recurrence: dailyRule,
+    });
+    const result = await skipOccurrence([r], "r1");
+    expect(result.find((x) => x.id === "r1")).toBeUndefined();
+    spy.mockRestore();
+  });
+
+  it("does nothing for an id that doesn't exist", async () => {
+    const r = makeReminder({ id: "r1" });
+    const result = await skipOccurrence([r], "unknown");
+    expect(result).toEqual([r]);
+  });
+});
+
 describe("toggleComplete", () => {
   it("flips the completed flag on the correct item", async () => {
     const r = makeReminder({ id: "r1", completed: false });
@@ -536,6 +604,31 @@ describe("notification scheduling", () => {
         trigger: { type: "date", date: new Date(NEW_FUTURE) },
       })
     );
+  });
+
+  // editReminder must sweep by payload too, not just cancel the stored id -
+  // otherwise a notification scheduled for this reminder under a DIFFERENT
+  // identifier than the one currently on record (e.g. a snooze whose write
+  // hasn't landed in the copy this edit started from) survives the edit as
+  // an orphan and fires later even though the reminder now shows a
+  // different time. Mirrors "cancels by payload as well as by stored id
+  // before rescheduling" for setAlarmForPendingReminders above.
+  it("cancels by payload as well as by stored id when editing", async () => {
+    (getAllScheduledNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      { identifier: "orphan", content: { data: { reminderId: "r1" } } },
+    ]);
+    const NEW_FUTURE = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    const r = makeReminder({ id: "r1", notificationId: "old-notif" });
+
+    await editReminder([r], "r1", {
+      title: "Updated",
+      description: "",
+      datetime: NEW_FUTURE,
+      alarm: true,
+    });
+
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("orphan");
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("old-notif");
   });
 
   it("deleteReminder cancels the reminder's notification", async () => {
