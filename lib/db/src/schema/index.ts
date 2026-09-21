@@ -22,3 +22,4 @@ export * from "./invitations";
 export * from "./linkCodes";
 export * from "./lookupRateLimits";
 export * from "./users";
+export * from "./waitlistSignups";

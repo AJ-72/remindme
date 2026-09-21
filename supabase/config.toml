@@ -2,3 +2,8 @@ project_id = "remindme-tier2"
 
 [functions]
 verify_jwt = true
+
+# A waitlist visitor does not have an app account or JWT. The function itself
+# validates and normalizes the email, then writes through its server-side key.
+[functions.join-waitlist]
+verify_jwt = false
