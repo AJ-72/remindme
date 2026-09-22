@@ -1,3 +1,5 @@
+import type { RecurrenceRule } from "./recurrence";
+
 const MALAYALAM_DIGIT_MAP: Record<string, string> = {
   "൦": "0", "൧": "1", "൨": "2", "൩": "3", "൪": "4",
   "൫": "5", "൬": "6", "൭": "7", "൮": "8", "൯": "9",
@@ -248,6 +250,10 @@ interface ClockMatch {
 export interface ParsedReading {
   title: string;
   date: Date | null;
+  // Optional: only ever set by the English path (parseNaturalLanguage.ts).
+  // The Malayalam parser never sets this — recurrence phrase detection is
+  // English-only per the M2 brief.
+  recurrence?: RecurrenceRule;
 }
 
 export interface ParsedAmbiguity {

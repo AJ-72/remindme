@@ -31,6 +31,7 @@ jest.mock("@/services/invitationClaimThrottle");
 jest.mock("@/services/ReminderService", () => ({
   ...jest.requireActual("@/services/ReminderService"),
   markNotifiedById: jest.fn(),
+  advanceRecurringById: jest.fn(),
   applyRecipientTimeChangeByInvitationId: jest.fn(),
 }));
 
@@ -113,6 +114,20 @@ describe("NotificationResponseHandler", () => {
     const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
     await onReceived({ request: { content: { data: { type: "invitation" } } } });
     expect(ReminderService.markNotifiedById).not.toHaveBeenCalled();
+  });
+
+  // Deliberately does NOT advance a recurring series on notification-received
+  // (regression coverage - it used to). Advancing here ran before the user
+  // had tapped anything, so reminder-detail.tsx and the tray's own Snooze
+  // action (which reads reminder.datetime as its snooze base) ended up
+  // showing/acting on the NEXT occurrence instead of the one that just
+  // fired. rescheduleAllFutureReminders' mount-time catch-up sweep is the
+  // one path this feature's correctness depends on and still covers it.
+  it("does not advance a recurring series on notification-received", async () => {
+    render(<NotificationResponseHandler />);
+    const onReceived = (addNotificationReceivedListener as jest.Mock).mock.calls[0][0];
+    await onReceived({ request: { content: { data: { reminderId: "r1" } } } });
+    expect(ReminderService.advanceRecurringById).not.toHaveBeenCalled();
   });
 
   it("removes the received-listener subscription on unmount", () => {

@@ -18,9 +18,10 @@ import { useReminders } from "@/contexts/RemindersContext";
 import { applySuggestedHour, formatHourRange } from "@/utils/adherenceCopy";
 import { computeAdherenceStats, STUCK_SNOOZE_THRESHOLD } from "@/utils/adherenceStats";
 import { useColors } from "@/hooks/useColors";
-import { isSendReminder } from "@/services/ReminderService";
+import { isRecurring, isSendReminder } from "@/services/ReminderService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
+import { describeRecurrence, upcomingOccurrences } from "@/utils/recurrence";
 import type { SnoozePreset } from "@/utils/snoozePresets";
 
 function goBack() {
@@ -40,6 +41,7 @@ export default function ReminderDetailScreen() {
     toggleComplete,
     snoozeReminder,
     deleteReminder,
+    skipOccurrence,
     snoozePreset,
     setSnoozePreset,
     editReminder,
@@ -79,6 +81,26 @@ export default function ReminderDetailScreen() {
     [isStuck, reminders]
   );
   const strongHour = stuckStats?.bestHour ?? null;
+
+  // The one place a user can verify a rule means what they think before
+  // trusting it overnight. The card's own upcoming datetime IS the first of
+  // the three (matching the mockup: "Today · 8:00 AM" and "Next 3" both
+  // start from the same occurrence) — the other two come from
+  // upcomingOccurrences, computed from the series' anchor but walked forward
+  // past the CURRENT `datetime`, not just anchor+1/anchor+2: after a snooze,
+  // `datetime` no longer equals `recurrenceAnchor` (see
+  // Reminder.recurrenceAnchor) and can already be past where anchor+1 would
+  // land, so a fixed anchor+1/anchor+2 preview can duplicate or misorder the
+  // first entry instead of showing the next two occurrences the series will
+  // actually advance to (advanceRecurringReminder always computes from the
+  // anchor with the same catch-up-past-a-reference-time logic, never from
+  // `datetime` directly, and never by chaining).
+  const nextOccurrences = useMemo(() => {
+    if (!reminder?.recurrence) return [];
+    const anchor = new Date(reminder.recurrenceAnchor ?? reminder.datetime);
+    const current = new Date(reminder.datetime);
+    return [current, ...upcomingOccurrences(reminder.recurrence, anchor, current, 2)];
+  }, [reminder?.recurrence, reminder?.datetime, reminder?.recurrenceAnchor]);
 
   const handleMoveToStrongHour = async () => {
     if (!reminder || !strongHour) return;
@@ -134,6 +156,14 @@ export default function ReminderDetailScreen() {
     setConfirmingDelete(false);
     await deleteReminder(id);
     goBack();
+  };
+
+  // B22: skipping one occurrence advances the series rather than ending
+  // it, so - unlike a real delete - this deliberately does NOT goBack():
+  // the same reminder is still here, just moved to its next occurrence.
+  const handleSkipOccurrence = async () => {
+    setConfirmingDelete(false);
+    await skipOccurrence(id);
   };
 
   const handleCancelDelete = () => {
@@ -244,6 +274,9 @@ export default function ReminderDetailScreen() {
       gap: 6,
       marginBottom: 24,
     },
+    timeRowWithRepeat: {
+      marginBottom: 6,
+    },
     timeText: {
       fontSize: 14,
       fontFamily: "Inter_500Medium",
@@ -251,6 +284,18 @@ export default function ReminderDetailScreen() {
     },
     timeChangeText: {
       fontSize: 13,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+      marginBottom: 20,
+    },
+    repeatRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginBottom: 8,
+    },
+    nextOccurrencesText: {
+      fontSize: 12,
       fontFamily: "Inter_400Regular",
       color: colors.mutedForeground,
       marginBottom: 20,
@@ -373,10 +418,30 @@ export default function ReminderDetailScreen() {
               {reminder.description}
             </Text>
           )}
-          <View style={styles.timeRow}>
+          <View style={[styles.timeRow, !!reminder.recurrence && styles.timeRowWithRepeat]}>
             <Feather name="clock" size={14} color={colors.mutedForeground} />
             <Text style={styles.timeText}>{formatDatetime(reminder.datetime)}</Text>
           </View>
+
+          {reminder.recurrence && (
+            <View style={styles.repeatRow} testID="repeat-detail">
+              <Feather name="repeat" size={14} color={colors.mutedForeground} />
+              <Text style={styles.timeText}>
+                {describeRecurrence(reminder.recurrence, new Date(reminder.datetime))}
+              </Text>
+            </View>
+          )}
+
+          {nextOccurrences.length > 0 && (
+            <Text style={styles.nextOccurrencesText} testID="repeat-next-occurrences">
+              Next 3:{" "}
+              {nextOccurrences
+                .map((d) =>
+                  d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
+                )
+                .join(" · ")}
+            </Text>
+          )}
 
           {isSendReminder(reminder) && reminder.recipientTimeChange && (
             <Text style={styles.timeChangeText} testID="recipient-time-change-text">
@@ -509,11 +574,17 @@ export default function ReminderDetailScreen() {
       <ConfirmSheet
         visible={confirmingDelete}
         title="Delete Reminder"
-        message="Are you sure you want to delete this reminder?"
-        confirmLabel="Delete"
+        message={
+          reminder && isRecurring(reminder)
+            ? "This reminder repeats. Skip just today's occurrence, or delete the whole series?"
+            : "Are you sure you want to delete this reminder?"
+        }
+        confirmLabel={reminder && isRecurring(reminder) ? "Delete Series" : "Delete"}
         destructive
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
+        extraLabel={reminder && isRecurring(reminder) ? "Skip This Occurrence" : undefined}
+        onExtra={reminder && isRecurring(reminder) ? handleSkipOccurrence : undefined}
       />
 
       <SnoozeSheet

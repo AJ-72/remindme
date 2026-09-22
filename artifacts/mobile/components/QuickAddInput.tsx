@@ -17,6 +17,7 @@ import {
 import { getLocales } from "expo-localization";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import QuietHoursSheet from "@/components/QuietHoursSheet";
+import RecurrencePicker from "@/components/RecurrencePicker";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useSharedText } from "@/contexts/SharedTextContext";
 import { useColors } from "@/hooks/useColors";
@@ -44,6 +45,7 @@ import {
 } from "@/services/ReminderService";
 import { formatTime12h } from "@/utils/formatDatetime";
 import { parseNaturalLanguage } from "@/utils/parseNaturalLanguage";
+import { describeRecurrence, type RecurrenceRule } from "@/utils/recurrence";
 import { EVENTS } from "@/constants/analytics";
 import { track } from "@/services/AnalyticsService";
 import { contentScript } from "@/utils/analyticsProps";
@@ -135,6 +137,11 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [input, setInput] = useState("");
   const [parsedTitle, setParsedTitle] = useState("");
   const [parsedDate, setParsedDate] = useState<Date | null>(null);
+  const [recurrence, setRecurrence] = useState<RecurrenceRule | undefined>(undefined);
+  const [pinnedDate, setPinnedDate] = useState<Date | null>(null);
+  const [pinnedTime, setPinnedTime] = useState<Date | null>(null);
+  const [pinnedRecurrence, setPinnedRecurrence] = useState<RecurrenceRule | undefined>(undefined);
+  const [showRepeatSheet, setShowRepeatSheet] = useState(false);
   const [alarm, setAlarm] = useState(defaultAlarmEnabled);
   // Tracks whether the user has overridden the alarm for the reminder they're
   // currently composing, so the sync effect below doesn't undo that.
@@ -193,9 +200,27 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [showNoTimeSheet, setShowNoTimeSheet] = useState(false);
   const [suggestedTime, setSuggestedTime] = useState<Date>(roundToNextHour(new Date()));
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
+  const [activePillEditor, setActivePillEditor] = useState<"date" | "time" | "recurrence" | null>(null);
 
   const pillAnim = useRef(new Animated.Value(0)).current;
   const pillTranslate = useRef(new Animated.Value(-6)).current;
+
+  // Effective values: pinned takes precedence, else parsed. A pinned date and
+  // a pinned time are independent partial overrides (editing one chip must
+  // not clobber the other), so they're composed onto one Date rather than
+  // treated as two competing full-Date candidates - a bug that previously
+  // let a time-only edit vanish from the save payload entirely, since
+  // `effectiveDate` (what save actually uses) never looked at `pinnedTime`.
+  const effectiveDate = (() => {
+    if (!pinnedDate && !pinnedTime) return parsedDate;
+    const base = pinnedDate ?? parsedDate ?? pinnedTime ?? new Date();
+    const composed = new Date(base);
+    if (pinnedTime) composed.setHours(pinnedTime.getHours(), pinnedTime.getMinutes(), 0, 0);
+    if (pinnedDate) composed.setFullYear(pinnedDate.getFullYear(), pinnedDate.getMonth(), pinnedDate.getDate());
+    return composed;
+  })();
+  const effectiveTime = effectiveDate;
+  const effectiveRecurrence = pinnedRecurrence ?? recurrence;
 
   useEffect(() => {
     if (sharedAudioTranscribing) {
@@ -244,10 +269,16 @@ export default function QuickAddInput({ onSaved }: Props) {
   }, [defaultAlarmEnabled]);
 
   useEffect(() => {
-    const { title, date, ambiguity: parsedAmbiguity } = parseNaturalLanguage(input);
+    const { title, date, ambiguity: parsedAmbiguity, recurrence: parsedRecurrence } =
+      parseNaturalLanguage(input);
     setParsedTitle(title);
     setParsedDate(date);
     setAmbiguity(parsedAmbiguity ?? null);
+    // Mirrors parsedDate exactly: the parse effect sets the rule on every
+    // keystroke, and a rule chosen by hand in the repeat sheet wins only
+    // until the text changes again and re-parses (see the plan's explicit
+    // sync rule for this surface).
+    setRecurrence(parsedRecurrence);
 
     if (date) {
       Animated.parallel([
@@ -303,6 +334,67 @@ export default function QuickAddInput({ onSaved }: Props) {
     if (target) await performSave(quietHoursEndAfter(target, quietHours), title);
   };
 
+  const handleDatePillPress = () => {
+    setActivePillEditor("date");
+    setSuggestedTime(effectiveDate ?? roundToNextHour(new Date()));
+    setPickerMode("date");
+    // Android's native dialog (rendered outside this Modal, see the
+    // `Platform.OS === "android" && pickerMode !== null` block below) is
+    // self-contained with its own OK/Cancel - showing the custom sheet
+    // underneath it too would stack two pickers on top of each other.
+    if (Platform.OS !== "android") setShowNoTimeSheet(true);
+  };
+
+  const handleTimePillPress = () => {
+    setActivePillEditor("time");
+    setSuggestedTime(effectiveDate ?? roundToNextHour(new Date()));
+    setPickerMode("time");
+    if (Platform.OS !== "android") setShowNoTimeSheet(true);
+  };
+
+  const handleRepeatPillPress = () => {
+    setActivePillEditor("recurrence");
+    setShowRepeatSheet(true);
+  };
+
+  // Takes the confirmed value explicitly rather than reading `suggestedTime`
+  // from closure - the Android chained flow calls this in the same tick as
+  // its own setSuggestedTime(updated), before that state update is visible,
+  // so reading the state variable here would pin the previous, stale value.
+  const handlePickerConfirmWith = (value: Date) => {
+    if (activePillEditor === "date") {
+      setPinnedDate(value);
+    } else if (activePillEditor === "time") {
+      setPinnedTime(value);
+    }
+    setActivePillEditor(null);
+    setPickerMode(null);
+    setShowNoTimeSheet(false);
+  };
+
+  const handlePickerConfirm = () => {
+    if (suggestedTime) handlePickerConfirmWith(suggestedTime);
+  };
+
+  const handlePickerCancel = () => {
+    setActivePillEditor(null);
+    setPickerMode(null);
+    setShowNoTimeSheet(false);
+  };
+
+  const handleRepeatSheetConfirm = () => {
+    if (activePillEditor === "recurrence" && recurrence) {
+      setPinnedRecurrence(recurrence);
+    }
+    setActivePillEditor(null);
+    setShowRepeatSheet(false);
+  };
+
+  const handleRepeatSheetCancel = () => {
+    setActivePillEditor(null);
+    setShowRepeatSheet(false);
+  };
+
   const performSave = async (dateToUse: Date, titleOverride?: string) => {
     const title = titleOverride ?? (parsedTitle || input.trim());
     if (!title.trim()) return;
@@ -320,6 +412,7 @@ export default function QuickAddInput({ onSaved }: Props) {
         // entirely - `'recipient' in obj` is true even when it holds undefined,
         // which is what isSendReminder would otherwise trip over.
         ...(recipient ? { recipient } : {}),
+        ...(effectiveRecurrence ? { recurrence: effectiveRecurrence } : {}),
       });
 
       // Additive Tier 2 send - never blocks the Tier 1 save above, which has
@@ -346,6 +439,12 @@ export default function QuickAddInput({ onSaved }: Props) {
       setParsedTitle("");
       setParsedDate(null);
       setAmbiguity(null);
+      // A forgotten reset here means the next reminder silently inherits the
+      // last one's recurrence — the worst available bug in this feature.
+      setRecurrence(undefined);
+      setPinnedDate(null);
+      setPinnedTime(null);
+      setPinnedRecurrence(undefined);
       // Back to the user's Settings default, not a hardcoded true — resetting
       // to true left a lit bell after every save even with sound turned off.
       alarmTouchedRef.current = false;
@@ -375,8 +474,9 @@ export default function QuickAddInput({ onSaved }: Props) {
       return;
     }
 
-    if (parsedDate) {
-      await doSave(parsedDate);
+    const dateToUse = effectiveDate;
+    if (dateToUse) {
+      await doSave(dateToUse);
     } else {
       const suggested = roundToNextHour(new Date());
       setSuggestedTime(suggested);
@@ -386,6 +486,10 @@ export default function QuickAddInput({ onSaved }: Props) {
   };
 
   const handleConfirmNoTime = async () => {
+    if (activePillEditor) {
+      handlePickerConfirm();
+      return;
+    }
     setPickerMode(null);
     setShowNoTimeSheet(false);
     await doSave(suggestedTime);
@@ -403,6 +507,10 @@ export default function QuickAddInput({ onSaved }: Props) {
   };
 
   const handleCancelNoTime = () => {
+    if (activePillEditor) {
+      handlePickerCancel();
+      return;
+    }
     setPickerMode(null);
     setShowNoTimeSheet(false);
   };
@@ -410,19 +518,26 @@ export default function QuickAddInput({ onSaved }: Props) {
   const handlePickerChange = (event: DateTimePickerEvent, date: Date | undefined) => {
     if (Platform.OS === "android") {
       if (event.type === "dismissed" || !date) {
-        setPickerMode(null);
+        handlePickerCancel();
         return;
       }
       if (pickerMode === "date") {
         const updated = new Date(suggestedTime);
         updated.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
         setSuggestedTime(updated);
-        setPickerMode("time");
+        // A pill edit is single-purpose - the date chip only asks for a date,
+        // the time chip only asks for a time. Only the original "no time
+        // found" flow (activePillEditor null) chains into a time picker too.
+        if (activePillEditor === "date") {
+          handlePickerConfirmWith(updated);
+        } else {
+          setPickerMode("time");
+        }
       } else if (pickerMode === "time") {
         const updated = new Date(suggestedTime);
         updated.setHours(date.getHours(), date.getMinutes(), 0, 0);
         setSuggestedTime(updated);
-        setPickerMode(null);
+        handlePickerConfirmWith(updated);
       }
     } else {
       if (date) setSuggestedTime(date);
@@ -444,13 +559,18 @@ export default function QuickAddInput({ onSaved }: Props) {
     setShowNoTimeSheet(false);
     setPickerMode(null);
     setSuggestedTime(roundToNextHour(new Date()));
+    setPinnedDate(null);
+    setPinnedTime(null);
+    setPinnedRecurrence(undefined);
+    setActivePillEditor(null);
   };
 
   const handleChangePress = () => {
+    const startMode = activePillEditor === "time" ? "time" : "date";
     if (Platform.OS === "android") {
-      setPickerMode("date");
+      setPickerMode(startMode);
     } else {
-      setPickerMode((m) => (m !== null ? null : "date"));
+      setPickerMode((m) => (m !== null ? null : startMode));
     }
   };
 
@@ -1229,6 +1349,20 @@ export default function QuickAddInput({ onSaved }: Props) {
         </Pressable>
         <Pressable
           style={styles.alarmBtn}
+          onPress={() => setShowRepeatSheet(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={recurrence ? describeRecurrence(recurrence, parsedDate ?? new Date()) : "Repeat"}
+          testID="quick-add-repeat"
+        >
+          <Feather
+            name="repeat"
+            size={16}
+            color={recurrence ? colors.primary : colors.mutedForeground}
+          />
+        </Pressable>
+        <Pressable
+          style={styles.alarmBtn}
           onPress={() => {
             alarmTouchedRef.current = true;
             setAlarm((a) => !a);
@@ -1415,21 +1549,56 @@ export default function QuickAddInput({ onSaved }: Props) {
           {
             opacity: pillAnim,
             transform: [{ translateY: pillTranslate }],
-            pointerEvents: "none",
           },
         ]}
       >
-        {parsedDate && (
+        {(effectiveDate || pinnedRecurrence) && (
           <>
-            <View style={styles.pill}>
-              <Feather name="calendar" size={11} color={colors.primary} />
-              <Text style={styles.pillText}>{formatDatePill(parsedDate)}</Text>
-            </View>
-            <Text style={styles.pillDivider}>·</Text>
-            <View style={styles.pill}>
-              <Feather name="clock" size={11} color={colors.primary} />
-              <Text style={styles.pillText}>{formatTimePill(parsedDate)}</Text>
-            </View>
+            {effectiveDate && (
+              <>
+                <Pressable
+                  style={styles.pill}
+                  onPress={handleDatePillPress}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Date: ${formatDatePill(effectiveDate)}`}
+                  testID="quick-add-date-pill"
+                >
+                  <Feather name="calendar" size={11} color={colors.primary} />
+                  <Text style={styles.pillText}>{formatDatePill(effectiveDate)}</Text>
+                </Pressable>
+                <Text style={styles.pillDivider}>·</Text>
+                <Pressable
+                  style={styles.pill}
+                  onPress={handleTimePillPress}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Time: ${formatTimePill(effectiveDate)}`}
+                  testID="quick-add-time-pill"
+                >
+                  <Feather name="clock" size={11} color={colors.primary} />
+                  <Text style={styles.pillText}>{formatTimePill(effectiveDate)}</Text>
+                </Pressable>
+              </>
+            )}
+            {effectiveRecurrence && (
+              <>
+                <Text style={styles.pillDivider}>·</Text>
+                <Pressable
+                  style={styles.pill}
+                  onPress={handleRepeatPillPress}
+                  accessible={true}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Repeat: ${describeRecurrence(effectiveRecurrence, effectiveDate ?? new Date())}`}
+                  testID="quick-add-repeat-pill"
+                >
+                  <Feather name="repeat" size={11} color={colors.primary} />
+                  <Text style={styles.pillText}>
+                    {describeRecurrence(effectiveRecurrence, effectiveDate ?? new Date())}
+                  </Text>
+                </Pressable>
+              </>
+            )}
           </>
         )}
       </Animated.View>
@@ -1549,9 +1718,15 @@ export default function QuickAddInput({ onSaved }: Props) {
         onRequestClose={handleCancelNoTime}
       >
         <Pressable style={styles.modalOverlay} onPress={handleCancelNoTime}>
-          <Pressable onPress={() => {}} style={styles.sheet}>
+          <Pressable onPress={() => {}} style={styles.sheet} testID="date-time-picker-sheet">
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>No time found</Text>
+            <Text style={styles.sheetTitle}>
+              {activePillEditor === "date"
+                ? "Edit date"
+                : activePillEditor === "time"
+                  ? "Edit time"
+                  : "No time found"}
+            </Text>
             <Text style={styles.sheetSubtitle}>
               Remind you at:
             </Text>
@@ -1617,15 +1792,58 @@ export default function QuickAddInput({ onSaved }: Props) {
             )}
 
             <View style={styles.sheetBtnRow}>
-              <Pressable style={styles.sheetCancelBtn} onPress={handleCancelNoTime}>
+              <Pressable
+                style={styles.sheetCancelBtn}
+                onPress={handleCancelNoTime}
+                testID="date-time-picker-cancel"
+              >
                 <Text style={styles.sheetCancelText}>Cancel</Text>
               </Pressable>
               <Pressable
                 style={styles.sheetConfirmBtn}
                 onPress={handleConfirmNoTime}
                 disabled={saving}
+                testID="date-time-picker-confirm"
               >
                 <Text style={styles.sheetConfirmText}>Confirm</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showRepeatSheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRepeatSheet(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowRepeatSheet(false)}>
+          <Pressable onPress={() => {}} style={styles.sheet} testID="repeat-sheet">
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Repeat</Text>
+            <Text style={styles.sheetSubtitle}>How often should this come back?</Text>
+
+            <RecurrencePicker
+              value={recurrence}
+              anchorDate={parsedDate ?? new Date()}
+              onChange={setRecurrence}
+            />
+
+            <View style={styles.sheetBtnRow}>
+              <Pressable
+                style={styles.sheetCancelBtn}
+                onPress={handleRepeatSheetCancel}
+                testID="repeat-sheet-cancel"
+              >
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={styles.sheetConfirmBtn}
+                onPress={handleRepeatSheetConfirm}
+                testID="repeat-sheet-confirm"
+              >
+                <Text style={styles.sheetConfirmText}>Done</Text>
               </Pressable>
             </View>
           </Pressable>

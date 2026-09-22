@@ -263,3 +263,49 @@ describe("ReminderCard — the will-not-ring chip", () => {
     expect(queryByTestId("will-not-ring-chip")).toBeNull();
   });
 });
+
+describe("ReminderCard — recurring reminders", () => {
+  it("shows no repeat marker for a one-shot reminder", () => {
+    const { queryByTestId } = renderCard(makeReminder());
+    expect(queryByTestId("repeat-marker")).toBeNull();
+  });
+
+  it("shows the repeat marker with describeRecurrence's label inside the time row", () => {
+    const { getByTestId, getByText } = renderCard(
+      makeReminder({ recurrence: { freq: "daily", interval: 1 } })
+    );
+    expect(getByTestId("repeat-marker")).toBeTruthy();
+    expect(getByText("Daily")).toBeTruthy();
+  });
+
+  it("coexists with the overdue destructive time styling", () => {
+    const { getByTestId } = renderCard(
+      makeReminder({
+        datetime: new Date(Date.now() - 3600_000).toISOString(),
+        recurrence: { freq: "weekly", interval: 1 },
+      })
+    );
+    expect(getByTestId("repeat-marker")).toBeTruthy();
+  });
+
+  it("coexists with the sender chip on a received recurring reminder", () => {
+    const { getByTestId, getByTestId: getById2 } = renderCard(
+      makeReminder({ senderName: "Priya", recurrence: { freq: "daily", interval: 1 } })
+    );
+    expect(getById2("sender-chip")).toBeTruthy();
+    expect(getByTestId("repeat-marker")).toBeTruthy();
+  });
+
+  it("coexists with the will-not-ring chip", async () => {
+    resetNotificationPermissionCache();
+    (getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: "denied",
+      canAskAgain: true,
+    });
+    const { findByTestId, getByTestId } = renderCard(
+      makeReminder({ recurrence: { freq: "daily", interval: 1 } })
+    );
+    expect(await findByTestId("will-not-ring-chip")).toBeTruthy();
+    expect(getByTestId("repeat-marker")).toBeTruthy();
+  });
+});

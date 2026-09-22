@@ -17,6 +17,25 @@ import { getSupabaseClient, getCurrentSession } from "@/services/SessionService"
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
+import { describeRecurrence, isValidRecurrenceRule, type RecurrenceRule } from "@/utils/recurrence";
+
+/**
+ * M2 Task 5c: parses and validates the `recurrence` param, or returns
+ * undefined for a one-shot invitation or a malformed/unparseable one.
+ * Crosses a trust boundary (another user's client -> this device -> its
+ * own notification schedule) - never trusted merely because it parsed as
+ * JSON, reusing Task 1's isValidRecurrenceRule rather than re-deriving a
+ * second definition of "valid" here.
+ */
+function parseRecurrenceParam(raw: string | undefined): RecurrenceRule | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return isValidRecurrenceRule(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Shown to the recipient for a newly-claimed invitation (Task 9's output),
@@ -49,13 +68,15 @@ function goBack() {
 export default function InvitationPreviewScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { id, title, description, datetime, senderId } = useLocalSearchParams<{
+  const { id, title, description, datetime, senderId, recurrence } = useLocalSearchParams<{
     id: string;
     title?: string;
     description?: string;
     datetime: string;
     senderId: string;
+    recurrence?: string;
   }>();
+  const recurrenceRule = parseRecurrenceParam(recurrence);
 
   const { addReminder, quietHours, userName } = useReminders();
   // The time this Accept is waiting on a ring-permission answer, or null.
@@ -132,6 +153,10 @@ export default function InvitationPreviewScreen() {
       // resolves, or the sender has no display_name set).
       senderName: displaySenderName,
       senderId,
+      // M2 Task 5c: already validated in parseRecurrenceParam above -
+      // never re-derived here. addReminder's own "absent means one-shot"
+      // convention means an undefined value here correctly omits the key.
+      ...(recurrenceRule ? { recurrence: recurrenceRule } : {}),
     });
     // Frame I3: the ask the first-run sheet did not make. It waits for the
     // home screen, where it can name the person who will read the answer.
@@ -396,6 +421,18 @@ export default function InvitationPreviewScreen() {
           <Feather name="clock" size={14} color={colors.mutedForeground} />
           <Text style={styles.timeText}>{formatDatetime(datetime)}</Text>
         </View>
+
+        {recurrenceRule && (
+          // Accepting a recurring reminder is a materially bigger
+          // commitment than a one-off - shown BEFORE Accept, not
+          // discovered next morning.
+          <View style={styles.timeRow} testID="invitation-recurrence">
+            <Feather name="repeat" size={14} color={colors.mutedForeground} />
+            <Text style={styles.timeText}>
+              {describeRecurrence(recurrenceRule, new Date(datetime))}
+            </Text>
+          </View>
+        )}
 
         {/* Said before Android asks, never after. A permission dialog with
             no sentence in front of it is a question about nothing; this one

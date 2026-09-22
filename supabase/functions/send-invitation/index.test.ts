@@ -5,10 +5,14 @@ function fakeClient(opts: {
   invitation: Record<string, unknown>;
   deviceTokens: string[];
   senderDisplayName?: string | null;
+  onSendInvitationCall?: (params: Record<string, unknown>) => void;
 }) {
   return {
-    rpc: async (fn: string) => {
-      if (fn === "send_invitation") return { data: [opts.invitation], error: null };
+    rpc: async (fn: string, params: Record<string, unknown>) => {
+      if (fn === "send_invitation") {
+        opts.onSendInvitationCall?.(params);
+        return { data: [opts.invitation], error: null };
+      }
       if (fn === "get_push_tokens_for_user") {
         return {
           data: opts.deviceTokens.map((t) => ({ expo_push_token: t })),
@@ -152,6 +156,44 @@ Deno.test("push title names the sender by their display_name", async () => {
     }
   );
   assertEquals(pushedTitle, "Amma sent you a reminder");
+});
+
+// M2 Task 5c
+Deno.test("forwards recurrence to send_invitation's p_recurrence param when given", async () => {
+  let seenParams: Record<string, unknown> = {};
+  const client = fakeClient({
+    invitation: { id: "inv-6", title: "Take tablet" },
+    deviceTokens: [],
+    onSendInvitationCall: (params) => {
+      seenParams = params;
+    },
+  });
+  await handleSendInvitation(client, "sender-1", {
+    recipientAppUserId: "user-1",
+    title: "Take tablet",
+    description: "",
+    datetime: new Date().toISOString(),
+    recurrence: { freq: "daily", interval: 1 },
+  });
+  assertEquals(seenParams.p_recurrence, { freq: "daily", interval: 1 });
+});
+
+Deno.test("forwards undefined (no recurrence key) when the request carries no recurrence", async () => {
+  let seenParams: Record<string, unknown> = {};
+  const client = fakeClient({
+    invitation: { id: "inv-7", title: "One-off" },
+    deviceTokens: [],
+    onSendInvitationCall: (params) => {
+      seenParams = params;
+    },
+  });
+  await handleSendInvitation(client, "sender-1", {
+    recipientAppUserId: "user-1",
+    title: "One-off",
+    description: "",
+    datetime: new Date().toISOString(),
+  });
+  assertEquals(seenParams.p_recurrence, undefined);
 });
 
 Deno.test("push title falls back to 'Someone' when the sender has no display_name", async () => {

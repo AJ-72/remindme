@@ -82,7 +82,8 @@ export interface TimeSuggestion {
  */
 export function suggestBetterHour(
   stats: AdherenceStats,
-  chosenHour: number
+  chosenHour: number,
+  options: { isRecurring?: boolean } = {}
 ): TimeSuggestion | null {
   const best = stats.bestHour;
   if (!best) return null;
@@ -97,6 +98,14 @@ export function suggestBetterHour(
   // A gap under 25 points is inside the noise of these sample sizes.
   if (best.rate - chosen.rate < 0.25) return null;
 
+  // A recurring reminder's hour is its STANDING schedule - moving it moves
+  // every future occurrence, not one event, which is a materially bigger
+  // change than the non-recurring case and must be said explicitly rather
+  // than reusing the same sentence for two different consequences.
+  const consequence = options.isRecurring
+    ? " This repeats, so moving it changes every future occurrence."
+    : "";
+
   return {
     hour: best.hour,
     rate: best.rate,
@@ -105,7 +114,7 @@ export function suggestBetterHour(
       best.hour
     )}, against ${formatRate(chosen.rate)} at ${formatHourRange(
       chosenHour
-    )}. Move this one?`,
+    )}. Move this one?${consequence}`,
   };
 }
 

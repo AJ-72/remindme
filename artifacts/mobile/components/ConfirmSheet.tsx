@@ -11,6 +11,11 @@ interface Props {
   destructive?: boolean;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
+  /** Optional third choice (e.g. "Skip this occurrence" vs. "Delete the
+   * series") rendered above the confirm/cancel row. Omitted entirely when
+   * either prop is absent - most callers only ever need two options. */
+  extraLabel?: string;
+  onExtra?: () => void | Promise<void>;
 }
 
 export default function ConfirmSheet({
@@ -22,6 +27,8 @@ export default function ConfirmSheet({
   destructive = false,
   onConfirm,
   onCancel,
+  extraLabel,
+  onExtra,
 }: Props) {
   const colors = useColors();
 
@@ -87,6 +94,18 @@ export default function ConfirmSheet({
       fontFamily: "Inter_600SemiBold",
       color: colors.primaryForeground,
     },
+    extraBtn: {
+      paddingVertical: 13,
+      borderRadius: 12,
+      backgroundColor: colors.muted,
+      alignItems: "center",
+      marginBottom: 12,
+    },
+    extraText: {
+      fontSize: 15,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.foreground,
+    },
   });
 
   return (
@@ -96,6 +115,11 @@ export default function ConfirmSheet({
           <View style={styles.handle} />
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
+          {extraLabel && onExtra ? (
+            <Pressable style={styles.extraBtn} onPress={onExtra} testID="confirm-sheet-extra">
+              <Text style={styles.extraText}>{extraLabel}</Text>
+            </Pressable>
+          ) : null}
           <View style={styles.btnRow}>
             <Pressable style={styles.cancelBtn} onPress={onCancel} testID="confirm-sheet-cancel">
               <Text style={styles.cancelText}>{cancelLabel}</Text>

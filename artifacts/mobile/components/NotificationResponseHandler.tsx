@@ -182,6 +182,18 @@ export default function NotificationResponseHandler() {
           // different facts, and this only needs the first - see
           // Reminder.notifiedAt for the real limitation (this listener only
           // runs while the app process is alive).
+          //
+          // Deliberately does NOT call advanceRecurringById here. It used to,
+          // to move a recurring series on the moment its notification landed
+          // rather than waiting for the next mount-time sweep - but that ran
+          // before the user had tapped anything, so reminder-detail.tsx (and
+          // the tray's own Snooze action, which reads reminder.datetime as
+          // its snooze base) ended up showing/acting on the NEXT occurrence
+          // instead of the one that just fired. rescheduleAllFutureReminders'
+          // mount-time catch-up pass is the one path this feature's
+          // correctness actually depends on (see its own comment) and already
+          // runs on every app open/foreground, so the series still advances
+          // promptly without this early call.
           if (data?.reminderId) {
             await markNotifiedById(data.reminderId);
           }

@@ -45,10 +45,11 @@ export function groupByDate<T>(
     "this-week": [],
     later: [],
   };
-  // Label for "this-week" entries is per-item (a weekday name), so items
-  // sharing that key still need their own label — tracked separately rather
-  // than forcing one shared label per bucket.
-  const weekdayLabels = new Map<T, string>();
+  // "This week" items are further split by calendar day (weekday label),
+  // since that bucket spans up to 6 distinct days that each need their own
+  // header — insertion order of first appearance decides label order, since
+  // items already arrive sorted by date from the caller.
+  const weekdayGroups = new Map<string, { label: string; items: T[] }>();
 
   for (const item of items) {
     const date = getDate(item);
@@ -59,7 +60,14 @@ export function groupByDate<T>(
       buckets.tomorrow.push(item);
     } else if (diff <= 6) {
       buckets["this-week"].push(item);
-      weekdayLabels.set(item, date.toLocaleDateString([], { weekday: "long" }));
+      const dayKey = startOfDay(date).toISOString();
+      if (!weekdayGroups.has(dayKey)) {
+        weekdayGroups.set(dayKey, {
+          label: date.toLocaleDateString([], { weekday: "long" }),
+          items: [],
+        });
+      }
+      weekdayGroups.get(dayKey)!.items.push(item);
     } else {
       buckets.later.push(item);
     }
@@ -69,11 +77,13 @@ export function groupByDate<T>(
   if (buckets.today.length) groups.push({ key: "today", label: "Today", items: buckets.today });
   if (buckets.tomorrow.length) groups.push({ key: "tomorrow", label: "Tomorrow", items: buckets.tomorrow });
   // "This week" items each carry their own weekday name, so they're emitted
-  // as individual single-item groups (in the caller's existing sort order)
+  // as one group per calendar day (in the caller's existing sort order)
   // rather than one group with a generic label — "Thursday" is more useful
   // to scan than a repeated "This week" header over several different days.
-  for (const item of buckets["this-week"]) {
-    groups.push({ key: "this-week", label: weekdayLabels.get(item)!, items: [item] });
+  // Items sharing a day are merged into that day's single group instead of
+  // each getting their own header.
+  for (const { label, items: dayItems } of weekdayGroups.values()) {
+    groups.push({ key: "this-week", label, items: dayItems });
   }
   if (buckets.later.length) groups.push({ key: "later", label: "Later", items: buckets.later });
 

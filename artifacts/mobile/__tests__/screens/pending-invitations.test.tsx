@@ -148,6 +148,83 @@ describe("PendingInvitationsScreen", () => {
     });
   });
 
+  // M2 Task 5c: this screen has its own inline Accept, bypassing
+  // invitation-preview.tsx entirely (see this file's own header comment).
+  // A recurring invitation accepted here must not silently drop the rule -
+  // and the recipient must be able to see it repeats before tapping Accept,
+  // the same requirement invitation-preview.tsx's own mockup satisfies with
+  // a full screen.
+  it("threads recurrence through to addReminder when accepting a recurring invitation", async () => {
+    mockSearchParams = {
+      invitations: JSON.stringify([
+        { ...CLAIMED[0], recurrence: { freq: "daily", interval: 1 } },
+      ]),
+    };
+    const rpcMock = mockRpcByArgs({ "sender-1": "Amma" });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+    const addReminderSpy = jest.spyOn(ReminderService, "addReminder");
+    jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+
+    const { getByTestId, findByText } = renderScreen();
+    await findByText("From Amma");
+    fireEvent.press(getByTestId("pending-invitation-accept-inv-1"));
+
+    await waitFor(() => expect(addReminderSpy).toHaveBeenCalled());
+    const [, data] = addReminderSpy.mock.calls[0];
+    expect(data.recurrence).toEqual({ freq: "daily", interval: 1 });
+
+    mockSearchParams = { invitations: JSON.stringify(CLAIMED) };
+  });
+
+  it("shows a repeat marker on a recurring invitation's row, before Accept is tapped", async () => {
+    mockSearchParams = {
+      invitations: JSON.stringify([
+        { ...CLAIMED[0], recurrence: { freq: "daily", interval: 1 } },
+      ]),
+    };
+    const rpcMock = mockRpcByArgs({ "sender-1": "Amma" });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+    const { findByText, getByTestId } = renderScreen();
+    await findByText("From Amma");
+    expect(getByTestId("pending-invitation-repeat-inv-1")).toBeTruthy();
+
+    mockSearchParams = { invitations: JSON.stringify(CLAIMED) };
+  });
+
+  it("does not show a repeat marker on a one-shot invitation's row", async () => {
+    const rpcMock = mockRpcByArgs({ "sender-1": "Amma", "sender-2": "Ravi" });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+
+    const { findByText, queryByTestId } = renderScreen();
+    await findByText("From Amma");
+    expect(queryByTestId("pending-invitation-repeat-inv-1")).toBeNull();
+  });
+
+  it("rejects an invalid recurrence rule rather than scheduling it, and does not show the repeat marker", async () => {
+    mockSearchParams = {
+      invitations: JSON.stringify([
+        { ...CLAIMED[0], recurrence: { freq: "hourly", interval: 1 } },
+      ]),
+    };
+    const rpcMock = mockRpcByArgs({ "sender-1": "Amma" });
+    (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });
+    const addReminderSpy = jest.spyOn(ReminderService, "addReminder");
+    jest.spyOn(InvitationService, "respondToInvitation").mockResolvedValue({ ok: true });
+
+    const { getByTestId, findByText, queryByTestId } = renderScreen();
+    await findByText("From Amma");
+    expect(queryByTestId("pending-invitation-repeat-inv-1")).toBeNull();
+
+    fireEvent.press(getByTestId("pending-invitation-accept-inv-1"));
+
+    await waitFor(() => expect(addReminderSpy).toHaveBeenCalled());
+    const [, data] = addReminderSpy.mock.calls[0];
+    expect(data.recurrence).toBeUndefined();
+
+    mockSearchParams = { invitations: JSON.stringify(CLAIMED) };
+  });
+
   it("declining one row does not add a local reminder and leaves the other row untouched", async () => {
     const rpcMock = mockRpcByArgs({ "sender-1": "Amma", "sender-2": "Ravi" });
     (SessionService.getSupabaseClient as jest.Mock).mockReturnValue({ rpc: rpcMock });

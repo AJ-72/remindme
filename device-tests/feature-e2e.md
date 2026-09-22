@@ -6,16 +6,21 @@
 | --- | --- | --- | --- | --- |
 | [D12](#d12) | Vague-task hint | `PASS` | 2026-08-29 | AUTO |
 | [D9](#d9) | Remind-someone-else Tier 1 | `PARTIAL` (core loop `PASS`) | 2026-08-30 | SEMI |
-| [D10](#d10) | Name capture and personalization | `PARTIAL` | 2026-08-24 | SEMI |
-| [D6](#d6) | Malayalam dictation end to end | `PENDING` | — | MANUAL |
-| [D11](#d11) | Quiet hours incl. midnight wrap | `PARTIAL` | 2026-09-04 | AUTO (partial) |
-| [D13](#d13) | "Why tasks slip" explainer | `PENDING` | — | SEMI |
+| [D10](#d10) | Name capture and personalization | `PASS` | 2026-09-20 | SEMI |
+| [D6](#d6) | Malayalam dictation end to end | `PASS` | 2026-09-20 | MANUAL |
+| [D11](#d11) | Quiet hours incl. midnight wrap | `PASS` | 2026-09-20 | AUTO (partial) |
+| [D13](#d13) | "Why tasks slip" explainer | `PASS` | 2026-09-20 | SEMI |
 | [D40](#d40) | "How you're doing" adherence screen | `PENDING` | — | SEMI |
 | [D41](#d41) | Better-time suggestion on save | `PENDING` | — | SEMI |
 | [D42](#d42) | Postponed-task intervention panel | `PENDING` | — | SEMI |
 | [D43](#d43) | notifiedAt / openedAt stamping survives a cold-start race | `PENDING` | — | SEMI |
 | [D83](#d83) | Dictation language is visible on quick-add | `PENDING` | — | SEMI |
 | [D84](#d84) | Switching dictation language mid-session | `PENDING` | — | MANUAL |
+| [D91](#d91) | Recurring reminder "Next 3" preview after repeated snoozes | `PASS` | 2026-09-19 | MANUAL |
+| [D92](#d92) | Home screen: recurrence preview cards for next occurrences | `PASS` | 2026-09-20 | MANUAL |
+| [D95](#d95) | Parsed date/time/recurrence chips are editable in place | `PASS` | 2026-09-21 | MANUAL |
+| [D96](#d96) | Skip today's occurrence of a recurring reminder vs. delete the series | `PASS` | 2026-09-20 | MANUAL |
+| [D97](#d97) | Same-weekday reminders/previews merge into one home-list group | `PASS` | 2026-09-20 | MANUAL |
 
 ---
 
@@ -418,7 +423,7 @@ fixed — a bare `router.back()` no-ops when there's nothing under this
 screen in the stack).
 
 <a id="d45"></a>
-## D45 — Country-code picker on registration · `PENDING`
+## D45 — Country-code picker on registration · `PASS` (2026-09-20)
 Malayalam-supporting app, real NRI user base — the device-region guess in
 `normalizeForIdentity` is wrong whenever a phone's system region doesn't
 match its SIM/carrier country (see `system_learnings.md`'s 2026-09-11
@@ -1180,9 +1185,11 @@ returns to the previous screen once, not to more copies of home).
 active but draws nothing, or the tour restarts on a later cold launch after
 being skipped.
 
-## D79 — System-wide "Remind Me" text-selection menu · `PENDING`
+## D93 — System-wide "Remind Me" text-selection menu · `PENDING`
 
-*Added 2026-09-17.* `ACTION_PROCESS_TEXT` is pure system integration: the
+*Added 2026-09-17. Renumbered from D79 on 2026-09-20 — D79 was already taken by the telemetry opt-out check in data-safety.md, which CLAUDE.md and backlog.md both cite.*
+
+`ACTION_PROCESS_TEXT` is pure system integration: the
 menu entry, the launch intent and the singleTask re-use path all live in the
 OS. Jest only proves that text put on the `sharedText` channel reaches
 QuickAddInput. Needs a **native build** (dev client or release) — a Metro
@@ -1276,3 +1283,210 @@ recognition".
 offline-model download. That is the documented behaviour of
 `ensureOfflineModelReady`, not a failure — but the app must say so and
 recover on the next tap.
+
+---
+
+<a id="d91"></a>
+## D91 — Recurring reminder "Next 3" preview after repeated snoozes · `PASS` (2026-09-19, OnePlus CPH2569, manual)
+
+*Added 2026-09-19.* Found live on-device while verifying uncommitted Task 7
+recurrence work (`feature/m2-recurring-reminders`), not from a written test
+plan — the reminder-detail screen's "Next 3" preview under `repeat-next-occurrences`
+duplicated a day instead of showing three distinct upcoming occurrences.
+
+**Root cause.** `snoozeReminder` (`ReminderService.ts`) moves a recurring
+reminder's `datetime` but deliberately never moves `recurrenceAnchor` (by
+design — `advanceRecurringReminder` must always compute from the untouched
+anchor). The preview used to compute `anchor + 1 period` and `anchor + 2
+periods` as fixed offsets from the anchor. Once enough snoozes pushed
+`datetime` past where `anchor + 1 period` naturally lands, the preview showed
+the current (snoozed) day twice before jumping to the third — e.g. "Next 3:
+Sun, 20 Sept · Sun, 20 Sept · Mon, 21 Sept" for a Daily reminder.
+
+**Fix.** New `upcomingOccurrences(rule, anchor, after, count)` in
+`recurrence.ts` walks forward from the anchor (mirroring
+`advanceRecurringReminder`'s own catch-up loop) and returns the next `count`
+occurrences strictly *after* a reference time, instead of fixed anchor-relative
+offsets. `reminder-detail.tsx` now calls it with the reminder's current
+`datetime` as the reference.
+
+**Steps.**
+1. Open a Daily recurring reminder that has been snoozed 3+ times (qualifies
+   for the "You have moved this N times" panel, or reach it via Insights'
+   stuck-task list).
+2. Read the "Next 3:" line under the repeat icon.
+
+**Pass.** Three distinct, correctly-ordered dates, each one period apart —
+no duplicated day.
+
+**Fails if.** Any two of the three dates are the same, or they are
+out of order.
+
+**Result (2026-09-19):** Reproduced the duplicate-day bug live on "Take
+medicine" (Daily, snoozed 3×) — screen showed "Next 3: Sun, 20 Sept · Sun, 20
+Sept · Mon, 21 Sept". Root-caused and fixed per above (Jest regression test
+added in `recurrence.test.ts` and `reminder-detail.test.tsx`, confirmed to
+fail against the pre-fix code and pass against the fix). Rebuilt and
+reinstalled locally; re-checked "Take medicine" (Daily, snoozed 3×, fresh
+instance of the same scenario) — screen now shows "Next 3: Sat, 19 Sept ·
+Sun, 20 Sept · Mon, 21 Sept", three distinct consecutive days. **PASS.**
+
+<a id="d92"></a>
+## D92 — Home screen: recurrence preview cards for next occurrences · `PASS` (2026-09-20, manual)
+
+*Added 2026-09-20.* Raised by the user: marking a recurring reminder done for
+today removed it from the home screen entirely — nothing visible signaled the
+series continues tomorrow or the day after. Feature (`utils/recurrencePreviews.ts`,
+`components/RecurrencePreviewCard.tsx`, wired into `app/(tabs)/index.tsx`)
+injects up to `PREVIEW_COUNT` read-only, dimmed preview cards for a recurring
+reminder's next occurrences into the existing day-grouped Upcoming list,
+independent of whether today's real occurrence is completed. The last preview
+in a run carries a "continues" label (e.g. "Daily").
+
+**Steps.**
+1. Have a recurring reminder (e.g. Daily) with today's occurrence marked done.
+2. Open the home screen, look under tomorrow's (and the day after's) date
+   header in the Upcoming section.
+
+**Pass.** Greyed-out preview card(s) for the reminder appear under the
+correct day headers, distinct from real interactive cards, even though the
+only real record for that series is today's completed one.
+
+**Fails if.** No preview appears for future days, or a preview looks
+identical to (i.e. is tappable/actionable like) a real card.
+
+**Result (2026-09-20):** Confirmed live by the user — "The cards are coming
+up fine now. greyed out marks its for tomorrow." **PASS.**
+
+---
+
+<a id="d96"></a>
+## D96 — Skip today's occurrence of a recurring reminder vs. delete the series · `PASS` (2026-09-20, manual)
+
+*Added 2026-09-20 (B22).* Deleting a recurring reminder used to remove the
+whole series unconditionally, with no way to say "just skip today, keep the
+series." `skipOccurrence()` (`ReminderService.ts`) now offers a third choice
+on delete for a recurring reminder, via `ConfirmSheet`'s new optional
+`extraLabel`/`onExtra` slot: "Skip This Occurrence" advances the series to
+its next occurrence without tallying it completed or missed; "Delete
+Series" keeps today's exact delete-everything behavior.
+
+**Steps.**
+1. Create a Daily recurring reminder. From the home screen (trash icon on
+   the card) or the reminder-detail screen (Delete button), delete it.
+2. Confirm the sheet shows both "Skip This Occurrence" and "Delete Series"
+   (a non-recurring reminder should still show the plain single-button
+   confirm, unchanged).
+3. Tap **Skip This Occurrence**.
+4. Separately, repeat from step 1 and tap **Delete Series** instead.
+
+**Pass.** After step 3, the reminder is still on the list/still open on
+the detail screen, now showing its next occurrence's date/time — it was
+neither marked done nor removed. After step 4 (a fresh reminder), the
+series is gone entirely, matching today's existing delete behavior.
+
+**Fails if.** Skip removes the reminder entirely, or leaves it stuck on
+the same past-due occurrence, or the Insights "How you're doing" screen
+later shows the skipped day counted as completed or missed.
+
+**Result (2026-09-20):** Confirmed live on device — skip advances the
+series without removing it, delete-series still removes it entirely.
+**PASS.**
+
+---
+
+<a id="d97"></a>
+## D97 — Same-weekday reminders/previews merge into one home-list group · `PASS` (2026-09-20, manual)
+
+*Added 2026-09-20.* Reported by the user: adding multiple recurring
+reminders, or a recurring + non-recurring reminder, landing on the same
+day 2-6 days out showed **two separate headers for the same weekday**
+(e.g. two "Tuesday" sections) instead of one, splitting same-day items
+across them.
+
+**Root cause.** `groupByDate()` (`utils/groupByDate.ts`) bucketed
+Today/Tomorrow/Later correctly as single groups, but emitted the
+"this-week" bucket as **one group per item** rather than one group per
+calendar day — any two items sharing a weekday got their own duplicate
+header instead of being merged into it.
+
+**Fix.** "This-week" items are now grouped by calendar day (`startOfDay`
+key) before being turned into `DateGroup`s, matching how Today/Tomorrow
+already merge same-day items.
+
+**Steps.**
+1. Add two or more reminders (recurring, non-recurring, or a mix,
+   including recurrence-preview cards) that land on the same weekday
+   2-6 days from today.
+2. View the home screen's Upcoming list.
+
+**Pass.** All same-day items appear under one weekday header, in
+datetime order.
+
+**Fails if.** The same weekday name appears as two or more separate
+header blocks with items split between them.
+
+**Result (2026-09-20):** Confirmed live on device — same-weekday items
+now merge under one header. **PASS.**
+
+---
+
+<a id="d95"></a>
+## D95 — Parsed date/time/recurrence chips are editable in place · `PASS` (2026-09-21, Android, manual)
+
+*Added 2026-09-20 with B23. Built and jest-verified 2026-09-21
+(`docs/shipped.md`). Confirmed on-device 2026-09-21 after fixing a live
+Android regression found during this pass (the native date/time dialog was
+appearing stacked on top of the app's own edit sheet) — see the Android note
+under Pass below.*
+
+The pill row under the quick-add box is `pointerEvents: "none"` today, so this
+is a check that a **new** affordance works, and specifically that it does not
+break the two things sitting closest to it: the text input underneath, and the
+live re-parse that fires on every keystroke. Jest can assert that a press
+handler was called; it cannot tell you the chip is reachable by a thumb, or
+that tapping near it does not steal focus from the input.
+
+**Setup.** Any build carrying B23. Home screen, empty quick-add box.
+
+**Steps.**
+1. Type `lunch with amma tomorrow at 1` — wait for the date and time chips to
+   appear under the box.
+2. Tap the **time** chip. Change the time to 2:30 PM. Confirm.
+3. Without saving, tap back into the text box and type ` at the usual place`
+   (appending, not replacing).
+4. Tap the **date** chip. Move it forward one day. Confirm.
+5. Type `every monday` into the box so a repeat chip appears; tap it and change
+   the frequency to weekly-on-Tuesday. Confirm.
+6. Save. Open the reminder from the list.
+7. Repeat step 1, but this time tap the text input directly *just below* the
+   chip row, in the gap between the chips and the box.
+
+**Pass.**
+- Each chip opens its own editor: date → date picker, time → time picker,
+  repeat → the recurrence sheet. Not one combined sheet.
+- On Android specifically, tapping a date/time chip shows **only** the native
+  OS date/time dialog — not the app's own "Edit date"/"Edit time" bottom sheet
+  underneath it. (Regression found live 2026-09-21: both used to mount at
+  once, so the native dialog appeared stacked on top of the custom sheet.
+  Fixed by skipping the custom sheet for a pill edit on Android, since the
+  native dialog is self-contained. Confirmed in Jest via a mocked picker;
+  this is the device confirmation that no visual double-modal remains.)
+- After step 3, the time still reads **2:30 PM** — the keystrokes did not
+  re-parse over the explicit edit.
+- The saved reminder in step 6 carries every edited value, and its notification
+  is scheduled for the edited time (check the list row, then
+  `dumpsys alarm | grep -i remindme`).
+- Step 7 puts the cursor in the text box and raises the keyboard. The chip row
+  does not swallow that tap.
+
+**Fails if.**
+- The chip row intercepts touches meant for the input — the most likely
+  regression from removing `pointerEvents: "none"`, and it makes the box feel
+  dead rather than obviously broken.
+- An explicit edit is silently reverted by the next keystroke (step 3). This is
+  the failure the user would report as "it keeps forgetting what I picked".
+- The repeat chip opens but its confirm writes nothing back, leaving the chip
+  showing the old rule.
+- A chip is tappable but its hit area is smaller than the chip's visible
+  bounds — check with `uiautomator dump` rather than by eye.

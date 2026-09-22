@@ -19,6 +19,7 @@ import {
   parseBackup,
   serializeBackup,
 } from "@/utils/reminderBackup";
+import { computeNthOccurrence, type RecurrenceRule } from "@/utils/recurrence";
 
 export type { SnoozePreset };
 export type { QuietHours };
@@ -198,6 +199,45 @@ export interface Reminder {
    * alone means "looked at it", which a snooze or completion doesn't need to
    * have happened for. */
   openedAt?: string;
+  /**
+   * Present only on a recurring reminder. Absent means one-shot - no
+   * migration needed, every existing record predating M2 simply has no
+   * recurrence and behaves exactly as before. See advanceRecurringReminder()
+   * below for how a recurring reminder moves to its next occurrence.
+   */
+  recurrence?: RecurrenceRule;
+  /**
+   * The series' standing schedule: what "every day at 8" actually means.
+   * Set when a recurrence rule is attached; NEVER moved by a snooze (a
+   * snooze defers one occurrence, it does not restate the schedule) - only
+   * by a deliberate time edit, which IS the user restating the schedule.
+   * advanceRecurringReminder() computes the next occurrence from this, not
+   * from `datetime`, which snooze overwrites - otherwise one two-hour
+   * snooze of "every day at 8" would silently convert the series to a
+   * standing 10am reminder.
+   */
+  recurrenceAnchor?: string;
+  /**
+   * Occurrences of a recurring series completed on time, tallied as each one
+   * advances. A recurring reminder's CURRENT record is always `pending` by
+   * `outcomeOf`'s definition (it always has a next occurrence sitting in the
+   * future) - without this, a perfectly-kept daily habit would score zero
+   * completions forever. See adherenceStats.ts.
+   */
+  occurrencesCompleted?: number;
+  /** Occurrences of a recurring series that went unactioned, tallied the
+   * same way and for the same reason as occurrencesCompleted above. */
+  occurrencesMissed?: number;
+  /**
+   * Snoozes on the CURRENT occurrence only, reset to 0 on each advance.
+   * `stuck` (adherenceStats.ts) reads THIS, not the series-wide
+   * `snoozeCount` above - three snoozes spread across three separate days of
+   * a daily reminder is normal and must not read as one task avoided three
+   * times in a row. `snoozeCount` keeps its own meaning unchanged (the
+   * series-wide avoidance signal M9 reads); this is a second, narrower
+   * counter, not a replacement.
+   */
+  currentOccurrenceSnoozes?: number;
 }
 
 /**
@@ -216,6 +256,129 @@ export function isReceivedReminder(r: Reminder): boolean {
  */
 export function isSendReminder(r: Reminder): boolean {
   return !!r.recipient?.phone?.trim();
+}
+
+/**
+ * Single definition of "is this reminder recurring", mirroring
+ * isSendReminder/isReceivedReminder above so every consumer agrees.
+ */
+export function isRecurring(r: Reminder): boolean {
+  return !!r.recurrence;
+}
+
+/** Bounds the catch-up loop in advanceRecurringReminder() below so a
+ * pathological rule (e.g. an interval that somehow yields near-zero
+ * progress) cannot hang the app trying to catch up to "now". */
+const MAX_ADVANCE_ITERATIONS = 10000;
+
+/**
+ * The reminder advanced to its next future occurrence, or null if it isn't
+ * recurring, has nothing to advance to yet, or the catch-up loop exhausts
+ * MAX_ADVANCE_ITERATIONS without reaching a strictly-future occurrence (see
+ * the cap-exhaustion comment inline below - not reachable via any real rule
+ * today, but a rule could arrive from an external source in a later task).
+ *
+ * Pure and synchronous - no I/O, no write lock. Callers (Task 5) are
+ * responsible for wrapping any actual load/save around this inside
+ * withWriteLock(), matching the pattern markNotifiedById() etc. use below.
+ *
+ * Catches up past MULTIPLE missed occurrences: a phone that was off for
+ * three days must land on the next FUTURE occurrence, not three days ago -
+ * so this calls computeNthOccurrence() with a growing period count, from the
+ * reminder's own recurrenceAnchor, until the result is strictly after `now`,
+ * rather than advancing just once.
+ *
+ * `snoozeCount`/`snoozeHistory` are deliberately preserved across
+ * occurrences, not reset - they are the series-level avoidance signal (M9's
+ * dread-override reads them), not a per-occurrence counter. It is `stuck`'s
+ * use of snoozeCount that conflates the two; Task 5b fixes that by adding a
+ * separate `currentOccurrenceSnoozes` rather than changing what this field
+ * means here. Do not "fix" this by resetting snoozeCount - both statements
+ * (series-level persists; per-occurrence tracking is a distinct, separate
+ * field) are correct at once, for different consumers.
+ */
+export function advanceRecurringReminder(r: Reminder, now: Date): Reminder | null {
+  if (!r.recurrence) return null;
+
+  const currentDue = new Date(r.datetime);
+  if (Number.isFinite(currentDue.getTime()) && currentDue.getTime() > now.getTime()) {
+    // Still in the future - nothing to advance to.
+    return null;
+  }
+
+  // Compute from the series' standing anchor, NEVER from `datetime` - a
+  // snooze overwrites `datetime` for that occurrence only, and computing
+  // from it here would silently convert the whole series to the snoozed
+  // time forever. `recurrenceAnchor` may be absent on a record from before
+  // this field existed; `datetime` is the correct fallback for that legacy
+  // case specifically (it has never been snoozed, so it IS the anchor).
+  const anchor = new Date(r.recurrenceAnchor ?? r.datetime);
+
+  // Each candidate is computed FRESH from `anchor` via computeNthOccurrence
+  // (periods=1, 2, 3, ...), never by chaining computeNextOccurrence from the
+  // previous candidate. Chaining would compound a monthly/yearly day-of-month
+  // clamp: a Jan-31 monthly reminder catching up after being past-due for
+  // several months would clamp Jan 31 -> Feb 28, then compute March from that
+  // already-clamped Feb 28 -> Mar 28, permanently losing the 31st instead of
+  // correctly landing back on Mar 31/Apr 30. Recomputing from the anchor each
+  // time clamps at most once, from the day the user actually set. See
+  // computeNthOccurrence's own doc comment.
+  let periods = 1;
+  let next = computeNthOccurrence(r.recurrence, anchor, periods);
+  let iterations = 0;
+  while (next.getTime() <= now.getTime() && iterations < MAX_ADVANCE_ITERATIONS) {
+    periods += 1;
+    next = computeNthOccurrence(r.recurrence, anchor, periods);
+    iterations += 1;
+  }
+
+  // Not reachable through any real RecurrenceRule today - normalizeInput()
+  // in recurrence.ts floors `interval` to >= 1 and every addX() helper
+  // advances by at least one day, so computeNextOccurrence always makes
+  // strictly-forward progress. This is defense in depth, not dead code:
+  // Task 5c will feed rules parsed from an external Tier 2 invitation
+  // payload through this same path, so "the rule made no progress" must
+  // fail safely rather than silently return a still-past-due occurrence
+  // dressed up as a valid result (per-occurrence fields already reset,
+  // looking like a fresh future reminder while actually stuck in the past).
+  if (next.getTime() <= now.getTime()) {
+    return null;
+  }
+
+  return {
+    ...r,
+    datetime: next.toISOString(),
+    // Per-occurrence state resets: a new occurrence has not been notified,
+    // opened, or completed yet.
+    completed: false,
+    completedAt: undefined,
+    notificationId: undefined,
+    notifiedAt: undefined,
+    openedAt: undefined,
+    // Tally the RETIRING occurrence's outcome onto the record before
+    // resetting to a fresh, always-pending-by-construction next occurrence.
+    // Without this, `outcomeOf` (adherenceStats.ts) reads every advanced
+    // record as `pending` forever, and a perfectly-kept daily habit
+    // contributes zero completions to any adherence number - proved by a
+    // probe against the real computeAdherenceStats before this existed.
+    occurrencesCompleted: r.completed
+      ? (r.occurrencesCompleted ?? 0) + 1
+      : r.occurrencesCompleted,
+    occurrencesMissed: !r.completed
+      ? (r.occurrencesMissed ?? 0) + 1
+      : r.occurrencesMissed,
+    // Per-occurrence snooze count resets to 0 - `stuck` reads THIS field,
+    // not the series-wide snoozeCount below, specifically so snoozes spread
+    // across separate days of a recurring reminder don't permanently read
+    // as one task avoided repeatedly in a row.
+    currentOccurrenceSnoozes: 0,
+    // Everything else (snoozeCount, snoozeHistory, originalDatetime,
+    // createdAt, recurrence, recurrenceAnchor, recipient/senderName, etc.)
+    // is preserved via the spread above - series-level state, not
+    // per-occurrence state. recurrenceAnchor in particular must NOT move
+    // here - only a deliberate time edit moves it (see its own doc comment
+    // on Reminder), never an advance.
+  };
 }
 
 export interface NotificationData {
@@ -1140,6 +1303,11 @@ export async function addReminder(
     completed: false,
     notificationId,
     createdAt: new Date().toISOString(),
+    // A newly-created recurring reminder's anchor IS its own datetime - the
+    // UI never has to know recurrenceAnchor exists, it just sets
+    // `recurrence` and the standing schedule is derived from where the
+    // reminder was actually set. Absent for a non-recurring reminder.
+    recurrenceAnchor: data.recurrence ? data.datetime : undefined,
   };
   const reminders = [added, ...current];
   await saveReminders(reminders);
@@ -1149,14 +1317,57 @@ export async function addReminder(
 export async function editReminder(
   current: Reminder[],
   id: string,
-  data: Omit<Reminder, "id" | "completed" | "notificationId">
+  data: Omit<Reminder, "id" | "completed" | "notificationId">,
+  options: { moveAnchor?: boolean } = {}
 ): Promise<Reminder[]> {
   const old = current.find((r) => r.id === id);
+  // Sweeps by payload AND cancels by stored id, like rearmReminder - a
+  // reminder that picked up an orphan notification (e.g. a snooze whose
+  // write hadn't landed in the copy this edit started from) has a pending
+  // trigger the stored id alone can't reach, which would otherwise survive
+  // this edit and fire alongside - or instead of - the newly scheduled one.
+  await cancelScheduledForReminder(id);
   await cancelNotification(old?.notificationId);
   const notificationId = await scheduleNotification(data, id);
-  const reminders = current.map((r) =>
-    r.id === id ? { ...r, ...data, notificationId } : r
-  );
+  const reminders = current.map((r) => {
+    if (r.id !== id) return r;
+    // `{ ...r, ...data }` alone can never CLEAR a field: when the caller
+    // omits an optional key (the same "absent means unset" convention
+    // addReminder documents for `recipient`), spreading `data` on top of `r`
+    // leaves r's own old value untouched, since there is nothing in `data`
+    // to overwrite it with. editReminder's contract is a full-replacement
+    // payload (unlike addReminder's fresh object), so clearing an
+    // already-set recipient or recurrence needs an explicit reset here, not
+    // just the spread. Found via the recurrence "clear to Doesn't repeat"
+    // case, then confirmed to be the identical pre-existing bug for
+    // recipient (clearing an existing recipient and saving silently kept
+    // the old one) - fixed for both.
+    const recipientPatch = "recipient" in data ? { recipient: data.recipient } : { recipient: undefined };
+    if (!data.recurrence) {
+      // "Doesn't repeat" was chosen (or recurrence was never set) - no
+      // anchor to carry, regardless of moveAnchor.
+      return {
+        ...r,
+        ...data,
+        ...recipientPatch,
+        notificationId,
+        recurrence: undefined,
+        recurrenceAnchor: undefined,
+      };
+    }
+    // Default is FALSE, deliberately, not "moves whenever datetime
+    // changes": editReminder is called from more than one place, and only
+    // an explicit, deliberate schedule restatement (the add-reminder Save
+    // button) should move the standing anchor. Other callers (e.g. the
+    // "move to your strongest hour" nudge on a recurring reminder) change
+    // `datetime` for reasons closer to a snooze - one occurrence, not the
+    // whole series - and must pass moveAnchor: false (the default) or
+    // explicitly ask the user first.
+    const recurrenceAnchor = options.moveAnchor
+      ? data.datetime
+      : r.recurrenceAnchor ?? data.datetime;
+    return { ...r, ...data, ...recipientPatch, notificationId, recurrenceAnchor };
+  });
   await saveReminders(reminders);
   return reminders;
 }
@@ -1185,6 +1396,63 @@ export async function deleteReminders(
   const targets = current.filter((r) => idSet.has(r.id));
   await Promise.all(targets.map((r) => cancelNotification(r.notificationId)));
   const reminders = current.filter((r) => !idSet.has(r.id));
+  await saveReminders(reminders);
+  return reminders;
+}
+
+/**
+ * B22: removes the CURRENTLY SHOWING occurrence of a recurring reminder
+ * from the schedule WITHOUT ending the series and WITHOUT tallying an
+ * outcome - unlike completeOccurrence (Mark Done), a skipped occurrence
+ * was neither completed nor missed, it was deliberately taken off the
+ * calendar.
+ *
+ * Reuses advanceRecurringReminder for the anchor-based catch-up math
+ * completeOccurrence relies on, but NOT with the real current time: that
+ * function's guard treats a still-future `datetime` as "nothing to
+ * advance to yet" (correct for its own caller, the past-due catch-up
+ * sweep), whereas "skip" must advance past the current occurrence
+ * whether it's overdue or still ahead - the user is looking at it right
+ * now, on the detail/list screen, asking to remove exactly this one.
+ * Passing the reminder's own `datetime` as `now` satisfies that guard
+ * (currentDue > now is then false) while leaving the anchor-based
+ * catch-up loop itself untouched, so a reminder that's ALSO several
+ * periods stale still lands correctly on the next strictly-future
+ * occurrence rather than the one right after the current (already-past)
+ * datetime.
+ *
+ * Falls back to a full deleteReminder when there's nothing to advance to:
+ * a non-recurring reminder (advanceRecurringReminder returns null by
+ * definition), or a recurring one whose catch-up loop is exhausted
+ * (MAX_ADVANCE_ITERATIONS) - in both cases there is no "next occurrence"
+ * to leave behind, so skipping degrades to deleting rather than leaving
+ * the reminder stuck.
+ */
+export async function skipOccurrence(
+  current: Reminder[],
+  id: string
+): Promise<Reminder[]> {
+  const target = current.find((r) => r.id === id);
+  if (!target) return current;
+
+  const asOfCurrentOccurrence = new Date(target.datetime);
+  const now = new Date();
+  const advanceFrom = asOfCurrentOccurrence.getTime() > now.getTime() ? asOfCurrentOccurrence : now;
+  const advanced = advanceRecurringReminder(target, advanceFrom);
+  if (!advanced) return deleteReminder(current, id);
+
+  await cancelNotification(target.notificationId);
+  const untallied: Reminder = {
+    ...advanced,
+    occurrencesCompleted: target.occurrencesCompleted,
+    occurrencesMissed: target.occurrencesMissed,
+  };
+  const notificationId = await rearmReminder(untallied, {
+    schedule: () => scheduleNotification(untallied, id),
+  });
+  const reminders = current.map((r) =>
+    r.id === id ? { ...untallied, notificationId } : r
+  );
   await saveReminders(reminders);
   return reminders;
 }
@@ -1229,6 +1497,44 @@ async function rearmReminder(
   return options.schedule();
 }
 
+/**
+ * The single decision for "what happens when this reminder is marked
+ * done", shared by toggleComplete (list-based, in-app) and markDoneById
+ * (by-id, notification-tray action) so a user gets the same result from
+ * either path.
+ *
+ * A recurring reminder does not stay completed - "every day at 8" means
+ * tomorrow's occurrence is still expected even though today's was just
+ * marked done, so completing it advances the series instead. A
+ * non-recurring reminder completes exactly as before.
+ *
+ * Only called on the COMPLETING transition, never on un-completing - see
+ * toggleComplete's own comment on why un-completing a past-due reminder is
+ * deliberately left overdue rather than advanced or rescheduled.
+ */
+async function completeOccurrence(
+  target: Reminder,
+  id: string
+): Promise<Partial<Reminder>> {
+  if (isRecurring(target)) {
+    const advanced = advanceRecurringReminder(target, new Date());
+    if (advanced) {
+      const notificationId = await rearmReminder(advanced, {
+        schedule: () => scheduleNotification(advanced, id),
+      });
+      return { ...advanced, notificationId };
+    }
+    // advanceRecurringReminder returned null (e.g. the iteration cap was
+    // exhausted - see its own doc comment): fall through to completing
+    // normally rather than leaving the reminder in limbo.
+  }
+  return {
+    completed: true,
+    notificationId: undefined,
+    completedAt: new Date().toISOString(),
+  };
+}
+
 export async function toggleComplete(
   current: Reminder[],
   id: string
@@ -1249,25 +1555,20 @@ export async function toggleComplete(
   // passed: it stays overdue and unscheduled (the list already surfaces
   // overdue items), rather than us inventing a new time on the user's behalf.
   // rearmReminder's default guard enforces exactly this.
-  const notificationId = completing
-    ? undefined
-    : await rearmReminder(
-        { ...target, completed: false },
-        { schedule: () => scheduleNotification(target, id) }
-      );
+  const patch: Partial<Reminder> = completing
+    ? await completeOccurrence(target, id)
+    : {
+        completed: false,
+        notificationId: await rearmReminder(
+          { ...target, completed: false },
+          { schedule: () => scheduleNotification(target, id) }
+        ),
+        // Set on completion, cleared on un-completion: a record must never
+        // claim a completion time for a task that is not complete.
+        completedAt: undefined,
+      };
 
-  const reminders = current.map((r) =>
-    r.id === id
-      ? {
-          ...r,
-          completed: !r.completed,
-          notificationId,
-          // Set on completion, cleared on un-completion: a record must never
-          // claim a completion time for a task that is not complete.
-          completedAt: completing ? new Date().toISOString() : undefined,
-        }
-      : r
-  );
+  const reminders = current.map((r) => (r.id === id ? { ...r, ...patch } : r));
   await saveReminders(reminders);
   return reminders;
 }
@@ -1312,6 +1613,11 @@ export async function snoozeReminder(
           datetime,
           notificationId,
           snoozeCount: (r.snoozeCount ?? 0) + 1,
+          // Per-occurrence sibling of snoozeCount above - resets to 0 on
+          // every advance (see advanceRecurringReminder), so `stuck`
+          // (adherenceStats.ts) can read "is THIS occurrence stuck"
+          // separately from "has this series ever been avoided".
+          currentOccurrenceSnoozes: (r.currentOccurrenceSnoozes ?? 0) + 1,
           // `??` not `||`: written once, on the first snooze only. An existing
           // value must survive every later snooze, since it is what makes the
           // distance a task has slid measurable.
@@ -1344,20 +1650,39 @@ export async function rescheduleAllFutureReminders(): Promise<void> {
   await withWriteLock(async () => {
     const reminders = await loadReminders();
     let changed = false;
+    const now = new Date();
     const updated = await Promise.all(
       reminders.map(async (reminder) => {
+        // A past-due RECURRING reminder must be advanced to its next future
+        // occurrence BEFORE rearmReminder runs, never after or instead of -
+        // isPendingForAlarmRewrite (below) rejects any past-due reminder by
+        // design (rescheduling an already-delivered one would show a second
+        // copy while orphaning the first), so a fired recurring occurrence
+        // is invisible to it until its datetime is moved into the future.
+        // This is the ONE path that makes the whole feature correct even if
+        // the best-effort received-listener advance never runs (a killed
+        // app misses the fire moment entirely) - everything else is
+        // latency, this is correctness.
+        const advanced =
+          isRecurring(reminder) &&
+          new Date(reminder.datetime).getTime() <= now.getTime()
+            ? advanceRecurringReminder(reminder, now)
+            : null;
+        const candidate = advanced ?? reminder;
+        if (advanced) changed = true;
+
         // rearmReminder's default guard (not completed, still in the future)
         // is exactly right here too: a reminder whose datetime has passed has
         // ALREADY been delivered, and rescheduling it would show a second copy
         // while orphaning the first — see isPendingForAlarmRewrite's doc.
-        const notificationId = await rearmReminder(reminder, {
-          schedule: () => scheduleNotification(reminder, reminder.id),
+        const notificationId = await rearmReminder(candidate, {
+          schedule: () => scheduleNotification(candidate, candidate.id),
         });
         if (notificationId !== undefined) {
           changed = true;
-          return { ...reminder, notificationId };
+          return { ...candidate, notificationId };
         }
-        return reminder;
+        return candidate;
       })
     );
     if (changed) {
@@ -1446,15 +1771,12 @@ export async function markDoneById(id: string): Promise<void> {
   const target = reminders.find((r) => r.id === id);
   if (!target) return;
   await cancelNotification(target.notificationId);
+  // Shares completeOccurrence with toggleComplete so marking done from the
+  // notification tray advances a recurring series exactly the same way
+  // marking done in-app does - see that function's own doc comment.
+  const completionPatch = await completeOccurrence(target, id);
   const updated = reminders.map((r) =>
-    r.id === id
-      ? {
-          ...r,
-          completed: true,
-          notificationId: undefined,
-          completedAt: new Date().toISOString(),
-        }
-      : r
+    r.id === id ? { ...r, ...completionPatch } : r
   );
   await saveReminders(updated);
 }
@@ -1487,6 +1809,32 @@ export async function markNotifiedById(id: string): Promise<void> {
 /** Stamps openedAt: the user just looked at this reminder's own detail
  * screen. See Reminder.openedAt for why this is tracked separately from
  * completing or snoozing it. */
+/**
+ * Best-effort recurring-series advance: a scheduled notification for this
+ * reminder just fired while the app is alive, so advance it to its next
+ * future occurrence immediately rather than waiting for the next mount-time
+ * sweep. This is latency, not correctness -
+ * rescheduleAllFutureReminders' own catch-up pass covers the case where this
+ * never runs at all (the app was killed at the exact fire moment), which is
+ * why that sweep, not this function, is the one path the feature's
+ * correctness actually depends on.
+ *
+ * A silent no-op for an unknown id or a non-recurring reminder, matching
+ * markNotifiedById's convention.
+ */
+export async function advanceRecurringById(id: string): Promise<void> {
+  // Same race as markNotifiedById/markOpenedById - see withWriteLock.
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    const target = reminders.find((r) => r.id === id);
+    if (!target) return;
+    const advanced = advanceRecurringReminder(target, new Date());
+    if (!advanced) return;
+    const updated = reminders.map((r) => (r.id === id ? advanced : r));
+    await saveReminders(updated);
+  });
+}
+
 export async function markOpenedById(id: string): Promise<void> {
   // See withWriteLock and markNotifiedById's comment above - same race, this
   // time from a notification tap cold-starting straight into the detail

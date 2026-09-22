@@ -16,6 +16,7 @@ import {
   attachInvitationId as serviceAttachInvitationId,
   deleteReminder as serviceDelete,
   deleteReminders as serviceDeleteMany,
+  skipOccurrence as serviceSkipOccurrence,
   editReminder as serviceEdit,
   getDefaultAlarmEnabled,
   getDefaultExactTimingEnabled,
@@ -84,10 +85,12 @@ interface RemindersContextType {
   attachInvitationId: (id: string, invitationId: string) => Promise<void>;
   editReminder: (
     id: string,
-    data: Omit<Reminder, "id" | "completed" | "notificationId">
+    data: Omit<Reminder, "id" | "completed" | "notificationId">,
+    options?: { moveAnchor?: boolean }
   ) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
   deleteReminders: (ids: string[]) => Promise<void>;
+  skipOccurrence: (id: string) => Promise<void>;
   toggleComplete: (id: string) => Promise<void>;
   markOpened: (id: string) => Promise<void>;
   snoozeReminder: (id: string, preset?: SnoozePreset) => Promise<void>;
@@ -374,9 +377,10 @@ export function RemindersProvider({
   const editReminder = useCallback(
     async (
       id: string,
-      data: Omit<Reminder, "id" | "completed" | "notificationId">
+      data: Omit<Reminder, "id" | "completed" | "notificationId">,
+      options?: { moveAnchor?: boolean }
     ) => {
-      const updated = await serviceEdit(reminders, id, data);
+      const updated = await serviceEdit(reminders, id, data, options);
       setReminders(updated);
       track(EVENTS.REMINDER_EDITED, reminderProps(data));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -406,6 +410,15 @@ export function RemindersProvider({
       const updated = await serviceDeleteMany(reminders, ids);
       setReminders(updated);
       track(EVENTS.REMINDER_DELETED, { count: ids.length, was_completed: false });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    },
+    [reminders]
+  );
+
+  const skipOccurrence = useCallback(
+    async (id: string) => {
+      const updated = await serviceSkipOccurrence(reminders, id);
+      setReminders(updated);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     },
     [reminders]
@@ -491,6 +504,7 @@ export function RemindersProvider({
         editReminder,
         deleteReminder,
         deleteReminders,
+        skipOccurrence,
         toggleComplete,
         markOpened,
         snoozeReminder,

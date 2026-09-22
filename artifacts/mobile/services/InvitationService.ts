@@ -134,6 +134,13 @@ export interface ClaimedInvitation {
   description: string | null;
   datetime: string;
   senderId: string;
+  /**
+   * M2 Task 5c. null for a one-shot invitation. Not yet validated at this
+   * layer - invitation-preview.tsx validates the shape before it reaches
+   * addReminder, since it crosses a trust boundary (another user's
+   * client -> this device -> its own notification schedule).
+   */
+  recurrence: { freq: string; interval: number; byWeekday?: number[] } | null;
 }
 
 /**

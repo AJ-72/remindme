@@ -25,3 +25,46 @@ Deno.test("returns an empty array when nothing is pending", async () => {
   const result = await handleClaimInvitations(client);
   assertEquals(result.claimed, []);
 });
+
+// M2 Task 5c
+Deno.test("forwards the recurrence column when present", async () => {
+  const client = {
+    rpc: async () => ({
+      data: [
+        {
+          id: "inv-1",
+          title: "Take tablet",
+          description: "",
+          datetime: "2026-09-09T08:00:00Z",
+          sender_id: "sender-1",
+          recurrence: { freq: "daily", interval: 1 },
+        },
+      ],
+      error: null,
+    }),
+    // deno-lint-ignore no-explicit-any
+  } as any;
+  const result = await handleClaimInvitations(client);
+  assertEquals(result.claimed[0].recurrence, { freq: "daily", interval: 1 });
+});
+
+Deno.test("forwards null recurrence as null, not undefined, for a one-shot invitation", async () => {
+  const client = {
+    rpc: async () => ({
+      data: [
+        {
+          id: "inv-2",
+          title: "X",
+          description: "Y",
+          datetime: "2026-09-09T08:00:00Z",
+          sender_id: "sender-1",
+          recurrence: null,
+        },
+      ],
+      error: null,
+    }),
+    // deno-lint-ignore no-explicit-any
+  } as any;
+  const result = await handleClaimInvitations(client);
+  assertEquals(result.claimed[0].recurrence, null);
+});

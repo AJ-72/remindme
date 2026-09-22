@@ -196,7 +196,44 @@ export function computeAdherenceStats(
     const snoozes = r.snoozeCount ?? 0;
     totalSnoozes += snoozes;
     if (snoozes > 0) postponed += 1;
-    if (!r.completed && snoozes >= STUCK_SNOOZE_THRESHOLD) stuck.push(r);
+    // `stuck` reads the CURRENT occurrence's snooze count when present
+    // (currentOccurrenceSnoozes, reset on every advance), not the
+    // series-wide snoozeCount - three snoozes spread across three separate
+    // days of a recurring reminder is normal and must not read as one task
+    // avoided three times in a row. Falls back to snoozeCount for a
+    // non-recurring reminder or one from before this field existed.
+    const occurrenceSnoozes = r.currentOccurrenceSnoozes ?? snoozes;
+    if (!r.completed && occurrenceSnoozes >= STUCK_SNOOZE_THRESHOLD) {
+      stuck.push(r);
+    }
+
+    // A recurring reminder's own CURRENT record is always pending by
+    // construction (advanceRecurringReminder always leaves it with a next
+    // future occurrence) - the retiring occurrences it already lived
+    // through are tallied on occurrencesCompleted/occurrencesMissed instead
+    // of being visible as separate records. Fold those in here so a
+    // perfectly-kept daily habit contributes N decided outcomes, not one
+    // permanent `pending` that scores nothing. Bucketed by this record's
+    // OWN planned hour/weekday (the anchor is stable across a series, see
+    // Reminder.recurrenceAnchor) rather than per-occurrence timestamps,
+    // which are not stored - exact for a stable series, an accepted
+    // approximation if the user later edits the time mid-series.
+    const tallyCompleted = r.occurrencesCompleted ?? 0;
+    const tallyMissed = r.occurrencesMissed ?? 0;
+    if (tallyCompleted > 0 || tallyMissed > 0) {
+      scored += tallyCompleted + tallyMissed;
+      completed += tallyCompleted;
+      missed += tallyMissed;
+      const planned = plannedTime(r);
+      if (isValidDate(planned)) {
+        const hourBucket = byHour[planned.getHours()];
+        const dayBucket = byWeekday[planned.getDay()];
+        hourBucket.scored += tallyCompleted + tallyMissed;
+        dayBucket.scored += tallyCompleted + tallyMissed;
+        hourBucket.completed += tallyCompleted;
+        dayBucket.completed += tallyCompleted;
+      }
+    }
 
     const outcome = outcomeOf(r, now);
     if (outcome === "pending") {

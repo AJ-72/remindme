@@ -6,12 +6,16 @@
 | --- | --- | --- | --- | --- |
 | [D8](#d8) | Dark mode, visually | `PASS` | 2026-08-24 | SEMI |
 | [D14](#d14) | Seven 2026-08-24 device fixes | `PARTIAL` | 2026-08-29 | SEMI |
-| [D27](#d27) | Ink & Coral palette, on device | `PENDING` | — | NO |
+| [D94](#d94) | Ink & Coral palette, on device | `PENDING` | — | NO |
 
 ---
 
-<a id="d27"></a>
-## D27 — Ink & Coral palette, on device · `PENDING`
+<a id="d94"></a>
+## D94 — Ink & Coral palette, on device · `PENDING`
+
+*Renumbered from D27 on 2026-09-20 — D27 was already taken by the Tier 2
+registration check in remind-others.md, which the Tier 2 spec and plan both
+cite as "D27-D37".*
 
 The palette swapped from indigo to Ink & Coral (`bbb1b3e`). Jest asserts
 token *values*, never rendered colour, so none of this is provable in

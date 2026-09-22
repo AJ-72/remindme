@@ -301,6 +301,57 @@ describe("ReminderDetailScreen", () => {
     expect(stored.find((r: Reminder) => r.id === "r1")).toBeUndefined();
   });
 
+  it("Delete on a recurring reminder offers skip-this-occurrence vs delete-the-series; skip advances it and stays on screen", async () => {
+    const PAST = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          datetime: PAST,
+          recurrenceAnchor: PAST,
+          recurrence: { freq: "daily", interval: 1 },
+        }),
+      ])
+    );
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("delete-button"));
+
+    const skipButton = await findByTestId("confirm-sheet-extra");
+    await act(async () => {
+      fireEvent.press(skipButton);
+    });
+
+    expect(mockBack).not.toHaveBeenCalled();
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored).toHaveLength(1);
+    expect(new Date(stored[0].datetime).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("Delete on a recurring reminder, choosing delete-the-series, removes it entirely and navigates back", async () => {
+    const PAST = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          datetime: PAST,
+          recurrenceAnchor: PAST,
+          recurrence: { freq: "daily", interval: 1 },
+        }),
+      ])
+    );
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("delete-button"));
+
+    const confirmButton = await findByTestId("confirm-sheet-confirm");
+    await act(async () => {
+      fireEvent.press(confirmButton);
+    });
+
+    await waitFor(() => expect(mockBack).toHaveBeenCalled(), { timeout: 5000 });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored.find((r: Reminder) => r.id === "r1")).toBeUndefined();
+  });
+
   it("cancelling the delete confirm sheet keeps the reminder and does not navigate back", async () => {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
     const { findByTestId } = renderScreen();
@@ -424,5 +475,184 @@ describe("the panel for a task that keeps moving", () => {
     );
     const { queryByTestId } = renderScreen();
     await waitFor(() => expect(queryByTestId("stuck-panel")).toBeNull());
+  });
+});
+
+describe("ReminderDetailScreen — recurrence", () => {
+  it("shows no repeat line for a one-shot reminder", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+    const { findByText, queryByTestId } = renderScreen();
+    await findByText("Test reminder");
+    expect(queryByTestId("repeat-detail")).toBeNull();
+  });
+
+  it("shows the rule via describeRecurrence", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recurrence: { freq: "daily", interval: 1 } })])
+    );
+    const { findByTestId, getByText } = renderScreen();
+    expect(await findByTestId("repeat-detail")).toBeTruthy();
+    expect(getByText("Daily")).toBeTruthy();
+  });
+
+  it("shows a Next 3 preview computed from computeNextOccurrence", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recurrence: { freq: "daily", interval: 1 } })])
+    );
+    const { findByTestId } = renderScreen();
+    const next3 = await findByTestId("repeat-next-occurrences");
+    expect(next3).toBeTruthy();
+  });
+
+  it("Next 3 preview's 2nd/3rd entries reflect the series' standing anchor, not a snoozed-to-a-different-day datetime", async () => {
+    // Regression for a real bug: the preview used to walk
+    // computeNextOccurrence forward from `reminder.datetime`, but a snooze
+    // overwrites `datetime` for one occurrence only and never moves
+    // recurrenceAnchor (see Reminder.recurrenceAnchor) - so a snoozed
+    // recurring reminder's "Next 3" silently showed occurrences computed
+    // from the snoozed time/day, disagreeing with what
+    // advanceRecurringReminder actually schedules (which always computes
+    // from the anchor). Weekly, anchored on a Monday, but snoozed 3 days
+    // forward to Thursday - the anchor-based 2nd/3rd entries land on the
+    // following two Mondays; a datetime-based (buggy) computation would
+    // instead show the following two Thursdays. Asserting on rendered date
+    // text (not just presence) is what makes this a real regression test
+    // rather than a smoke test - see this file's own "Next 3" smoke test
+    // above for the difference.
+    const anchorMonday = new Date();
+    anchorMonday.setHours(9, 0, 0, 0);
+    // Walk to the next Monday strictly in the future from "now" so the
+    // fixture is never accidentally past-due regardless of what day the
+    // suite runs on.
+    while (anchorMonday.getDay() !== 1 || anchorMonday.getTime() <= Date.now()) {
+      anchorMonday.setDate(anchorMonday.getDate() + 1);
+    }
+    const snoozedThursday = new Date(anchorMonday);
+    snoozedThursday.setDate(snoozedThursday.getDate() + 3); // Mon -> Thu
+
+    // Entry 1 of the preview is intentionally reminder.datetime as-is (the
+    // current, possibly-snoozed occurrence) — so it legitimately shows
+    // Thursday. It's entries 2 and 3 (computed from the anchor) that the bug
+    // affected: the buggy version chained forward from Thursday and showed
+    // the FOLLOWING Thursday there; the fix must show the following Monday
+    // instead.
+    const secondMonday = new Date(anchorMonday);
+    secondMonday.setDate(secondMonday.getDate() + 7);
+    const secondMondayLabel = secondMonday.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+    const followingThursday = new Date(snoozedThursday);
+    followingThursday.setDate(followingThursday.getDate() + 7);
+    const wrongFollowingThursdayLabel = followingThursday.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          datetime: snoozedThursday.toISOString(),
+          recurrenceAnchor: anchorMonday.toISOString(),
+          recurrence: { freq: "weekly", interval: 1 },
+        }),
+      ])
+    );
+    const { findByTestId } = renderScreen();
+    const next3 = await findByTestId("repeat-next-occurrences");
+    const text = next3.props.children.join("");
+    expect(text).toContain(secondMondayLabel);
+    expect(text).not.toContain(wrongFollowingThursdayLabel);
+  });
+
+  it("Next 3 preview does not duplicate the current occurrence when repeated snoozes push `datetime` past anchor+1", async () => {
+    // Regression for a real bug found live on-device (2026-09-19): a DAILY
+    // reminder anchored at 9:00 AM, snoozed 3 times until it landed the next
+    // day at 5:05 PM. anchor+1 day (9:00 AM) is BEFORE the snoozed `datetime`
+    // (5:05 PM that same day) — the previous fix (anchor+1, anchor+2 fixed
+    // periods) rendered entry 1 (from datetime) and entry 2 (from anchor+1)
+    // as the SAME calendar day, then jumped straight to entry 3 (the day
+    // after) — three entries covering only two distinct days instead of
+    // three genuinely distinct occurrences. The weekly test above doesn't
+    // catch this because a 3-day snooze there never pushes `datetime` past
+    // anchor+1's own week-later landing; a daily rule with a same-day snooze
+    // does.
+    // Anchored relative to "now" (not a hardcoded absolute date) so the
+    // fixture never accidentally becomes past-due depending on what day the
+    // suite runs on, which would trigger the mount-time reschedule sweep
+    // (rescheduleAllFutureReminders) and advance the reminder before the
+    // assertions run.
+    const anchor = new Date();
+    anchor.setDate(anchor.getDate() + 2);
+    anchor.setHours(9, 0, 0, 0);
+    const snoozedDatetime = new Date(anchor);
+    snoozedDatetime.setDate(snoozedDatetime.getDate() + 1);
+    snoozedDatetime.setHours(17, 5, 0, 0);
+
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          datetime: snoozedDatetime.toISOString(),
+          recurrenceAnchor: anchor.toISOString(),
+          recurrence: { freq: "daily", interval: 1 },
+        }),
+      ])
+    );
+    const { findByTestId } = renderScreen();
+    const next3 = await findByTestId("repeat-next-occurrences");
+    const text = next3.props.children.join("");
+
+    const snoozedDayLabel = snoozedDatetime.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+    const dayAfterSnooze = new Date(snoozedDatetime);
+    dayAfterSnooze.setDate(dayAfterSnooze.getDate() + 1);
+    dayAfterSnooze.setHours(9, 0, 0, 0);
+    const dayAfterSnoozeLabel = dayAfterSnooze.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+    const twoDaysAfterSnooze = new Date(snoozedDatetime);
+    twoDaysAfterSnooze.setDate(twoDaysAfterSnooze.getDate() + 2);
+    twoDaysAfterSnooze.setHours(9, 0, 0, 0);
+    const twoDaysAfterSnoozeLabel = twoDaysAfterSnooze.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+
+    // Entry 1 legitimately shows the snoozed day (the current occurrence).
+    // The bug was entry 2 ALSO showing that same day instead of the next
+    // distinct occurrence — assert the label appears exactly once, not "is
+    // present".
+    expect(text.split(snoozedDayLabel).length - 1).toBe(1);
+    expect(text).toContain(dayAfterSnoozeLabel);
+    expect(text).toContain(twoDaysAfterSnoozeLabel);
+  });
+
+  it("routes Edit into add-reminder, same as any other reminder — no separate recurrence edit path", async () => {
+    // Per the plan: "route editing into the SAME shared picker. Do not
+    // build a third implementation." The existing footer Edit button
+    // already routes into add-reminder.tsx, where the Repeats row lives —
+    // this screen adds no second Edit affordance for the rule specifically.
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ recurrence: { freq: "daily", interval: 1 } })])
+    );
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("edit-button"));
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: "/add-reminder",
+      params: { id: "r1" },
+    });
   });
 });

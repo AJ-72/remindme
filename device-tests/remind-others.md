@@ -157,7 +157,7 @@ A's screen and A is told it expired unanswered. Server-side, the invitation's
 to A, or B receives it late after expiry.
 
 <a id="d32"></a>
-## D32 — Concurrent cancel versus reschedule · `MANUAL`, `BLOCKED`
+## D32 — Concurrent cancel versus reschedule · `BLOCKED` (MANUAL)
 Two thumbs, same minute. No machine oracle — this is the one item in this file
 that genuinely needs two people.
 

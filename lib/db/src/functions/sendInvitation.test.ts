@@ -122,4 +122,108 @@ describe("send_invitation", () => {
     ).rejects.toThrow();
     await db.close();
   });
+
+  describe("recurrence (M2 Task 5c)", () => {
+    it("defaults to null when no recurrence is given, matching the client's own convention", async () => {
+      const db = await withSeed();
+      const result = await db.asUser(
+        ANAND,
+        `select recurrence from send_invitation('${AMMA}', 'X', 'Y', now() + interval '2 hours')`
+      );
+      expect(result).toEqual([{ recurrence: null }]);
+      await db.close();
+    });
+
+    it("writes the recurrence rule straight through when given", async () => {
+      const db = await withSeed();
+      const result = await db.asUser(
+        ANAND,
+        `select recurrence from send_invitation('${AMMA}', 'X', 'Y', now() + interval '2 hours', '{"freq":"daily","interval":1}'::jsonb)`
+      );
+      expect(result).toEqual([{ recurrence: { freq: "daily", interval: 1 } }]);
+      await db.close();
+    });
+
+    it("does not clamp the reminder time for a recurring send far in the future - datetime is unclamped, only content_expires_at is", async () => {
+      const db = await withSeed();
+      const result = await db.asUser(
+        ANAND,
+        `select (datetime > now() + interval '364 days') as datetime_unclamped,
+                (content_expires_at < now() + interval '31 days') as content_capped
+           from send_invitation('${AMMA}', 'X', 'Y', now() + interval '365 days', '{"freq":"yearly","interval":1}'::jsonb)`
+      );
+      expect(result).toEqual([{ datetime_unclamped: true, content_capped: true }]);
+      await db.close();
+    });
+
+    it("rejects an interval below 1", async () => {
+      const db = await withSeed();
+      await expect(
+        db.asUser(
+          ANAND,
+          `select * from send_invitation('${AMMA}', 'X', 'Y', now() + interval '2 hours', '{"freq":"daily","interval":0}'::jsonb)`
+        )
+      ).rejects.toThrow();
+      await db.close();
+    });
+
+    it("rejects a negative interval", async () => {
+      const db = await withSeed();
+      await expect(
+        db.asUser(
+          ANAND,
+          `select * from send_invitation('${AMMA}', 'X', 'Y', now() + interval '2 hours', '{"freq":"daily","interval":-1}'::jsonb)`
+        )
+      ).rejects.toThrow();
+      await db.close();
+    });
+
+    it("rejects an unknown freq", async () => {
+      const db = await withSeed();
+      await expect(
+        db.asUser(
+          ANAND,
+          `select * from send_invitation('${AMMA}', 'X', 'Y', now() + interval '2 hours', '{"freq":"hourly","interval":1}'::jsonb)`
+        )
+      ).rejects.toThrow();
+      await db.close();
+    });
+
+    it("rejects a malformed shape with no freq at all", async () => {
+      const db = await withSeed();
+      await expect(
+        db.asUser(
+          ANAND,
+          `select * from send_invitation('${AMMA}', 'X', 'Y', now() + interval '2 hours', '{"interval":1}'::jsonb)`
+        )
+      ).rejects.toThrow();
+      await db.close();
+    });
+
+    // A missing "freq" is `null = any(...)`, which SQL's three-valued logic
+    // evaluates to NULL rather than FALSE - a naive `not (x = any(...))`
+    // check would silently let this pass instead of rejecting it. Same bug
+    // class for a missing "interval" below.
+    it("rejects a shape with no interval at all", async () => {
+      const db = await withSeed();
+      await expect(
+        db.asUser(
+          ANAND,
+          `select * from send_invitation('${AMMA}', 'X', 'Y', now() + interval '2 hours', '{"freq":"daily"}'::jsonb)`
+        )
+      ).rejects.toThrow();
+      await db.close();
+    });
+
+    it("rejects a non-object recurrence value", async () => {
+      const db = await withSeed();
+      await expect(
+        db.asUser(
+          ANAND,
+          `select * from send_invitation('${AMMA}', 'X', 'Y', now() + interval '2 hours', '"daily"'::jsonb)`
+        )
+      ).rejects.toThrow();
+      await db.close();
+    });
+  });
 });

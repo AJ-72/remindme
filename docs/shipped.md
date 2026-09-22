@@ -1,0 +1,207 @@
+# Shipped
+
+Everything that has landed, newest first. **This is the source for release
+notes and feature announcements** — each entry carries a plain-language
+"user-facing" line you can lift directly, plus the technical record for
+traceability.
+
+Items move here from [backlog.md](../backlog.md) when they ship, and the
+backlog row is deleted in the same commit. Deep technical root causes live in
+[system_learnings.md](../system_learnings.md), not here; design reasoning
+lives in [docs/roadmap.md](roadmap.md).
+
+**Announce-ready** marks entries safe to put in front of users. Entries
+marked `jest only` are code-complete but unproven on hardware — do not
+advertise these until a device run logs a pass in `device-tests/`.
+
+---
+
+## 2026-09
+
+### Snooze notification actions device-verified (B2) — 2026-09-20 · Announce-ready
+
+**User-facing:** None (bug fix). Snoozing and marking done directly from
+notifications now works reliably when the app is fully closed, and re-alert
+after snooze shows your name in the notification.
+
+Device-verified:
+[D3](../device-tests/notifications.md#d3),
+[D15](../device-tests/notifications.md#d15),
+[D16](../device-tests/notifications.md#d16).
+
+### Recurring reminders (M2) — 2026-09-19 · `jest only`
+
+**User-facing:** Set a reminder once and have it repeat — "every day at 8",
+"every Monday", monthly or yearly. Snoozing today's reminder doesn't move
+the whole series, and a completed repeating reminder still shows you what's
+coming next.
+
+English only; Malayalam recurrence is not built. Notification behavior across
+occurrences is unproven on hardware (D85-D90). Detail:
+[roadmap.md#m2](roadmap.md#m2-recurring-reminders).
+
+### Skip one occurrence of a recurring reminder (B22) — 2026-09-20 · Announce-ready
+
+**User-facing:** Deleting a repeating reminder now asks what you mean:
+skip just today's occurrence and keep the series going, or delete the
+whole thing. Skipping doesn't count against your completion stats — it's
+neither a "done" nor a "missed".
+
+### Editable date/time/recurrence chips in quick add (B23) — 2026-09-21 · Announce-ready
+
+**User-facing:** If the app parses the wrong day, time, or repeat pattern from
+what you typed, you can now tap the chip under the box to fix it directly —
+no need to re-word the sentence or save and edit afterwards. Once you correct
+a chip, further typing won't silently overwrite your correction.
+
+Tapping a date/time chip opens the existing native picker; tapping the repeat
+chip opens the existing recurrence picker. Each is seeded with the current
+value and, once confirmed, "pinned" so later re-parses of the title don't
+reset it; cancelling leaves the prior value untouched, and saving or clearing
+the input resets all pins. A live Android regression (native picker appearing
+stacked on top of the app's own edit sheet) was found and fixed during device
+testing — see the RCA note under D95.
+
+Device-confirmed, [device-tests/feature-e2e.md#d95](../device-tests/feature-e2e.md#d95).
+
+### Recurring reminder preview cards — 2026-09-20 · Announce-ready
+
+**User-facing:** After you finish today's repeating reminder, the next few
+occurrences stay visible as dimmed cards under their own day headings,
+instead of the reminder vanishing from your list.
+
+Device-confirmed, [device-tests/feature-e2e.md#d92](../device-tests/feature-e2e.md#d92).
+
+### Remind someone else, Tier 2 (M4) — 2026-09-11 · Announce-ready
+
+**User-facing:** Send a reminder straight to someone else's phone. They get a
+notification saying who it's from, and can accept or decline. Works without
+either of you sharing anything but a phone number, and reminders still fire
+even if the service is down.
+
+Live end-to-end on two physical devices. Covers: registration and invite-link
+binding, push naming the sender, accept/decline, a list screen when several
+arrive at once, a sender chip on received reminders, and per-person blocking.
+Backend is Supabase (`remindme-tier2`), reached only via Edge Functions.
+Design: [roadmap.md#m4](roadmap.md#m4-remind-someone-else).
+
+| Sub-item | ID | Note |
+| --- | --- | --- |
+| Persist registered number; block silent re-registration | B10 | Adds an "already registered" state and a "Remove this number" step. |
+| Push shows the sender's name | B11 | "{name} sent you a reminder" instead of generic copy. |
+| Optional registration on first install | B12 | Skippable; core reminders never require it. |
+| Home screen provenance chip + date sort | B13 | "From {name}" chip; list already sorted earliest-first. |
+| B11's fix redeployed to the live function | B14 | Live function had drifted from repo source. |
+| Multiple pending invitations to a list screen | B15 | 2+ arriving at once no longer dropped. |
+
+### Android push notifications (FCM) — 2026-09-11 · Announce-ready
+
+**User-facing:** Reminders sent to you by other people now actually arrive as
+notifications on Android.
+
+Needed two separate credentials — `google-services.json` **and** an FCM
+service-account key uploaded to Expo's dashboard. See CLAUDE.md's "Gotchas".
+
+### Internal cleanups — 2026-09-12
+
+Not user-facing; no release-note value. Recorded for traceability only.
+
+| Item | ID | Note |
+| --- | --- | --- |
+| Collapse duplicated cancel-to-schedule sequence | B17 | `rearmReminder()` now backs all four call sites; the "still in the future" guard applied everywhere. |
+| Extract dictation seam; remove shipped debug logs | B18 | **Reverted 2026-09-17** — `main` had grown a larger dictation surface the hook predated. Re-extraction still open. |
+| Deduplicate date-picker plumbing | B19 | New `utils/dateTimePicker.ts`. Divergent picker sequencing left alone deliberately (different UX, not drift). |
+| Centralize dictation-readiness | B20 | `resolveDictationReadiness()`; the two call sites had silently disagreed on what "still downloading" means. |
+
+### 12-hour AM/PM time display — 2026-09-03 · `jest only`
+
+**User-facing:** Times show as "6:30 PM" rather than "18:30".
+
+Device run blocked on Metro connectivity at the time —
+[device-tests/malayalam-parsing.md#d24](../device-tests/malayalam-parsing.md#d24).
+
+### Malayalam numeral clock times + ambiguous-numeral sheet — 2026-09 · `jest only`
+
+**User-facing:** Malayalam reminders understand clock times written in
+numerals, and ask you which time you meant when a number is genuinely
+ambiguous.
+
+Parser-side only; device checklist still open.
+
+---
+
+## 2026-08
+
+### Smart alerts, components 1/3/4/5 — 2026-08-23 · Announce-ready
+
+**User-facing:** Quiet hours, so reminders don't wake you, plus a
+plain-English explainer of why tasks slip and what to do about it.
+
+Component 2 (the re-nudge ladder) was deliberately deferred — see
+[roadmap.md#m9](roadmap.md#m9-smart-re-nudge).
+
+### Insights — "How you're doing" · Announce-ready
+
+**User-facing:** See your own completion rate, which hours you actually
+follow through, how your week is loaded, and which tasks you keep putting
+off. It stays quiet rather than guessing when it doesn't have enough data
+yet.
+
+Derived entirely from reminder records — no separate event log.
+
+### Remind someone else, Tier 1 (M4) — 2026-08-30 · Announce-ready
+
+**User-facing:** Set a reminder to message someone — at the right time your
+phone rings and hands you a pre-filled WhatsApp or SMS message to send.
+
+Core loop passed on device. **Honest framing that constrains all copy: this
+is "remind me to message someone", not "remind someone else"** — the
+recipient's phone never rings. Edge cases outstanding under B8/D9.
+
+### Dark mode (M1) — 2026-08-10 · Announce-ready
+
+**User-facing:** Full dark mode, following your system setting, with a
+Light/Dark/System override in Settings.
+
+Needs a fresh device walk — several screens shipped after the last pass (D8).
+
+### Manual backup / restore — 2026-08-10 · Announce-ready
+
+**User-facing:** Back up your reminders to a file and restore them on another
+phone.
+
+Merge is local-wins, dedupes by content not id.
+
+### Re-arm fixes — 2026-08-28 / 2026-08-30 · Announce-ready
+
+**User-facing:** Un-completing a reminder schedules its notification again,
+and your existing reminders keep working immediately after an app update
+instead of waiting for the next sweep.
+
+Device-verified: [D21](../device-tests/data-safety.md#d21),
+[D23](../device-tests/data-safety.md#d23).
+
+### Alarm icon explainer — 2026-08-28 · Announce-ready
+
+**User-facing:** The permanent alarm icon in your status bar is now
+explained, and the setting that causes it is labelled clearly.
+
+Device-verified with one fix needed:
+[D22](../device-tests/cross-cutting.md#d22).
+
+---
+
+## 2026-07
+
+Earlier work, before this log was split out. User-facing where noted.
+
+| Item | Shipped | User-facing |
+| --- | --- | --- |
+| Speech-to-text fixes (language always English, content not saved, toggle stuck) | 2026-07-23 | Voice dictation works in your chosen language and saves what you said. |
+| Branding — CuriosMind Labs name + About tab | 2026-07-22 | — (placeholder icon only) |
+| Sort completed newest-first, pending earliest-first | 2026-07-21 | Your list is ordered the way you would expect. |
+| "Mark as done" notification doesn't dismiss | 2026-07-21 | Marking done from the notification clears it. |
+| Description edits not saving | 2026-07-21 | Edits to a reminder's notes save correctly. |
+| Reminder doesn't fire first time without an edit+save | 2026-07-21 | New reminders fire without needing a re-save. |
+| Show description in notification (with consent) | 2026-07-20 | Your reminder's notes can show in the notification. |
+| Textbox placeholder overflow | 2026-07-20 | — (visual fix) |

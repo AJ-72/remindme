@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, pgEnum, pgPolicy, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, jsonb, pgEnum, pgPolicy, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -102,6 +102,26 @@ export const invitationsTable = pgTable(
     contentEncryption: contentEncryptionEnum("content_encryption").notNull().default("none"),
 
     datetime: timestamp("datetime", { withTimezone: true }).notNull(),
+
+    /**
+     * A recurrence rule (shape mirrors the mobile client's RecurrenceRule -
+     * artifacts/mobile/utils/recurrence.ts), or null for a one-shot
+     * reminder. Nullable and additive, matching the client's own "absent
+     * means one-shot" convention - no backfill needed.
+     *
+     * The server never re-sends or re-schedules from this column - it is a
+     * mailbox, not a runtime (see this table's own header). The recipient
+     * accepts ONCE; the series then lives entirely on her device, advancing
+     * via the same local machinery as any other recurring reminder. This
+     * column exists only to carry the rule across the one accept, not to
+     * back any server-side scheduling.
+     *
+     * Crosses a trust boundary (another user's client -> this row -> the
+     * recipient's own notification schedule), so `send_invitation()`
+     * validates its shape server-side before writing it - never trust it
+     * merely because it parsed as JSON.
+     */
+    recurrence: jsonb("recurrence"),
 
     /** Preserved so the sender's list can read "9:00 (you sent 8:00)" after a
      * reschedule. Same problem and same solution as `Reminder.originalDatetime`

@@ -1,5 +1,6 @@
 import * as chrono from "chrono-node";
 import { parseMalayalamDateTime, type ParsedDateTime } from "./malayalamDateParser";
+import { computeNextOccurrence, parseRecurrencePhrase } from "./recurrence";
 
 export const MALAYALAM_RANGE = /[ഀ-ൿ]/;
 
@@ -17,6 +18,42 @@ function daysInMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate();
 }
 
+interface Range {
+  start: number;
+  end: number;
+}
+
+// Merges overlapping/adjacent ranges before stripping. Needed because a
+// recurrence phrase's span can overlap a chrono match embedded inside it
+// (e.g. "every monday" [0,12) vs chrono's own "monday" [6,12) match) —
+// stripping both independently against the same original-string indices
+// double-counts the overlap and corrupts the result. Sorted descending by
+// start, matching the existing highest-index-first stripping loop.
+function mergeRanges(ranges: Range[]): Range[] {
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const merged: Range[] = [];
+  for (const r of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && r.start <= last.end) {
+      last.end = Math.max(last.end, r.end);
+    } else {
+      merged.push({ ...r });
+    }
+  }
+  return merged.sort((a, b) => b.start - a.start);
+}
+
+function stripRanges(text: string, ranges: Range[]): string {
+  let title = text;
+  for (const { start, end } of mergeRanges(ranges)) {
+    title = title.slice(0, start) + title.slice(end);
+  }
+  return title
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
+    .trim();
+}
+
 // Ambiguity is reported only by the Malayalam parser today; chrono resolves
 // the equivalent English shape ("buy 5 apples in the morning") without ever
 // reading the count as an hour, so there is nothing to ask about there.
@@ -28,8 +65,29 @@ export function parseNaturalLanguage(text: string, now: Date = new Date()): Pars
   }
 
   const ordinalMatch = text.match(ORDINAL_DAY_RELATIVE_MONTH);
+  const recurrenceMatch = parseRecurrencePhrase(text);
   const results = chrono.parse(text, now, { forwardDate: true });
-  if (results.length === 0) return { title: text.trim(), date: null };
+
+  if (results.length === 0) {
+    if (!recurrenceMatch) return { title: text.trim(), date: null };
+
+    // A recurrence phrase matched but chrono found no explicit clock time
+    // anywhere in the text (e.g. "every Monday" with nothing else
+    // date-like). Anchor default, deliberately chosen: 9:00 AM local time,
+    // on the first occurrence the rule produces strictly after "now" (e.g.
+    // the next Monday). 9:00 AM matches the existing default this codebase
+    // already uses elsewhere for a day-only match with no time component
+    // (see PERIOD_WORDS/composed.setHours(9, 0, 0, 0) in
+    // malayalamDateParser.ts), so a recurring reminder with no stated time
+    // behaves the same as a one-off reminder with no stated time.
+    const anchor = new Date(now);
+    anchor.setHours(9, 0, 0, 0);
+    const date = computeNextOccurrence(recurrenceMatch.rule, anchor);
+
+    const title = stripRanges(text, [recurrenceMatch.match]);
+    return { title: title || text.trim(), date, recurrence: recurrenceMatch.rule };
+  }
+
   const parsed = results[0];
   let date = parsed.date();
 
@@ -40,21 +98,21 @@ export function parseNaturalLanguage(text: string, now: Date = new Date()): Pars
     date.setDate(clampedDay);
   }
 
-  // Collect removal ranges (chrono's own matches, plus the ordinal-day
-  // prefix chrono ignored) and strip them out highest-index-first so
-  // earlier ranges' indices stay valid into the original string.
-  const ranges = results.map((r) => ({ start: r.index, end: r.index + r.text.length }));
+  // Collect removal ranges (chrono's own matches, the ordinal-day prefix
+  // chrono ignored, and any recurrence phrase) and strip them out
+  // highest-index-first so earlier ranges' indices stay valid into the
+  // original string.
+  const ranges: Range[] = results.map((r) => ({ start: r.index, end: r.index + r.text.length }));
   if (ordinalMatch && ordinalMatch.index !== undefined) {
     ranges.push({ start: ordinalMatch.index, end: ordinalMatch.index + ordinalMatch[0].length });
   }
-  ranges.sort((a, b) => b.start - a.start);
-  let title = text;
-  for (const { start, end } of ranges) {
-    title = title.slice(0, start) + title.slice(end);
+  if (recurrenceMatch) {
+    ranges.push(recurrenceMatch.match);
   }
-  title = title
-    .replace(/\s+/g, " ")
-    .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
-    .trim();
-  return { title: title || text.trim(), date };
+  const title = stripRanges(text, ranges);
+  return {
+    title: title || text.trim(),
+    date,
+    ...(recurrenceMatch ? { recurrence: recurrenceMatch.rule } : {}),
+  };
 }

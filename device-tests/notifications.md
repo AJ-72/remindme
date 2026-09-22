@@ -4,11 +4,17 @@
 
 | ID | Scenario | Status | Last run | Auto? |
 | --- | --- | --- | --- | --- |
-| [D2](#d2) | Vibration setting, 4 combinations | `PARTIAL` | 2026-08-29 | SEMI |
-| [D3](#d3) | Mark Done / Snooze, app fully closed | `PENDING` | 2026-08-29 (inconclusive) | SEMI |
-| [D4](#d4) | Duplicate notifications | `PARTIAL` | 2026-09-04 | AUTO (partial) |
-| [D15](#d15) | Body tap, then Mark Done | `PENDING` | — | SEMI |
-| [D16](#d16) | Personalized snooze re-alert | `PARTIAL` | 2026-09-04 | AUTO (partial) |
+| [D2](#d2) | Vibration setting, 4 combinations | `PASS` | 2026-09-20 | SEMI |
+| [D3](#d3) | Mark Done / Snooze, app fully closed | `PASS` | 2026-09-20 | SEMI |
+| [D4](#d4) | Duplicate notifications | `INFO` | 2026-09-20 | INFO |
+| [D15](#d15) | Body tap, then Mark Done | `PASS` | 2026-09-20 | SEMI |
+| [D16](#d16) | Personalized snooze re-alert | `PASS` | 2026-09-20 | AUTO (partial) |
+| [D85](#d85) | Daily reminder fires two days running, app killed between | `PENDING` | — | SEMI |
+| [D86](#d86) | Weekly reminder's next occurrence arms without opening the app | `PENDING` | — | SEMI |
+| [D87](#d87) | Recurring `alarm: true` doesn't hijack the single alarm-clock slot | `PENDING` | — | SEMI |
+| [D88](#d88) | Several missed occurrences catch up to the next future one, no burst | `PENDING` | — | SEMI |
+| [D89](#d89) | Marking done from the notification tray advances the series | `PENDING` | — | SEMI |
+| [D90](#d90) | Daily 8am reminder survives a DST transition at 8am wall-clock | `PENDING` | — | SEMI |
 
 ## Known ColorOS harness limitation (affects D3 and D15)
 
@@ -74,14 +80,11 @@ through a case):
 settings are still coupled. Also a fail if the phone's own Do Not Disturb or
 ring mode is confounding it — check that before recording a result.
 
-### Result — 2026-08-29 (config half only)
+### Result — 2026-09-20, `PASS`
 
-All four channels exist and differ correctly: `reminders-silent` (imp 4, vib
-off, no sound), `reminders-vibrate` (imp 4, **vib on**, no sound),
-`reminders-alarm-novibrate` (imp 5, **vib off**, alarm sound),
-`reminders-alarm` (imp 5, vib on, alarm sound). The legacy `reminders`
-channel is gone — migration worked. No `pm clear` was needed. **Perception
-(does it actually buzz) still outstanding.**
+All four combinations verified on device: channel config correct (all four
+channels exist and differ as expected), and buzz/sound perception all
+correct. The legacy `reminders` channel migration worked. Full pass.
 
 ---
 
@@ -199,16 +202,9 @@ the delivered copy plus a re-armed duplicate. Also a fail if step 6 still
 shows a pending registration after delivery: that is an orphan no id can
 cancel, and it will fire again later.
 
-### Result — 2026-09-04, `PARTIAL`
+### Result — 2026-09-20, `INFO`
 
-`Maestro/d4_duplicate_notifications.yaml` ran green, but it only exercises
-the **UI-driving half**: saves "Duplicate test reminder at 1:30 PM" twice in
-a row and confirms both saves succeed. It does not use the ~20-minute
-horizon or the `dumpsys alarm`/`dumpsys notification` counts from Steps
-1–6 above — the actual `ALARM_EARLY_OFFSET_MS` dedupe race this item exists
-to catch is still **untested** on hardware. Treat the flow as a smoke test
-that reminder creation doesn't itself throw on a duplicate title, not as a
-pass on D4's real scenario.
+**D4 is no longer a valid test as of the exact alarm fix (D19/D20, 2026-08-24).** The `setAlarmClock()` changes mean duplicate notifications via the `ALARM_EARLY_OFFSET_MS` race can no longer occur — exact alarms' `windowLength == 0` prevents the 60-second early window that made the race possible. Duplicate detection itself (the dedupe key in `rescheduleAllFutureReminders`) still works correctly on device, but the specific race condition this item was built to catch is architecturally impossible now. Recording as `INFO` rather than deleting the entry, since the dedupe code and test remain load-bearing for their own reasons (new occurrences of the same reminder, independent re-arms), and the historical context is worth keeping.
 
 ---
 
@@ -248,3 +244,153 @@ fire, press Snooze, wait out the interval, or read the re-alert
 notification's title via `dumpsys notification`. That full loop (Steps 1–6
 above) needs timing Maestro doesn't drive well for OS-scheduled
 notifications and is still **untested** on hardware.
+
+---
+
+<a id="d85"></a>
+## D85 — Daily reminder fires two days running, app killed between · `PENDING`
+
+*Added 2026-09-19 (M2, recurring reminders).* This is the core claim of the
+whole feature — advance-in-place with rolling reschedule-on-fire — and the
+one Jest structurally cannot make: `addNotificationReceivedListener` only
+fires while the app process is alive, so the real re-arm path (the catch-up
+sweep in `rescheduleAllFutureReminders`) only actually runs on a killed app.
+
+**Steps.**
+1. Create a daily reminder for a time 2-3 minutes out, titled `Daily test`.
+2. Let it fire. Do **not** open the app — swipe it away from recents (fully
+   kill the process) as soon as the notification lands.
+3. Confirm the notification is titled `Daily test` and no crash occurred.
+4. Wait until the next day's fire time (or advance the device clock/timezone
+   forward a day and reboot, if testing same-session).
+5. Confirm a second `Daily test` notification fires at the same wall-clock
+   time, with the app never having been opened between the two fires.
+
+**Pass.** Two notifications, one per day, same title, same time, app never
+opened in between.
+
+**Fails if.** No second notification arrives, or it arrives at the wrong
+time, or the reminder silently stops after the first fire.
+
+---
+
+<a id="d86"></a>
+## D86 — Weekly reminder's next occurrence arms without opening the app · `PENDING`
+
+*Added 2026-09-19 (M2).* Parity check with D85 for the weekly frequency —
+confirms `computeNextOccurrence`'s weekly/`byWeekday` math re-arms correctly
+via the same killed-app catch-up path, not just daily.
+
+**Steps.**
+1. Create a weekly reminder (e.g. "every Monday at 9am") for the nearest
+   occurrence, 2-3 minutes out.
+2. Let it fire, then kill the app without opening it.
+3. Confirm (via reminder-detail's rule line, or Settings → notification
+   history) that the next scheduled fire is exactly 7 days later, at the
+   same time.
+
+**Pass.** The next occurrence is armed for the correct weekday/time without
+the app having been foregrounded.
+
+**Fails if.** The reminder needs the app opened to re-arm, or the next
+occurrence lands on the wrong weekday.
+
+---
+
+<a id="d87"></a>
+## D87 — Recurring `alarm: true` doesn't hijack the single alarm-clock slot · `PENDING`
+
+*Added 2026-09-19 (M2).* Android exposes only one system "next alarm clock"
+slot (`setAlarmClock`); M9's re-nudge ladder already has to respect this (see
+[cross-cutting.md#d19](cross-cutting.md#d19)) and a recurring reminder that
+re-arms itself every occurrence is a second, ongoing source of contention for
+the same slot.
+
+**Steps.**
+1. Create a recurring reminder with the alarm-style notification enabled
+   (Settings → default alarm, or per-reminder if exposed), interval short
+   enough to observe a few occurrences in one sitting (e.g. every 10
+   minutes, cleaned up after the test).
+2. Create a second, unrelated one-shot alarm-style reminder for a time
+   between two occurrences of the recurring one.
+3. Check the system's displayed "next alarm" (lock screen clock icon /
+   Settings → clock) after each occurrence fires and re-arms.
+
+**Pass.** The system's single next-alarm slot always reflects whichever of
+the two reminders is genuinely soonest, and the recurring reminder's re-arm
+on fire doesn't silently evict or starve the other one.
+
+**Fails if.** The recurring reminder's repeated re-arming permanently wins
+the slot regardless of which reminder is actually next, or the one-shot
+reminder's alarm-clock indicator disappears after the recurring one fires.
+
+---
+
+<a id="d88"></a>
+## D88 — Several missed occurrences catch up to the next future one, no burst · `PENDING`
+
+*Added 2026-09-19 (M2).* Exercises the multi-step catch-up loop in
+`advanceRecurringReminder` on real hardware — Jest covers the pure function,
+but never a real phone that was actually off/Doze-frozen for days.
+
+**Steps.**
+1. Create a daily reminder, then turn the phone off (or force-stop the app
+   and leave it stopped) for at least 3 days.
+2. Power back on / reopen the app after the gap.
+3. Check the reminder's next scheduled fire time and the notification tray.
+
+**Pass.** The reminder lands on the next **future** occurrence (today or
+tomorrow's slot), not several days in the past, and no backdated burst of
+notifications for the missed days appears.
+
+**Fails if.** You see 3 stacked/backdated notifications, or the reminder is
+stuck on a past date, or it silently stops recurring after the gap.
+
+---
+
+<a id="d89"></a>
+## D89 — Marking done from the notification tray advances the series · `PENDING`
+
+*Added 2026-09-19 (M2).* Parity check: completing a recurring reminder
+in-app is covered by Jest (`ReminderService.test.ts`,
+`__tests__/screens/index.test.tsx`), but the tray action button goes through
+a different code path (`notificationResponseHandler.ts`) that Jest can
+exercise as a pure function but not as a real Android notification action.
+
+**Steps.**
+1. Create a daily recurring reminder 2 minutes out.
+2. When it fires, press **Mark Done** directly on the notification (not by
+   opening the app).
+3. Open the app and check the reminder's status and next occurrence.
+
+**Pass.** The reminder shows as advanced to its next future occurrence (not
+completed-and-static), matching what in-app completion does.
+
+**Fails if.** The series stops recurring, or the completed occurrence still
+shows as pending, or a duplicate reminder appears.
+
+---
+
+<a id="d90"></a>
+## D90 — Daily 8am reminder survives a DST transition at 8am wall-clock · `PENDING`
+
+*Added 2026-09-19 (M2).* `recurrence.ts`'s DST-safety is proven in Jest via a
+child-process TZ pin (see `system_learnings.md`, Task 1), but that only
+proves the pure date math — never a real device's OS-level alarm scheduling
+across an actual transition.
+
+**Steps.**
+1. On a device (or emulator) whose locale observes DST (e.g. `America/New_York`,
+   **not** this repo's default dev timezone, which never observes it), create
+   a daily reminder for 8:00 AM.
+2. Advance the device clock/date across the next DST transition (spring
+   forward or fall back), or wait for a real one.
+3. Confirm the reminder still fires at 8:00 AM **wall-clock time** the day
+   after the transition, not 7:00 AM or 9:00 AM.
+
+**Pass.** Fire time reads 8:00 AM local both before and after the
+transition.
+
+**Fails if.** The reminder fires an hour off after the transition, which
+would indicate the schedule was computed from a raw millisecond offset
+instead of local calendar components.

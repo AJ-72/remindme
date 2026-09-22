@@ -16,6 +16,7 @@ import { Reminder, useReminders } from "@/contexts/RemindersContext";
 import { isReceivedReminder, isSendReminder } from "@/services/ReminderService";
 import { formatDatetime } from "@/utils/formatDatetime";
 import { getFontFamily } from "@/utils/getFontFamily";
+import { describeRecurrence } from "@/utils/recurrence";
 
 function isOverdue(iso: string, completed: boolean): boolean {
   return !completed && new Date(iso) < new Date();
@@ -93,6 +94,16 @@ const staticStyles = StyleSheet.create({
     marginTop: 6,
   },
   timeText: {
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+  },
+  repeatMarker: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    marginLeft: 6,
+  },
+  repeatMarkerText: {
     fontSize: 12,
     fontFamily: "Inter_500Medium",
   },
@@ -178,6 +189,9 @@ function ReminderCard({ reminder, onDelete }: Props) {
     senderChipText: [staticStyles.recipientChipText, { color: colors.accent }],
     description: [staticStyles.description, { color: colors.mutedForeground }],
     timeText: [staticStyles.timeText, dynamicTimeTextStyle],
+    // Always muted, deliberately — even when the time itself is destructive
+    // (overdue). "Every day" is a fact about the schedule, not a warning.
+    repeatMarkerText: [staticStyles.repeatMarkerText, { color: colors.mutedForeground }],
   };
 
   return (
@@ -300,6 +314,14 @@ function ReminderCard({ reminder, onDelete }: Props) {
               color={overdue && !reminder.completed ? colors.destructive : colors.mutedForeground}
             />
             <Text style={styles.timeText}>{formatDatetime(reminder.datetime)}</Text>
+            {reminder.recurrence && (
+              <View style={styles.repeatMarker} testID="repeat-marker">
+                <Feather name="repeat" size={11} color={colors.mutedForeground} />
+                <Text style={styles.repeatMarkerText}>
+                  {describeRecurrence(reminder.recurrence, new Date(reminder.datetime))}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 

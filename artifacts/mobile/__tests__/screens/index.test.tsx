@@ -1,5 +1,5 @@
 import React from "react";
-import { render, waitFor, fireEvent, act } from "@testing-library/react-native";
+import { render, waitFor, fireEvent, act, within } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StyleSheet } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -18,6 +18,8 @@ import {
 } from "@/services/ReminderService";
 import { formatHeaderDate } from "@/utils/formatHeaderDate";
 import { TAB_BAR_HEIGHT } from "@/constants/tabBar";
+import * as ReminderServiceModule from "@/services/ReminderService";
+import type { RecurrenceRule } from "@/utils/recurrence";
 
 jest.mock("expo-haptics");
 jest.mock("expo-router", () => ({
@@ -127,6 +129,76 @@ describe("HomeScreen", () => {
     expect(await findByText("Done")).toBeTruthy();
   });
 
+  it("a completed recurring reminder never comes to rest in Completed — it advances and stays in Upcoming", async () => {
+    // PAST, not FUTURE: advanceRecurringReminder only advances a reminder
+    // whose occurrence has actually fired (Task 4's contract) — completing a
+    // recurring reminder early, before its scheduled time, is a different,
+    // deliberately-unhandled case that falls through to a plain complete.
+    //
+    // The mount-time rescheduleAllFutureReminders sweep (Task 5's own
+    // catch-up pass) would otherwise race this: it advances any past-due
+    // recurring reminder on its own, before this test's toggle press ever
+    // fires, so by the time the tap lands the reminder is already at its
+    // NEXT (future) occurrence — completing THAT is "early", not "the fired
+    // occurrence", and the test would observe a plain complete instead of
+    // an advance. No-op the sweep here so the test can control this
+    // deterministically and actually exercise toggleComplete's own advance
+    // path, which is the thing this test means to prove.
+    jest.spyOn(ReminderServiceModule, "rescheduleAllFutureReminders").mockResolvedValue(undefined);
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          id: "r1",
+          title: "Take tablet",
+          completed: false,
+          datetime: PAST,
+          recurrence: { freq: "daily", interval: 1 },
+        }),
+      ])
+    );
+    const { findByText, getByTestId, queryByText } = renderScreen();
+    expect(await findByText("Take tablet")).toBeTruthy();
+    expect(await findByText("Upcoming")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(getByTestId("complete-toggle"));
+    });
+
+    // Still visible (advanced to its next occurrence), still under Upcoming,
+    // and never visibly parked in Completed at any point.
+    await waitFor(() => expect(queryByText("Take tablet")).toBeTruthy());
+    expect(queryByText("Completed")).toBeNull();
+  });
+
+  it("upcomingCount reflects the post-advance state of a completed recurring reminder", async () => {
+    // Same mount-sweep race as above — no-op it so the toggle itself is the
+    // thing under test.
+    jest.spyOn(ReminderServiceModule, "rescheduleAllFutureReminders").mockResolvedValue(undefined);
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          id: "r1",
+          title: "Take tablet",
+          completed: false,
+          datetime: PAST,
+          recurrence: { freq: "daily", interval: 1 },
+        }),
+      ])
+    );
+    const { findByText, getByTestId } = renderScreen();
+    await findByText("Take tablet");
+    expect(await findByText("1 upcoming")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(getByTestId("complete-toggle"));
+    });
+
+    // Still 1 upcoming — the series advanced rather than dropping to 0.
+    await waitFor(async () => expect(await findByText("1 upcoming")).toBeTruthy());
+  });
+
   it("sorts completed reminders newest-first, independent of upcoming's earliest-first order", async () => {
     const OLDER = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     const NEWER = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -168,6 +240,65 @@ describe("HomeScreen", () => {
     });
 
     await waitFor(() => expect(queryByText("Delete me")).toBeNull(), { timeout: 5000 });
+  });
+
+  it("deleting a recurring reminder offers skip-this-occurrence vs delete-the-series, and skip keeps it on the list at its next occurrence", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          id: "r1",
+          title: "Recurring task",
+          datetime: PAST,
+          recurrenceAnchor: PAST,
+          recurrence: dailyRule,
+        }),
+      ])
+    );
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("delete-reminder-r1"));
+
+    const skipButton = await findByTestId("confirm-sheet-extra");
+    await act(async () => {
+      fireEvent.press(skipButton);
+    });
+
+    // Still exactly one stored reminder (the series continues), advanced
+    // to a future occurrence rather than removed entirely.
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+      expect(new Date(stored[0].datetime).getTime()).toBeGreaterThan(Date.now());
+    });
+  });
+
+  it("choosing delete-the-series for a recurring reminder removes it entirely", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          id: "r1",
+          title: "Recurring task",
+          datetime: PAST,
+          recurrenceAnchor: PAST,
+          recurrence: dailyRule,
+        }),
+      ])
+    );
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("delete-reminder-r1"));
+
+    const confirmButton = await findByTestId("confirm-sheet-confirm");
+    await act(async () => {
+      fireEvent.press(confirmButton);
+    });
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(0);
+    });
   });
 
   it("cancelling the delete confirm sheet keeps the reminder", async () => {
@@ -654,6 +785,96 @@ describe("HomeScreen — the name ask an invited install gets instead", () => {
     expect(StyleSheet.flatten(line.props.style).fontFamily).toBe(
       "NotoSansMalayalam_400Regular"
     );
+  });
+});
+
+// A recurring series is one Reminder record, not one row per occurrence, so
+// the home list has to synthesize read-only preview cards for its next
+// couple of occurrences (utils/recurrencePreviews.ts) -- otherwise a
+// recurring reminder vanishes from every day but the one its live datetime
+// happens to be on, and disappears from view entirely the moment today's
+// occurrence is marked done.
+describe("HomeScreen — recurring reminder previews", () => {
+  const NOW = new Date(2026, 8, 19, 9, 0, 0); // Saturday
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("shows read-only preview cards for a recurring reminder's next occurrences", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          id: "r1",
+          title: "Take medicine",
+          datetime: NOW.toISOString(),
+          recurrence: { freq: "daily", interval: 1 },
+          recurrenceAnchor: NOW.toISOString(),
+        }),
+      ])
+    );
+    const { findAllByText, queryByTestId } = renderScreen();
+
+    // The live card (today's own occurrence) plus 2 read-only previews.
+    expect(await findAllByText("Take medicine")).toHaveLength(3);
+    expect(queryByTestId("recurrence-preview-r1-preview-0")).toBeTruthy();
+    expect(queryByTestId("recurrence-preview-r1-preview-1")).toBeTruthy();
+  });
+
+  it("keeps showing previews once today's occurrence is marked done", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          id: "r1",
+          title: "Take medicine",
+          datetime: NOW.toISOString(),
+          completed: true,
+          recurrence: { freq: "daily", interval: 1 },
+          recurrenceAnchor: NOW.toISOString(),
+        }),
+      ])
+    );
+    const { findByTestId, queryByTestId } = renderScreen();
+
+    expect(await findByTestId("recurrence-preview-r1-preview-0")).toBeTruthy();
+    expect(queryByTestId("recurrence-preview-r1-preview-1")).toBeTruthy();
+  });
+
+  it("shows a continuation label on the last preview only", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        makeReminder({
+          id: "r1",
+          title: "Take medicine",
+          datetime: NOW.toISOString(),
+          recurrence: { freq: "daily", interval: 1 },
+          recurrenceAnchor: NOW.toISOString(),
+        }),
+      ])
+    );
+    const { findByTestId, queryAllByTestId } = renderScreen();
+
+    const lastPreview = await findByTestId("recurrence-preview-r1-preview-1");
+    expect(within(lastPreview).getByTestId("recurrence-preview-continues")).toBeTruthy();
+    expect(queryAllByTestId("recurrence-preview-continues")).toHaveLength(1);
+  });
+
+  it("never shows a preview card for a non-recurring reminder", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ id: "r1", title: "Buy milk", datetime: NOW.toISOString() })])
+    );
+    const { findByText, queryByTestId } = renderScreen();
+
+    expect(await findByText("Buy milk")).toBeTruthy();
+    expect(queryByTestId("recurrence-preview-r1-preview-0")).toBeNull();
   });
 });
 

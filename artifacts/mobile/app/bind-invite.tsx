@@ -41,6 +41,12 @@ function navigateToInvitationPreview(invitation: ClaimedInvitation) {
       description: invitation.description,
       datetime: invitation.datetime,
       senderId: invitation.senderId,
+      // M2 Task 5c: router params are strings only, so a non-null rule is
+      // JSON-encoded here and parsed (and validated, since it crosses a
+      // trust boundary) on the receiving screen. Omitted entirely for a
+      // one-shot invitation rather than passing the literal string "null" -
+      // invitation-preview.tsx's own param type treats absence as one-shot.
+      ...(invitation.recurrence ? { recurrence: JSON.stringify(invitation.recurrence) } : {}),
     },
   });
 }

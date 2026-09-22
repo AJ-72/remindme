@@ -31,6 +31,7 @@ import {
   VIBRATION_KEY,
   deleteReminder,
   deleteReminders,
+  skipOccurrence,
   editReminder,
   SNOOZE_PRESET_KEY,
   getDefaultAlarmEnabled,
@@ -45,6 +46,7 @@ import {
   saveReminders,
   markDoneById,
   markNotifiedById,
+  advanceRecurringById,
   markOpenedById,
   MAX_SNOOZE_HISTORY_ENTRIES,
   requestNotificationPermissions,
@@ -63,6 +65,8 @@ import {
   attachInvitationId,
   applyRecipientTimeChangeByInvitationId,
   isSendReminder,
+  isRecurring,
+  advanceRecurringReminder,
   INVITE_NUDGE_COUNT_KEY,
   INVITE_NUDGE_ENABLED_KEY,
   INVITE_NUDGE_MAX_ENTRIES,
@@ -75,6 +79,8 @@ import {
   type NotificationData,
 } from "@/services/ReminderService";
 import { DEFAULT_QUIET_HOURS } from "@/utils/quietHours";
+import type { RecurrenceRule } from "@/utils/recurrence";
+import * as recurrenceModule from "@/utils/recurrence";
 import {
   scheduleNotificationAsync,
   cancelScheduledNotificationAsync,
@@ -150,6 +156,32 @@ describe("addReminder", () => {
     const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
     expect(call.content.data.reminderId).toBe(added.id);
   });
+
+  // A newly-created recurring reminder's anchor IS its first datetime - the
+  // UI never has to know about recurrenceAnchor at all, it just sets
+  // `recurrence` and the service derives the standing schedule from where
+  // the reminder was actually set.
+  it("sets recurrenceAnchor to the reminder's own datetime when recurrence is present", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const { added } = await addReminder([], {
+      title: "A",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+      recurrence: dailyRule,
+    });
+    expect(added.recurrenceAnchor).toBe(FUTURE);
+  });
+
+  it("does not set recurrenceAnchor for a non-recurring reminder", async () => {
+    const { added } = await addReminder([], {
+      title: "A",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+    });
+    expect(added.recurrenceAnchor).toBeUndefined();
+  });
 });
 
 describe("editReminder", () => {
@@ -164,6 +196,88 @@ describe("editReminder", () => {
     });
     expect(result.find((r) => r.id === "r1")?.title).toBe("Updated");
     expect(result.find((r) => r.id === "r2")?.title).toBe("Other");
+  });
+
+  // A deliberate time edit through the edit screen IS the user restating
+  // the schedule, unlike a snooze - the anchor must move to match. This is
+  // the one path (besides creation) allowed to move recurrenceAnchor.
+  it("moves recurrenceAnchor to the new datetime when moveAnchor is explicitly requested", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const newTime = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    const r1 = makeReminder({
+      id: "r1",
+      recurrence: dailyRule,
+      recurrenceAnchor: FUTURE,
+      datetime: FUTURE,
+    });
+    const result = await editReminder(
+      [r1],
+      "r1",
+      {
+        title: "Original",
+        description: "",
+        datetime: newTime,
+        alarm: true,
+        recurrence: dailyRule,
+      },
+      { moveAnchor: true }
+    );
+    expect(result.find((r) => r.id === "r1")?.recurrenceAnchor).toBe(newTime);
+  });
+
+  // The default (moveAnchor omitted) must NOT move the anchor just because
+  // datetime changed - editReminder is called from more than the
+  // add-reminder Save button (e.g. reminder-detail's "move to strongest
+  // hour" nudge), and only a genuinely deliberate schedule restatement
+  // should move the standing anchor.
+  it("does not move recurrenceAnchor when moveAnchor is omitted, even if datetime changes", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const newTime = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    const r1 = makeReminder({
+      id: "r1",
+      recurrence: dailyRule,
+      recurrenceAnchor: FUTURE,
+      datetime: FUTURE,
+    });
+    const result = await editReminder([r1], "r1", {
+      title: "Original",
+      description: "",
+      datetime: newTime,
+      alarm: true,
+      recurrence: dailyRule,
+    });
+    expect(result.find((r) => r.id === "r1")?.recurrenceAnchor).toBe(FUTURE);
+  });
+
+  it("sets recurrenceAnchor when recurrence is newly added via edit", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r1 = makeReminder({ id: "r1", datetime: FUTURE });
+    const result = await editReminder([r1], "r1", {
+      title: "Original",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+      recurrence: dailyRule,
+    });
+    expect(result.find((r) => r.id === "r1")?.recurrenceAnchor).toBe(FUTURE);
+  });
+
+  it("clears recurrenceAnchor when recurrence is removed via edit", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r1 = makeReminder({
+      id: "r1",
+      recurrence: dailyRule,
+      recurrenceAnchor: FUTURE,
+      datetime: FUTURE,
+    });
+    const result = await editReminder([r1], "r1", {
+      title: "Original",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+      // recurrence omitted - "Doesn't repeat" was chosen.
+    });
+    expect(result.find((r) => r.id === "r1")?.recurrenceAnchor).toBeUndefined();
   });
 });
 
@@ -196,6 +310,73 @@ describe("deleteReminders", () => {
     const r1 = makeReminder({ id: "r1" });
     const result = await deleteReminders([r1], ["unknown"]);
     expect(result).toEqual([r1]);
+  });
+});
+
+describe("skipOccurrence", () => {
+  const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+
+  it("advances a recurring reminder to its next occurrence instead of removing it", async () => {
+    const r = makeReminder({
+      id: "r1",
+      datetime: PAST,
+      recurrenceAnchor: PAST,
+      recurrence: dailyRule,
+    });
+    const result = await skipOccurrence([r], "r1");
+    const updated = result.find((x) => x.id === "r1");
+    expect(updated).toBeDefined();
+    expect(new Date(updated!.datetime).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  // The whole point of "skip" vs "mark done": today's occurrence must not
+  // read as completed, and must not read as missed either - it was
+  // deliberately removed from the schedule, not avoided.
+  it("does not tally the skipped occurrence as completed or missed", async () => {
+    const r = makeReminder({
+      id: "r1",
+      datetime: PAST,
+      recurrenceAnchor: PAST,
+      recurrence: dailyRule,
+      occurrencesCompleted: 2,
+      occurrencesMissed: 1,
+    });
+    const result = await skipOccurrence([r], "r1");
+    const updated = result.find((x) => x.id === "r1");
+    expect(updated!.occurrencesCompleted).toBe(2);
+    expect(updated!.occurrencesMissed).toBe(1);
+  });
+
+  it("falls back to deleting the reminder entirely for a non-recurring reminder", async () => {
+    const r = makeReminder({ id: "r1" });
+    const result = await skipOccurrence([r], "r1");
+    expect(result.find((x) => x.id === "r1")).toBeUndefined();
+  });
+
+  it("falls back to deleting the reminder entirely when there is no future occurrence to advance to", async () => {
+    // Same iteration-cap-exhaustion technique as
+    // advanceRecurringReminder's own "genuinely hit" test above: force
+    // computeNthOccurrence to never progress past the anchor, so
+    // advanceRecurringReminder returns null and skipOccurrence must fall
+    // back to a full delete rather than leaving the reminder stuck.
+    const spy = jest
+      .spyOn(recurrenceModule, "computeNthOccurrence")
+      .mockImplementation((_rule, anchor) => anchor);
+    const r = makeReminder({
+      id: "r1",
+      datetime: PAST,
+      recurrenceAnchor: PAST,
+      recurrence: dailyRule,
+    });
+    const result = await skipOccurrence([r], "r1");
+    expect(result.find((x) => x.id === "r1")).toBeUndefined();
+    spy.mockRestore();
+  });
+
+  it("does nothing for an id that doesn't exist", async () => {
+    const r = makeReminder({ id: "r1" });
+    const result = await skipOccurrence([r], "unknown");
+    expect(result).toEqual([r]);
   });
 });
 
@@ -261,6 +442,60 @@ describe("toggleComplete", () => {
     await toggleComplete([r], "r1");
 
     expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  // Completing a recurring reminder must advance the series, not leave it
+  // completed forever - "every day at 8" means tomorrow's occurrence is
+  // still expected even though today's was just marked done.
+  it("advances a recurring reminder instead of completing it forever", async () => {
+    (scheduleNotificationAsync as jest.Mock).mockClear();
+    (scheduleNotificationAsync as jest.Mock).mockResolvedValueOnce("advanced-notif-id");
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({
+      id: "r1",
+      completed: false,
+      datetime: PAST,
+      recurrence: dailyRule,
+    });
+
+    const result = await toggleComplete([r], "r1");
+    const updated = result.find((x) => x.id === "r1")!;
+
+    // Never left completed=true - it rolled forward to the next occurrence.
+    expect(updated.completed).toBe(false);
+    expect(new Date(updated.datetime).getTime()).toBeGreaterThan(Date.now());
+    // The advanced occurrence gets a fresh scheduled notification, since
+    // its own future datetime makes it eligible again.
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // Un-completing must never advance - that path is deliberately subtle
+  // (see the existing "past reminders stay overdue" comment above) and
+  // advancing here would silently skip an occurrence the user is actively
+  // trying to restore, not retire.
+  it("does not advance a recurring reminder when un-completing it", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({
+      id: "r1",
+      completed: true,
+      datetime: FUTURE,
+      recurrence: dailyRule,
+    });
+    const originalDatetime = r.datetime;
+
+    const result = await toggleComplete([r], "r1");
+    const updated = result.find((x) => x.id === "r1")!;
+
+    expect(updated.completed).toBe(false);
+    expect(updated.datetime).toBe(originalDatetime);
+  });
+
+  // A non-recurring reminder must behave exactly as before - no advance
+  // logic should engage for it.
+  it("still completes a non-recurring reminder normally (no regression)", async () => {
+    const r = makeReminder({ id: "r1", completed: false, datetime: FUTURE });
+    const result = await toggleComplete([r], "r1");
+    expect(result.find((x) => x.id === "r1")?.completed).toBe(true);
   });
 });
 
@@ -369,6 +604,31 @@ describe("notification scheduling", () => {
         trigger: { type: "date", date: new Date(NEW_FUTURE) },
       })
     );
+  });
+
+  // editReminder must sweep by payload too, not just cancel the stored id -
+  // otherwise a notification scheduled for this reminder under a DIFFERENT
+  // identifier than the one currently on record (e.g. a snooze whose write
+  // hasn't landed in the copy this edit started from) survives the edit as
+  // an orphan and fires later even though the reminder now shows a
+  // different time. Mirrors "cancels by payload as well as by stored id
+  // before rescheduling" for setAlarmForPendingReminders above.
+  it("cancels by payload as well as by stored id when editing", async () => {
+    (getAllScheduledNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      { identifier: "orphan", content: { data: { reminderId: "r1" } } },
+    ]);
+    const NEW_FUTURE = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    const r = makeReminder({ id: "r1", notificationId: "old-notif" });
+
+    await editReminder([r], "r1", {
+      title: "Updated",
+      description: "",
+      datetime: NEW_FUTURE,
+      alarm: true,
+    });
+
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("orphan");
+    expect(cancelScheduledNotificationAsync).toHaveBeenCalledWith("old-notif");
   });
 
   it("deleteReminder cancels the reminder's notification", async () => {
@@ -601,6 +861,76 @@ describe("rescheduleAllFutureReminders", () => {
     );
     await rescheduleAllFutureReminders();
     expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // The one path that makes the whole feature correct even if the
+  // best-effort received-listener advance (Task 5b) never runs: a killed
+  // app that missed a recurring reminder's fire time must self-heal on the
+  // next mount-time sweep, not stay stuck past-due forever. This is the
+  // sweep's own catch-up responsibility, independent of any UI ever opening.
+  it("advances a past-due recurring reminder before re-arming it", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({
+      completed: false,
+      datetime: PAST,
+      recurrence: dailyRule,
+    });
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify([r])
+    );
+    await rescheduleAllFutureReminders();
+    // isPendingForAlarmRewrite rejects past-due reminders by design - the
+    // sweep must advance datetime into the future FIRST, then re-arm the
+    // advanced (now-future) record, or this reminder is silently skipped
+    // forever.
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    const saved = JSON.parse(
+      (AsyncStorage.setItem as jest.Mock).mock.calls.slice(-1)[0][1]
+    );
+    expect(new Date(saved[0].datetime).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  // A non-recurring past-due reminder must still be skipped exactly as
+  // before - the sweep's new recurring-aware branch must not change
+  // behavior for the reminder shape every other test in this block covers.
+  it("still skips a non-recurring past-due reminder (no regression)", async () => {
+    const r = makeReminder({ completed: false, datetime: PAST });
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify([r])
+    );
+    await rescheduleAllFutureReminders();
+    expect(scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  // Phone off for several days: the sweep must land on the next FUTURE
+  // occurrence in one pass, not require multiple app opens to catch up one
+  // missed day at a time.
+  it("catches up a recurring reminder missed for multiple days in one sweep", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const threeDaysAgo = new Date(
+      Date.now() - 3 * 24 * 60 * 60 * 1000
+    ).toISOString();
+    const r = makeReminder({
+      completed: false,
+      datetime: threeDaysAgo,
+      recurrence: dailyRule,
+    });
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify([r])
+    );
+    await rescheduleAllFutureReminders();
+    expect(scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    const saved = JSON.parse(
+      (AsyncStorage.setItem as jest.Mock).mock.calls.slice(-1)[0][1]
+    );
+    const advancedTime = new Date(saved[0].datetime).getTime();
+    expect(advancedTime).toBeGreaterThan(Date.now());
+    // Should NOT be several days in the future either - only advanced to the
+    // next occurrence past now, not overshot. Generous margin (not exactly
+    // 24h) since the reminder's own datetime and this assertion's Date.now()
+    // are captured at different moments - a tight boundary here is flaky,
+    // not meaningfully stricter.
+    expect(advancedTime).toBeLessThan(Date.now() + 2 * 24 * 60 * 60 * 1000);
   });
 });
 
@@ -1138,6 +1468,30 @@ describe("markDoneById", () => {
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].completed).toBe(false);
   });
+
+  // Parity with toggleComplete: marking done from the notification tray
+  // must advance a recurring series exactly the same way marking done
+  // in-app does - a user must not get a different result depending on
+  // which path they used.
+  it("advances a recurring reminder instead of completing it forever, same as toggleComplete", async () => {
+    (scheduleNotificationAsync as jest.Mock).mockClear();
+    (scheduleNotificationAsync as jest.Mock).mockResolvedValueOnce("advanced-notif-id");
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({
+      id: "r1",
+      completed: false,
+      datetime: PAST,
+      recurrence: dailyRule,
+      notificationId: "notif-r1",
+    });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await markDoneById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].completed).toBe(false);
+    expect(new Date(stored[0].datetime).getTime()).toBeGreaterThan(Date.now());
+  });
 });
 
 describe("snoozeReminder", () => {
@@ -1183,6 +1537,36 @@ describe("snoozeReminder", () => {
       minutes: 15,
     });
     expect(result).toEqual([r]);
+  });
+
+  // Task 5b: currentOccurrenceSnoozes increments alongside the existing
+  // series-wide snoozeCount, but resets on every advance (see
+  // advanceRecurringReminder) - the two answer different questions ("has
+  // this ever been avoided" vs. "is the user stuck on THIS occurrence").
+  it("increments currentOccurrenceSnoozes alongside snoozeCount", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({
+      id: "r1",
+      recurrence: dailyRule,
+      snoozeCount: 5,
+      currentOccurrenceSnoozes: 1,
+    });
+    const result = await snoozeReminder([r], "r1", {
+      kind: "minutes",
+      minutes: 15,
+    });
+    const updated = result.find((x) => x.id === "r1")!;
+    expect(updated.snoozeCount).toBe(6);
+    expect(updated.currentOccurrenceSnoozes).toBe(2);
+  });
+
+  it("starts currentOccurrenceSnoozes at 1 on the first snooze", async () => {
+    const r = makeReminder({ id: "r1" });
+    const result = await snoozeReminder([r], "r1", {
+      kind: "minutes",
+      minutes: 15,
+    });
+    expect(result.find((x) => x.id === "r1")?.currentOccurrenceSnoozes).toBe(1);
   });
 });
 
@@ -1326,6 +1710,56 @@ describe("markNotifiedById", () => {
   it("no-ops safely for an id with no matching reminder", async () => {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder({ id: "r1" })]));
     await expect(markNotifiedById("unknown")).resolves.toBeUndefined();
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].notifiedAt).toBeUndefined();
+  });
+});
+
+describe("advanceRecurringById", () => {
+  // Best-effort: while the app is alive, a delivered notification advances
+  // its series immediately rather than waiting for the next mount-time
+  // sweep. This is latency, not correctness - rescheduleAllFutureReminders'
+  // catch-up handles the case where this never runs (app killed at the
+  // fire moment).
+  it("advances a recurring reminder whose datetime is now past-due", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({ id: "r1", datetime: PAST, recurrence: dailyRule });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await advanceRecurringById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(new Date(stored[0].datetime).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("no-ops safely for an id with no matching reminder", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder({ id: "r1" })]));
+    await expect(advanceRecurringById("unknown")).resolves.toBeUndefined();
+  });
+
+  it("no-ops safely for a non-recurring reminder", async () => {
+    const r = makeReminder({ id: "r1", datetime: PAST });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await advanceRecurringById("r1");
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].datetime).toBe(PAST);
+  });
+
+  // Ordering: markNotifiedById stamps notifiedAt on the occurrence that just
+  // fired. advanceRecurringById resets notifiedAt on the NEW occurrence it
+  // creates (a new occurrence has not been notified yet). Calling both for
+  // the same delivery must not leave the fired occurrence's stamp inherited
+  // by the fresh one.
+  it("resets notifiedAt on the advanced occurrence even if markNotifiedById ran first", async () => {
+    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+    const r = makeReminder({ id: "r1", datetime: PAST, recurrence: dailyRule });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await markNotifiedById("r1");
+    await advanceRecurringById("r1");
+
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].notifiedAt).toBeUndefined();
   });
@@ -1976,5 +2410,308 @@ describe("scheduleNotification and the permission ask", () => {
 
     expect(requestPermissionsAsync).toHaveBeenCalled();
     expect(await getNotifPromptCount()).toBe(1);
+  });
+});
+
+describe("isRecurring", () => {
+  const base: Reminder = {
+    id: "1",
+    title: "t",
+    description: "",
+    datetime: "2026-09-01T10:00:00.000Z",
+    completed: false,
+  };
+
+  it("is false when there is no recurrence rule", () => {
+    expect(isRecurring(base)).toBe(false);
+  });
+
+  it("is true when a recurrence rule is present", () => {
+    const rule: RecurrenceRule = { freq: "daily", interval: 1 };
+    expect(isRecurring({ ...base, recurrence: rule })).toBe(true);
+  });
+});
+
+describe("advanceRecurringReminder", () => {
+  const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
+
+  const base: Reminder = {
+    id: "1",
+    title: "t",
+    description: "",
+    datetime: "2026-09-01T10:00:00.000Z",
+    completed: false,
+  };
+
+  it("returns null for a non-recurring reminder", () => {
+    const now = new Date("2026-09-05T00:00:00.000Z");
+    expect(advanceRecurringReminder(base, now)).toBeNull();
+  });
+
+  it("returns null when the recurring reminder's datetime is still in the future", () => {
+    const r: Reminder = { ...base, recurrence: dailyRule };
+    const now = new Date("2026-08-01T00:00:00.000Z"); // before base.datetime
+    expect(advanceRecurringReminder(r, now)).toBeNull();
+  });
+
+  it("advances a single missed occurrence to the next strictly-future occurrence", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    // Just past due, no catch-up needed beyond one step.
+    const now = new Date("2026-09-01T11:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now);
+    expect(advanced).not.toBeNull();
+    expect(new Date(advanced!.datetime).toISOString()).toBe(
+      "2026-09-02T10:00:00.000Z"
+    );
+    expect(new Date(advanced!.datetime).getTime()).toBeGreaterThan(now.getTime());
+  });
+
+  it("catches up past multiple missed occurrences to land on the next future one", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    // Phone "off" for three days: now is well past three missed dailies.
+    const now = new Date("2026-09-04T12:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now);
+    expect(advanced).not.toBeNull();
+    // Next daily occurrence strictly after now, not the day right after the
+    // original due date.
+    expect(new Date(advanced!.datetime).toISOString()).toBe(
+      "2026-09-05T10:00:00.000Z"
+    );
+  });
+
+  it("catching up a monthly reminder anchored on the 31st across several months lands on the 30th/31st, not drifted to the 28th", () => {
+    // Regression for a real bug: the catch-up loop used to compute each
+    // candidate by chaining computeNextOccurrence from the PREVIOUS
+    // candidate, which compounds the day-of-month clamp every step (Jan 31
+    // -> Feb 28 -> Mar 28 (from the already-clamped Feb 28, not from the
+    // real anchor) -> Apr 28), permanently losing the 31st the user actually
+    // set. Fixed by computing every candidate fresh from recurrenceAnchor via
+    // computeNthOccurrence, which clamps at most once. Confirmed as a live
+    // bug via a throwaway probe before this fix: catching up from Jan 31 to
+    // "now" of May 1 landed on May 28, not May 31.
+    const r: Reminder = {
+      ...base,
+      datetime: new Date(2026, 0, 31, 9, 0, 0).toISOString(),
+      recurrenceAnchor: new Date(2026, 0, 31, 9, 0, 0).toISOString(),
+      recurrence: { freq: "monthly", interval: 1 },
+    };
+    const now = new Date(2026, 4, 1, 0, 0, 0); // May 1 2026 - phone off since Jan 31
+    const advanced = advanceRecurringReminder(r, now);
+    expect(advanced).not.toBeNull();
+    const result = new Date(advanced!.datetime);
+    // Walking the anchor day (31) forward month by month: Feb clamps to 28
+    // (Feb has no 31st), Mar 31 is real (31 days), Apr clamps to 30 (Apr has
+    // no 31st) - Apr 30 is still not strictly after "now" (May 1 00:00), so
+    // the next actual future occurrence is May 31 (May has 31 days, no
+    // clamp needed). The bug this regresses against would have instead
+    // compounded every step's clamp and landed on May 28.
+    expect(result.getMonth()).toBe(4); // May (0-indexed)
+    expect(result.getDate()).toBe(31);
+  });
+
+  it("advances quickly for a large-but-under-cap number of missed occurrences", () => {
+    // Not the cap-hitting case (see below) - this just confirms a large,
+    // realistic catch-up (~9700 daily occurrences) stays fast and lands
+    // strictly in the future.
+    const r: Reminder = {
+      ...base,
+      datetime: "2000-01-01T10:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    const now = new Date("2026-09-18T00:00:00.000Z"); // ~9700 days later
+    const start = Date.now();
+    const advanced = advanceRecurringReminder(r, now);
+    const elapsed = Date.now() - start;
+    expect(advanced).not.toBeNull();
+    expect(elapsed).toBeLessThan(2000);
+    expect(new Date(advanced!.datetime).getTime()).toBeGreaterThan(now.getTime());
+  });
+
+  it("returns null instead of a still-past-due result when the iteration cap is genuinely hit", () => {
+    // No real RecurrenceRule can fail to progress (normalizeInput floors
+    // interval >= 1, and every addX() helper advances by at least a day) -
+    // but Task 5c will feed rules parsed from an external Tier 2 invitation
+    // payload through this same path, so the cap itself must be proven to
+    // fail safely rather than assumed unreachable. Force it here by
+    // stubbing computeNthOccurrence to never progress past `anchor`.
+    //
+    // Mocks computeNthOccurrence, not computeNextOccurrence: the catch-up
+    // loop now computes each candidate fresh from the anchor via
+    // computeNthOccurrence (see advanceRecurringReminder's own comment on
+    // why - avoiding compounded monthly/yearly day-of-month clamping), so
+    // that is the call the cap-exhaustion path actually drives.
+    const spy = jest
+      .spyOn(recurrenceModule, "computeNthOccurrence")
+      .mockImplementation((_rule, anchor) => anchor);
+
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    const now = new Date("2026-09-05T00:00:00.000Z");
+
+    const advanced = advanceRecurringReminder(r, now);
+
+    // computeNthOccurrence was called MAX_ADVANCE_ITERATIONS + 1 times
+    // (the initial call, then one per loop iteration) before the loop gave
+    // up - proves the cap was actually exercised, not just "under budget".
+    expect(spy).toHaveBeenCalledTimes(10001);
+    expect(advanced).toBeNull();
+
+    spy.mockRestore();
+  });
+
+  it("resets per-occurrence state", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+      completed: true,
+      completedAt: "2026-09-01T10:05:00.000Z",
+      notificationId: "notif-1",
+      notifiedAt: "2026-09-01T10:00:05.000Z",
+      openedAt: "2026-09-01T10:01:00.000Z",
+    };
+    const now = new Date("2026-09-01T11:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now)!;
+    expect(advanced.completed).toBe(false);
+    expect(advanced.completedAt).toBeUndefined();
+    expect(advanced.notificationId).toBeUndefined();
+    expect(advanced.notifiedAt).toBeUndefined();
+    expect(advanced.openedAt).toBeUndefined();
+  });
+
+  it("preserves series-level state", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+      snoozeCount: 3,
+      snoozeHistory: [{ at: "2026-09-01T09:00:00.000Z", minutes: 30 }],
+      originalDatetime: "2026-08-30T10:00:00.000Z",
+      createdAt: "2026-08-29T00:00:00.000Z",
+      senderName: "Priya",
+      recipient: { name: "Priya", phone: "+911234567890" },
+    };
+    const now = new Date("2026-09-01T11:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now)!;
+    expect(advanced.snoozeCount).toBe(3);
+    expect(advanced.snoozeHistory).toEqual(r.snoozeHistory);
+    expect(advanced.originalDatetime).toBe(r.originalDatetime);
+    expect(advanced.createdAt).toBe(r.createdAt);
+    expect(advanced.recurrence).toEqual(dailyRule);
+    expect(advanced.senderName).toBe("Priya");
+    expect(advanced.recipient).toEqual(r.recipient);
+  });
+
+  // Task 5b: occurrence tallies. Without these, a completed occurrence
+  // advances into a `pending` record and contributes nothing to adherence -
+  // proved by a probe against the real computeAdherenceStats before this
+  // was fixed. Tallying on the record itself (not a separate event log)
+  // keeps the "derived, not logged" principle while letting a recurring
+  // series contribute N decided outcomes instead of one permanent pending.
+  it("tallies the retiring occurrence as completed when it was completed", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+      completed: true,
+      occurrencesCompleted: 2,
+    };
+    const now = new Date("2026-09-01T11:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now)!;
+    expect(advanced.occurrencesCompleted).toBe(3);
+    expect(advanced.occurrencesMissed).toBeUndefined();
+  });
+
+  it("tallies the retiring occurrence as missed when it was never completed", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+      completed: false,
+      occurrencesMissed: 1,
+    };
+    const now = new Date("2026-09-01T11:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now)!;
+    expect(advanced.occurrencesMissed).toBe(2);
+    expect(advanced.occurrencesCompleted).toBeUndefined();
+  });
+
+  // currentOccurrenceSnoozes is per-occurrence: it must reset to 0 on every
+  // advance, regardless of how many times the retiring occurrence was
+  // snoozed - `stuck` reads THIS field, not the series-wide snoozeCount,
+  // specifically so snoozes spread across separate days don't permanently
+  // flag the series as avoided.
+  it("resets currentOccurrenceSnoozes to 0 on advance, regardless of its prior value", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+      currentOccurrenceSnoozes: 3,
+      snoozeCount: 7,
+    };
+    const now = new Date("2026-09-01T11:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now)!;
+    expect(advanced.currentOccurrenceSnoozes).toBe(0);
+    // snoozeCount (series-wide, read by M9) is untouched - a different
+    // field for a different consumer, not superseded by the one above.
+    expect(advanced.snoozeCount).toBe(7);
+  });
+
+  // Task 5b: the snooze anchor. The advance must compute from
+  // recurrenceAnchor, never from `datetime` (which a snooze overwrites) -
+  // otherwise one two-hour snooze of "every day at 8" silently converts the
+  // series to a standing 10am reminder forever.
+  it("advances from recurrenceAnchor, not from a snoozed datetime", () => {
+    const r: Reminder = {
+      ...base,
+      // The reminder was originally due at 8am, but got snoozed to 10am -
+      // datetime now says 10am, recurrenceAnchor still says 8am.
+      recurrenceAnchor: "2026-09-01T08:00:00.000Z",
+      datetime: "2026-09-01T10:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    const now = new Date("2026-09-02T00:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now)!;
+    // Next occurrence should be 8am the next day (anchor + 1 day), NOT
+    // 10am the next day (which advancing from `datetime` would produce).
+    expect(new Date(advanced.datetime).toISOString()).toBe(
+      "2026-09-02T08:00:00.000Z"
+    );
+  });
+
+  it("falls back to datetime as the anchor when recurrenceAnchor is absent (legacy record)", () => {
+    const r: Reminder = {
+      ...base,
+      datetime: "2026-09-01T08:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    const now = new Date("2026-09-02T00:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now)!;
+    expect(new Date(advanced.datetime).toISOString()).toBe(
+      "2026-09-02T08:00:00.000Z"
+    );
+  });
+
+  it("preserves recurrenceAnchor across an advance - it is a series-level field", () => {
+    const r: Reminder = {
+      ...base,
+      recurrenceAnchor: "2026-09-01T08:00:00.000Z",
+      datetime: "2026-09-01T08:00:00.000Z",
+      recurrence: dailyRule,
+    };
+    const now = new Date("2026-09-02T00:00:00.000Z");
+    const advanced = advanceRecurringReminder(r, now)!;
+    expect(advanced.recurrenceAnchor).toBe("2026-09-01T08:00:00.000Z");
   });
 });
