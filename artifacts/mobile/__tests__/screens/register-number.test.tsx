@@ -163,11 +163,11 @@ describe("RegisterNumberScreen", () => {
     fireEvent.changeText(getByTestId("register-number-input"), "4155552671");
     fireEvent.press(getByTestId("register-number-submit"));
 
-    await findByText(/already registered to a different account/i);
+    await findByText(/that number is already registered/i);
     expect(DeviceRegistrationService.registerDeviceForPush).not.toHaveBeenCalled();
   });
 
-  it("shows copy for a number already registered to a different account", async () => {
+  it("offers reset/migrate instead of a dead-end error on a number_taken collision", async () => {
     (InvitationService.selfRegister as jest.Mock).mockResolvedValue({
       ok: false,
       error: "number_taken",
@@ -177,9 +177,65 @@ describe("RegisterNumberScreen", () => {
     fireEvent.changeText(getByTestId("register-number-input"), "4155552671");
     fireEvent.press(getByTestId("register-number-submit"));
 
-    expect(
-      await findByText("That number is already registered to a different account")
-    ).toBeTruthy();
+    expect(await findByText(/that number is already registered/i)).toBeTruthy();
+    expect(getByTestId("register-number-collision-migrate")).toBeTruthy();
+    expect(getByTestId("register-number-collision-reset")).toBeTruthy();
+  });
+
+  it("migrate: confirms, then calls selfRegister with action migrate and finishes registration", async () => {
+    (InvitationService.selfRegister as jest.Mock).mockImplementation((_phone, action) =>
+      Promise.resolve(
+        action === "migrate" ? { ok: true, appUserId: "new-account" } : { ok: false, error: "number_taken" }
+      )
+    );
+
+    const { getByTestId, findByTestId, findByText } = renderScreen();
+    fireEvent.changeText(getByTestId("register-number-input"), "4155552671");
+    fireEvent.press(getByTestId("register-number-submit"));
+    fireEvent.press(await findByTestId("register-number-collision-migrate"));
+
+    expect(await findByText("Move to this device?")).toBeTruthy();
+    fireEvent.press(getByTestId("register-number-collision-confirm"));
+
+    expect(await findByText(/you're registered/i)).toBeTruthy();
+    expect(InvitationService.selfRegister).toHaveBeenLastCalledWith("+14155552671", "migrate");
+  });
+
+  it("reset: confirms, then calls selfRegister with action reset and finishes registration", async () => {
+    (InvitationService.selfRegister as jest.Mock).mockImplementation((_phone, action) =>
+      Promise.resolve(
+        action === "reset" ? { ok: true, appUserId: "new-account" } : { ok: false, error: "number_taken" }
+      )
+    );
+
+    const { getByTestId, findByTestId, findByText } = renderScreen();
+    fireEvent.changeText(getByTestId("register-number-input"), "4155552671");
+    fireEvent.press(getByTestId("register-number-submit"));
+    fireEvent.press(await findByTestId("register-number-collision-reset"));
+
+    expect(await findByText(/erase the old account\?/i)).toBeTruthy();
+    fireEvent.press(getByTestId("register-number-collision-confirm"));
+
+    expect(await findByText(/you're registered/i)).toBeTruthy();
+    expect(InvitationService.selfRegister).toHaveBeenLastCalledWith("+14155552671", "reset");
+  });
+
+  it("collision-confirm 'go back' returns to the choice screen without acting", async () => {
+    (InvitationService.selfRegister as jest.Mock).mockResolvedValue({
+      ok: false,
+      error: "number_taken",
+    });
+
+    const { getByTestId, findByTestId, findByText } = renderScreen();
+    fireEvent.changeText(getByTestId("register-number-input"), "4155552671");
+    fireEvent.press(getByTestId("register-number-submit"));
+    fireEvent.press(await findByTestId("register-number-collision-reset"));
+    expect(await findByText(/erase the old account\?/i)).toBeTruthy();
+
+    fireEvent.press(getByTestId("register-number-collision-confirm-back"));
+    expect(await findByText(/that number is already registered/i)).toBeTruthy();
+    // Only the original failed attempt happened - going back must not itself register.
+    expect(InvitationService.selfRegister).toHaveBeenCalledTimes(1);
   });
 
   it("shows offline copy on a network error", async () => {

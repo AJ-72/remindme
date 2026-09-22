@@ -78,7 +78,12 @@ type ScreenState =
   | { phase: "input" }
   | { phase: "submitting" }
   | { phase: "success"; claimed: ClaimedInvitation[] }
-  | { phase: "error"; error: string };
+  | { phase: "error"; error: string }
+  // B9: the number just typed already belongs to a different account. Offer
+  // the two collision-recovery choices rather than a bare dead-end error -
+  // this is reachable only from that specific collision, never proactively.
+  | { phase: "collision"; e164: string }
+  | { phase: "collision-confirm"; e164: string; action: "reset" | "migrate" };
 
 function copyForError(error: string): string {
   switch (error) {
@@ -161,10 +166,41 @@ export default function RegisterNumberScreen() {
         error: String(result.error),
         claimed: 0,
       });
+      if (result.error === "number_taken") {
+        setState({ phase: "collision", e164 });
+        return;
+      }
       setState({ phase: "error", error: result.error });
       return;
     }
-    await setRegisteredPhone(e164);
+    await finishRegistration(e164, "self_register");
+  };
+
+  // Runs after the user confirms a collision-recovery choice. Irreversible -
+  // the confirmation screen (collision-confirm) is what stands in for the
+  // OTP proof this app doesn't have yet, so it must be explicit and must
+  // name what will be lost, not just what will be gained.
+  const confirmCollisionAction = async (targetE164: string, action: "reset" | "migrate") => {
+    setState({ phase: "submitting" });
+    const result = await selfRegister(targetE164, action);
+    if (!result.ok) {
+      track(EVENTS.NUMBER_REGISTERED, {
+        method: action,
+        ok: false,
+        error: String(result.error),
+        claimed: 0,
+      });
+      setState({ phase: "error", error: result.error });
+      return;
+    }
+    await finishRegistration(targetE164, action);
+  };
+
+  // Shared by the ordinary register path and both collision-recovery
+  // actions (reset/migrate) - all three end the same way, with a session
+  // bound to phoneE164 and pending invitations claimed.
+  const finishRegistration = async (phoneE164: string, method: "self_register" | "reset" | "migrate") => {
+    await setRegisteredPhone(phoneE164);
     // B11: this is the first moment a session/users row exists for someone
     // who set their name before ever registering - syncDisplayName() from
     // setUserName() would have no-op'd back then (no session yet), so it's
@@ -186,7 +222,7 @@ export default function RegisterNumberScreen() {
     // found live-testing on two devices (see CLAUDE.md), so it is measured
     // now rather than rediscovered.
     track(EVENTS.NUMBER_REGISTERED, {
-      method: "self_register",
+      method,
       ok: true,
       error: null,
       claimed: claimed.length,
@@ -313,6 +349,7 @@ export default function RegisterNumberScreen() {
       backgroundColor: colors.primary,
     },
     primaryBtnDisabled: { backgroundColor: colors.muted },
+    destructiveBtn: { backgroundColor: colors.destructive, marginTop: 10 },
     primaryBtnText: {
       fontSize: 15,
       fontFamily: "Inter_600SemiBold",
@@ -498,6 +535,73 @@ export default function RegisterNumberScreen() {
               testID="register-number-retry"
             >
               <Text style={styles.primaryBtnText}>Try again</Text>
+            </Pressable>
+          </>
+        )}
+
+        {state.phase === "collision" && (
+          <>
+            <Feather name="alert-circle" size={40} color={colors.destructive} />
+            <Text style={styles.title}>That number is already registered</Text>
+            <Text style={styles.message}>
+              Is this your own number from a previous phone or install? We don't verify
+              numbers with a code yet, so you'll need to choose what happens to the old
+              account.
+            </Text>
+            <Pressable
+              style={styles.primaryBtn}
+              onPress={() => setState({ phase: "collision-confirm", e164: state.e164, action: "migrate" })}
+              testID="register-number-collision-migrate"
+            >
+              <Text style={styles.primaryBtnText}>Yes, it's my old account — keep its history</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.primaryBtn, styles.destructiveBtn]}
+              onPress={() => setState({ phase: "collision-confirm", e164: state.e164, action: "reset" })}
+              testID="register-number-collision-reset"
+            >
+              <Text style={styles.primaryBtnText}>Start fresh — erase the old account</Text>
+            </Pressable>
+            <Pressable
+              style={styles.skipBtn}
+              onPress={() => setState({ phase: "input" })}
+              testID="register-number-collision-cancel"
+            >
+              <Text style={styles.skipBtnText}>Use a different number instead</Text>
+            </Pressable>
+          </>
+        )}
+
+        {state.phase === "collision-confirm" && (
+          <>
+            <Feather
+              name={state.action === "reset" ? "trash-2" : "refresh-cw"}
+              size={40}
+              color={colors.destructive}
+            />
+            <Text style={styles.title}>
+              {state.action === "reset" ? "Erase the old account?" : "Move to this device?"}
+            </Text>
+            <Text style={styles.message}>
+              {state.action === "reset"
+                ? "This permanently deletes the old account for this number, including everything it sent or received. This cannot be undone."
+                : "Reminders that account sent or received move to this device instead. The old account's devices are removed — this device becomes the only one signed in."}
+            </Text>
+            <Pressable
+              style={[styles.primaryBtn, styles.destructiveBtn]}
+              onPress={() => confirmCollisionAction(state.e164, state.action)}
+              testID="register-number-collision-confirm"
+            >
+              <Text style={styles.primaryBtnText}>
+                {state.action === "reset" ? "Erase and continue" : "Move my data here"}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={styles.skipBtn}
+              onPress={() => setState({ phase: "collision", e164: state.e164 })}
+              testID="register-number-collision-confirm-back"
+            >
+              <Text style={styles.skipBtnText}>Go back</Text>
             </Pressable>
           </>
         )}

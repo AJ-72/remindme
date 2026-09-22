@@ -8,8 +8,16 @@ import { getAuthedClient } from "../_shared/supabaseClient.ts";
 // Hashes the caller's own asserted number server-side (same pepper/
 // normalization as lookup) and calls self_register(), which is the only
 // thing allowed to write a not-yet-existing users row for this caller.
+//
+// `action` also covers the two collision-recovery branches offered when
+// self_register() refuses a number already owned by a different account
+// (B9's second half - see reset/migratePhoneNumber.sql for the full
+// rationale). All three share the same request shape and the same "hash
+// server-side, then call one RPC" logic, so one function routes between
+// them rather than three near-identical Edge Functions.
 export interface SelfRegisterRequest {
   phoneE164: string;
+  action?: "register" | "reset" | "migrate";
 }
 
 export interface SelfRegisterResponse {
@@ -17,12 +25,19 @@ export interface SelfRegisterResponse {
   appUserId: string;
 }
 
+const RPC_BY_ACTION: Record<NonNullable<SelfRegisterRequest["action"]>, string> = {
+  register: "self_register",
+  reset: "reset_phone_number",
+  migrate: "migrate_phone_number",
+};
+
 export async function handleSelfRegister(
   client: SupabaseClient,
   body: SelfRegisterRequest
 ): Promise<SelfRegisterResponse> {
   const hash = await hmacPhoneHash(body.phoneE164);
-  const { data, error } = await client.rpc("self_register", { p_phone_hash: hash });
+  const rpcName = RPC_BY_ACTION[body.action ?? "register"];
+  const { data, error } = await client.rpc(rpcName, { p_phone_hash: hash });
   if (error) throw error;
 
   const row = data?.[0];
@@ -45,6 +60,9 @@ Deno.serve(async (req: Request) => {
   }
   if (!body.phoneE164) {
     return jsonError(400, "invalid_body", "phoneE164 is required");
+  }
+  if (body.action && !(body.action in RPC_BY_ACTION)) {
+    return jsonError(400, "invalid_body", "action must be register, reset, or migrate");
   }
 
   try {

@@ -98,8 +98,20 @@ export type SelfRegisterResult = { ok: true; appUserId: string } | { ok: false; 
  * Goes through the self-register Edge Function (not a direct RPC like
  * bindViaInviteToken) because hashing the phone number requires the
  * server-side pepper, which the client never has.
+ *
+ * `action` selects the collision-recovery branch (B9): "register" (default)
+ * is the ordinary first-time path and fails with `number_taken` if a
+ * different account already holds the number; "reset" deletes that other
+ * account and everything referencing it, then claims the number fresh;
+ * "migrate" re-points that account's invitations/blocks onto THIS caller and
+ * deletes the emptied old row. Both recovery actions are equally
+ * self-asserted (no OTP yet) and irreversible - the caller (register-
+ * number.tsx) must get explicit confirmation before choosing either.
  */
-export async function selfRegister(phoneE164: string): Promise<SelfRegisterResult> {
+export async function selfRegister(
+  phoneE164: string,
+  action: "register" | "reset" | "migrate" = "register"
+): Promise<SelfRegisterResult> {
   let session;
   try {
     session = await ensureSession();
@@ -115,7 +127,7 @@ export async function selfRegister(phoneE164: string): Promise<SelfRegisterResul
         Authorization: `Bearer ${session.access_token}`,
         apikey: SUPABASE_ANON_KEY,
       },
-      body: JSON.stringify({ phoneE164 }),
+      body: JSON.stringify({ phoneE164, action }),
     });
 
     const json = await res.json();
