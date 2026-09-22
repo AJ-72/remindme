@@ -167,6 +167,12 @@ re-derive them.
 
 ---
 
+## Deeper documentation
+
+[`docs/knowledge/`](docs/knowledge/README.md) is the full orientation map: what the app is,
+architecture diagrams, a code map, the key flows, local development, and the
+feature/backlog picture. Written for both people and coding agents.
+
 ## Running it
 
 ```bash
