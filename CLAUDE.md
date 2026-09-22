@@ -301,6 +301,7 @@ without a decision.
 
 ## Pointers
 
+- `docs/knowledge/` — the orientation map for this codebase, for agents and humans: what the app is, architecture diagrams, a code map, the key flows, local dev, features and plans, and an agent brief of invariants. Start there when you need bearings; it points back here for anything run/operate. Keep it current in the same commit as an architecture, screen, service or command change.
 - `README.md` is the public-facing entry point, aimed at someone evaluating the repo (including how it was built with AI). This file (`CLAUDE.md`) remains the canonical run/operate reference — keep run instructions here, not there. A `replit.md` template was removed on 2026-08-09; ignore any lingering references to it.
 - `backlog.md`, `docs/features.md`, `docs/shipped.md`, `docs/roadmap.md` — see **Work tracking** above for which belongs where.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` hold design specs and implementation plans for past features (dated filenames) — useful history/precedent when working in an area they cover.
