@@ -9,7 +9,7 @@
 
 import { getCurrentSession } from "./SessionService";
 import { getOrCreateDeviceKey } from "./DeviceIdentityService";
-import { normalizeForIdentity } from "@/utils/phoneNumber";
+import { alternateIdentityCandidates, normalizeForIdentity } from "@/utils/phoneNumber";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/constants/supabase";
 import type { ReminderRecipient } from "./ReminderService";
 
@@ -37,31 +37,64 @@ export interface ReachabilityResult {
  * cause. A definitive "no" (appUserId: null with a fresh lookedUpAt) only
  * comes back when the server actually answered.
  */
-export async function checkReachability(
-  recipient: Pick<ReminderRecipient, "phone">,
-  region: string | null
-): Promise<ReachabilityResult | null> {
-  const { e164 } = normalizeForIdentity(recipient.phone, region);
-  if (!e164) return null;
-
-  const session = await getCurrentSession();
-  if (!session) return null;
-
+async function lookupOne(
+  e164: string,
+  deviceKey: string,
+  accessToken: string
+): Promise<{ exists: boolean; appUserId: string | null } | null> {
   try {
-    const deviceKey = await getOrCreateDeviceKey();
     const res = await fetch(`${SUPABASE_URL}/functions/v1/lookup`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
         apikey: SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({ phoneE164: e164, deviceKey }),
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { exists: boolean; appUserId: string | null };
-    return { appUserId: data.exists ? data.appUserId : null, lookedUpAt: new Date().toISOString() };
+    return (await res.json()) as { exists: boolean; appUserId: string | null };
   } catch {
     return null;
   }
+}
+
+/**
+ * On an ambiguous miss, retries a short list of plausible alternate regions
+ * (see alternateIdentityCandidates) before giving up - a bare "not
+ * reachable" is otherwise indistinguishable from the recipient genuinely
+ * not having the app, which is the harmful failure mode this guards.
+ */
+export async function checkReachability(
+  recipient: Pick<ReminderRecipient, "phone">,
+  region: string | null
+): Promise<ReachabilityResult | null> {
+  const { e164, ambiguous } = normalizeForIdentity(recipient.phone, region);
+  if (!e164) return null;
+
+  const session = await getCurrentSession();
+  if (!session) return null;
+
+  const deviceKey = await getOrCreateDeviceKey();
+
+  const first = await lookupOne(e164, deviceKey, session.access_token);
+  if (first === null) return null;
+  if (first.exists) {
+    return { appUserId: first.appUserId, lookedUpAt: new Date().toISOString() };
+  }
+  if (!ambiguous) {
+    return { appUserId: null, lookedUpAt: new Date().toISOString() };
+  }
+
+  for (const candidate of alternateIdentityCandidates(recipient.phone, region)) {
+    const result = await lookupOne(candidate, deviceKey, session.access_token);
+    if (result?.exists) {
+      return { appUserId: result.appUserId, lookedUpAt: new Date().toISOString() };
+    }
+  }
+
+  // Every candidate missed. Still ambiguous - a future call may need to
+  // retry again rather than trusting this as durable (see
+  // recipientReachability.ts's TTL asymmetry).
+  return { appUserId: null, lookedUpAt: new Date().toISOString() };
 }

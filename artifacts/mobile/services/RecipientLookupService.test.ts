@@ -76,4 +76,47 @@ describe("checkReachability", () => {
     const result = await checkReachability({ phone: "9876543210" }, "IN");
     expect(result).toBeNull();
   });
+
+  it("does not retry when the first lookup was unambiguous (explicit + prefix)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ exists: false, appUserId: null }),
+    });
+    const result = await checkReachability({ phone: "+919876543210" }, "IN");
+    expect(result?.appUserId).toBeNull();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries alternate regions on an ambiguous miss, and returns a hit found on retry", async () => {
+    mockFetch.mockImplementation(async (_url: string, options: { body: string }) => {
+      const { phoneE164 } = JSON.parse(options.body);
+      if (phoneE164 === "+19876543210") {
+        return { ok: true, json: async () => ({ exists: true, appUserId: "user-us" }) };
+      }
+      return { ok: true, json: async () => ({ exists: false, appUserId: null }) };
+    });
+    const result = await checkReachability({ phone: "9876543210" }, "IN");
+    expect(result?.appUserId).toBe("user-us");
+    expect(mockFetch.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("returns appUserId: null after exhausting every alternate region", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ exists: false, appUserId: null }),
+    });
+    const result = await checkReachability({ phone: "9876543210" }, "IN");
+    expect(result?.appUserId).toBeNull();
+    expect(mockFetch.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("does not retry beyond the first hit", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ exists: true, appUserId: "user-123" }),
+    });
+    const result = await checkReachability({ phone: "9876543210" }, "IN");
+    expect(result?.appUserId).toBe("user-123");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
 });

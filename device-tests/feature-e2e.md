@@ -21,6 +21,7 @@
 | [D95](#d95) | Parsed date/time/recurrence chips are editable in place | `PASS` | 2026-09-21 | MANUAL |
 | [D96](#d96) | Skip today's occurrence of a recurring reminder vs. delete the series | `PASS` | 2026-09-20 | MANUAL |
 | [D97](#d97) | Same-weekday reminders/previews merge into one home-list group | `PASS` | 2026-09-20 | MANUAL |
+| [D98](#d98) | Recipient lookup finds a region-ambiguous number via retry (B9) | `PENDING` | — | MANUAL |
 
 ---
 
@@ -1490,3 +1491,42 @@ that tapping near it does not steal focus from the input.
   showing the old rule.
 - A chip is tappable but its hit area is smaller than the chip's visible
   bounds — check with `uiautomator dump` rather than by eye.
+
+<a id="d98"></a>
+## D98 — Recipient lookup finds a region-ambiguous number via retry (B9) · `PENDING`
+
+*Added 2026-09-22.* Jest proves `alternateIdentityCandidates()` returns the
+right set of E.164 strings and that `checkReachability()` calls the `lookup`
+Edge Function once per candidate until a hit, but everything is mocked — the
+real bug this fixes only shows up with two genuinely different physical
+devices, one with a mismatched system region, hitting the live
+`remindme-tier2` backend for real.
+
+**Setup.** Two registered devices/accounts, as in the 2026-09-11 two-device
+Tier 2 test (see `system_learnings.md`). On the **sender's** device, save the
+recipient's contact as **bare national digits with no leading `+`** (e.g.
+`9876543210` for an Indian number). Set the sender device's **system locale
+region** to something other than India (e.g. `en-GB` or `en-US`) — this
+recreates the exact mismatch found live on 2026-09-11.
+
+**Steps.**
+1. On the sender device, start "Remind someone else" and pick the
+   misconfigured contact.
+2. Read the reachability badge/state before doing anything else.
+3. Compare against the same flow with the sender device's region set back to
+   match the recipient's real country.
+4. Repeat with a recipient number from a country **not** in
+   `FALLBACK_IDENTITY_REGIONS` (`artifacts/mobile/utils/phoneNumber.ts`) —
+   confirm it still fails cleanly (no crash, same "not reachable" wording) as
+   the honest negative case this fix does not claim to cover.
+
+**Pass.** Step 2 shows the recipient as reachable, matching step 3's result —
+the region mismatch found live in the earlier session no longer produces a
+silent miss. Step 4 fails the same way it always did (no crash, no infinite
+retry, a "not reachable" state a user can act on), not a new failure mode.
+
+**Fails if.** Step 2 still shows "not reachable" despite the recipient having
+the app (the retry did not run, or ran against the wrong candidate list), or
+the flow visibly hangs/retries for longer than a normal single lookup would
+(each extra candidate is a full round trip to the Edge Function, so a slow
+network could make this noticeably slower — worth timing).

@@ -1,5 +1,6 @@
 import { getLocales } from "expo-localization";
 import {
+  alternateIdentityCandidates,
   callingCodeForRegion,
   normalizePhone,
   normalizeForIdentity,
@@ -156,5 +157,37 @@ describe("normalizeForIdentity", () => {
       e164: null,
       ambiguous: false,
     });
+  });
+});
+
+describe("alternateIdentityCandidates", () => {
+  it("offers other plausible regions for a bare national number, excluding the one already tried", () => {
+    const candidates = alternateIdentityCandidates("9876543210", "IN");
+    expect(candidates).not.toContain("+919876543210"); // already tried
+    expect(candidates).toContain("+19876543210"); // US
+    expect(candidates).toContain("+449876543210"); // GB
+  });
+
+  it("returns no candidates for an explicit international number - nothing ambiguous to retry", () => {
+    expect(alternateIdentityCandidates("+919876543210", "IN")).toEqual([]);
+  });
+
+  it("returns no candidates for a 00-prefixed international number", () => {
+    expect(alternateIdentityCandidates("0091 98765 43210", "IN")).toEqual([]);
+  });
+
+  it("returns no candidates for empty input", () => {
+    expect(alternateIdentityCandidates("", "IN")).toEqual([]);
+    expect(alternateIdentityCandidates(null, "IN")).toEqual([]);
+  });
+
+  it("resolves a national trunk 0 the same way normalizeForIdentity does", () => {
+    const candidates = alternateIdentityCandidates("098765 43210", "IN");
+    expect(candidates).toContain("+19876543210");
+  });
+
+  it("has no duplicates even when triedRegion is unrecognized", () => {
+    const candidates = alternateIdentityCandidates("9876543210", "ZZ");
+    expect(new Set(candidates).size).toBe(candidates.length);
   });
 });

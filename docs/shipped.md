@@ -18,6 +18,25 @@ advertise these until a device run logs a pass in `device-tests/`.
 
 ## 2026-09
 
+### Recipient lookup retries alternate regions on an ambiguous miss (B9) — 2026-09-22 · jest only
+
+**User-facing:** None yet (bug fix, unproven on hardware). Sending a
+reminder to someone whose contact number was saved without a country code
+should now find them even when your phone's region setting doesn't match
+their number's real country — instead of a single guess that silently missed.
+
+`normalizeForIdentity()` (`artifacts/mobile/utils/phoneNumber.ts`) still makes
+one region guess as before, but a new `alternateIdentityCandidates()` returns
+a short fixed list of other plausible regions (India, US, UK, Saudi Arabia,
+UAE — this app's actual NRI/Gulf-diaspora cohort) to retry when that guess is
+ambiguous. `RecipientLookupService.checkReachability()` retries each
+candidate against the existing `lookup` Edge Function in turn on a miss,
+stopping at the first hit. Deliberately client-side only — the `lookup`
+Edge Function's single-hash matching was left unchanged, keeping this out of
+the security-sensitive `SECURITY DEFINER`/hash-matching surface. Jest-green
+(`phoneNumber.test.ts`, `RecipientLookupService.test.ts`), not yet verified
+against a real cross-region mismatch on hardware.
+
 ### Snooze notification actions device-verified (B2) — 2026-09-20 · Announce-ready
 
 **User-facing:** None (bug fix). Snoozing and marking done directly from
