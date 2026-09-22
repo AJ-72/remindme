@@ -7,29 +7,39 @@ directly.
 
 Who talks to what.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/02-architecture-1-dark.svg">
+  <img alt="1. System context — diagram" src="diagrams/02-architecture-1-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
+
 ```mermaid
 graph TB
-    subgraph Device["📱 Android / iOS device"]
-        APP["Reminders app<br/>(React Native + Expo Router)"]
+    subgraph Device["Android / iOS device"]
+        APP["Reminders app<br/>React Native + Expo Router"]
         AS[("AsyncStorage<br/>all reminders + settings")]
-        OS["OS notification scheduler<br/>(expo-notifications)"]
-        STT["Speech recognition<br/>(expo-speech-recognition)"]
+        OS["OS notification scheduler<br/>expo-notifications"]
+        STT["Speech recognition"]
         CONTACTS["Contacts"]
     end
 
-    subgraph Cloud["☁️ Supabase project remindme-tier2"]
+    subgraph Cloud["Supabase project remindme-tier2"]
         EF["Edge Functions (Deno)"]
-        PG[("Postgres<br/>5 tables + RLS<br/>+ SECURITY DEFINER fns")]
+        PG[("Postgres<br/>6 tables + RLS<br/>+ SECURITY DEFINER fns")]
     end
 
-    EXPO["Expo Push service → FCM"]
-    VENDOR["PostHog · Sentry<br/>(opt-out, no user content)"]
-    MSG["WhatsApp / SMS<br/>(deep link only)"]
+    subgraph Ext["Third parties"]
+        EXPO["Expo Push service<br/>then FCM"]
+        VENDOR["PostHog · Sentry<br/>opt-out, no user content"]
+        MSG["WhatsApp / SMS<br/>deep link only"]
+    end
 
-    APP --> AS
-    APP --> OS
-    APP --> STT
-    APP --> CONTACTS
+    APP --- AS
+    APP --- OS
+    APP --- STT
+    APP --- CONTACTS
     APP -->|HTTPS, user JWT| EF
     EF --> PG
     EF -->|push token| EXPO
@@ -43,10 +53,20 @@ graph TB
     style AS fill:#7a5c2e,color:#fff
 ```
 
+</details>
+
 **Read this first:** the app never calls Postgres or PostREST directly. Every
 backend call goes through an Edge Function. That is [ADR 0001](../adr/0001-client-talks-to-edge-functions-not-postgrest.md).
 
 ## 2. Monorepo layout
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/02-architecture-2-dark.svg">
+  <img alt="2. Monorepo layout — diagram" src="diagrams/02-architecture-2-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 graph LR
@@ -71,6 +91,8 @@ graph LR
     style API fill:#6b3d3d,color:#fff
 ```
 
+</details>
+
 `artifacts/api-server`, `lib/api-spec`, `lib/api-client-react` and
 `lib/api-zod` are a working pipeline with nothing flowing through it. Do not
 assume the mobile app uses them. It does not.
@@ -78,6 +100,14 @@ assume the mobile app uses them. It does not.
 ## 3. Mobile layers
 
 The rule: **screens never touch storage or the OS. Services do.**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/02-architecture-3-dark.svg">
+  <img alt="3. Mobile layers — diagram" src="diagrams/02-architecture-3-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 graph TB
@@ -123,6 +153,8 @@ graph TB
     style L5 fill:#7a5c2e,color:#fff
 ```
 
+</details>
+
 Layer rules, in order of importance:
 
 1. `ReminderService.ts` is the **only** module that reads or writes
@@ -134,6 +166,14 @@ Layer rules, in order of importance:
 ## 4. Provider tree
 
 The nesting order is load-bearing. Getting it wrong throws at render time.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/02-architecture-4-dark.svg">
+  <img alt="4. Provider tree — diagram" src="diagrams/02-architecture-4-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 graph TB
@@ -149,11 +189,21 @@ graph TB
     style G fill:#2d5f8a,color:#fff
 ```
 
+</details>
+
 `SharedTextProvider` reads settings through `useReminders()`. It must sit
 **inside** `RemindersProvider`. This exact mistake has broken three test
 files. Copy the order above into any test that renders both.
 
 ## 5. Backend
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/02-architecture-5-dark.svg">
+  <img alt="5. Backend — diagram" src="diagrams/02-architecture-5-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 graph TB
@@ -192,6 +242,8 @@ graph TB
     style RLS fill:#3d6b4a,color:#fff
 ```
 
+</details>
+
 Three facts that catch people:
 
 - **A new table with no `pgPolicy` has RLS off.** Drizzle enables RLS only on
@@ -206,6 +258,14 @@ Three facts that catch people:
 ## 6. Data model on the device
 
 One `Reminder` record carries everything. There is no second table.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/02-architecture-6-dark.svg">
+  <img alt="6. Data model on the device — diagram" src="diagrams/02-architecture-6-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 classDiagram
@@ -237,6 +297,8 @@ classDiagram
     Reminder --> RecurrenceRule
     Reminder --> ReminderRecipient
 ```
+
+</details>
 
 Three fields hold three different times. Do not mix them:
 

@@ -45,3 +45,31 @@ If a page here disagrees with one of those four files, **those four win**.
 When you change architecture, add a screen, add a service, or change a
 command, update the matching page here **in the same commit**. A stale map
 costs more than no map.
+
+## Diagrams
+
+Each diagram is committed twice, as `diagrams/<page>-<n>-light.svg` and
+`-dark.svg`, and embedded through a `<picture>` element so it follows the
+reader's theme. The Mermaid source sits under the picture, in a collapsed
+`<details>` block. **Edit the Mermaid source, then re-render.**
+
+Why SVG files and not a live ```mermaid block:
+
+- github.com's own Mermaid renderer fails on some of these diagrams with
+  `svg element not in render tree`.
+- GitHub Pages does not render Mermaid at all. Jekyll emits a plain code
+  block.
+
+A committed SVG renders in both, and in any other Markdown viewer.
+
+To re-render after editing a diagram:
+
+```bash
+npm i @mermaid-js/mermaid-cli
+mmdc -i in.mmd -o docs/knowledge/diagrams/<page>-<n>-light.svg -b white \
+     -c '{"htmlLabels":false,"flowchart":{"htmlLabels":false,"wrappingWidth":500},"theme":"default"}'
+# repeat with "theme":"dark" and -b "#0d1117" for the dark variant
+```
+
+Keep `htmlLabels` off. With it on, Mermaid emits `foreignObject`, and a
+browser showing an SVG as an image does not render that — the labels vanish.

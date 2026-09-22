@@ -143,6 +143,14 @@ Malayalam freely.
 Four things must all be right, or the build fails in ways that look unrelated.
 Do them in this order.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/05-local-dev-1-dark.svg">
+  <img alt="Local Android builds on Windows — diagram" src="diagrams/05-local-dev-1-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
+
 ```mermaid
 flowchart TB
     A["1. Set JAVA_HOME to JDK 17-21<br/>e.g. Android Studio's bundled JBR"] --> B
@@ -152,6 +160,8 @@ flowchart TB
 
     style C fill:#6b3d3d,color:#fff
 ```
+
+</details>
 
 1. **`JAVA_HOME`.** A newer system JDK gives
    `Error resolving plugin [id: 'com.facebook.react.settings'] > 26.0.2`.

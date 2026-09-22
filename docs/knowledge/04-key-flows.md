@@ -4,6 +4,14 @@ Six flows cover most of the app. Each one names the files it passes through.
 
 ## 1. Create a reminder from a sentence
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/04-key-flows-1-dark.svg">
+  <img alt="1. Create a reminder from a sentence — diagram" src="diagrams/04-key-flows-1-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
+
 ```mermaid
 sequenceDiagram
     actor U as User
@@ -36,6 +44,8 @@ sequenceDiagram
     CX-->>QA: navigate back
 ```
 
+</details>
+
 Notes:
 - The parser runs on **every keystroke**. This is why the `nl_parse_result`
   analytics event fires at save, not at parse.
@@ -43,6 +53,14 @@ Notes:
 - `exactTiming` decides whether the trigger is alarm-clock backed.
 
 ## 2. A notification fires and the user acts
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/04-key-flows-2-dark.svg">
+  <img alt="2. A notification fires and the user acts — diagram" src="diagrams/04-key-flows-2-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 sequenceDiagram
@@ -68,12 +86,22 @@ sequenceDiagram
     end
 ```
 
+</details>
+
 Important limit: `addNotificationReceivedListener` only fires while the app
 process is alive. A notification delivered to a killed app's tray leaves no
 `notifiedAt`. This stamp is evidence a notification fired. It is not proof it
 was the only time.
 
 ## 3. A recurring series moves forward
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/04-key-flows-3-dark.svg">
+  <img alt="3. A recurring series moves forward — diagram" src="diagrams/04-key-flows-3-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 flowchart TB
@@ -90,6 +118,8 @@ flowchart TB
     style E fill:#6b3d3d,color:#fff
 ```
 
+</details>
+
 Two rules the tests pin:
 
 1. **Compute every candidate fresh from `recurrenceAnchor`.** Chaining
@@ -101,6 +131,14 @@ The boot sweep is what covers a killed app. It catches up several missed
 occurrences in one pass.
 
 ## 4. Intake from another app
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/04-key-flows-4-dark.svg">
+  <img alt="4. Intake from another app — diagram" src="diagrams/04-key-flows-4-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 flowchart LR
@@ -120,6 +158,8 @@ flowchart LR
     style PT fill:#6b3d3d,color:#fff
 ```
 
+</details>
+
 Why a native module: the selected text arrives as an Intent **extra**. React
 Native's Linking API cannot read an extra. The module consumes the intent
 after reading it, so a rotation does not re-insert handled text.
@@ -128,6 +168,14 @@ Why the language is read fresh from `ReminderService.getDictationLanguage()`
 and not from a prop: a cold start would otherwise use a stale closure.
 
 ## 5. Remind someone else — Tier 1
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/04-key-flows-5-dark.svg">
+  <img alt="5. Remind someone else — Tier 1 — diagram" src="diagrams/04-key-flows-5-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 sequenceDiagram
@@ -146,9 +194,19 @@ sequenceDiagram
     Note over SR: app invite appended, capped at 3 per person
 ```
 
+</details>
+
 No backend. No account. This tier works offline apart from the message.
 
 ## 6. Remind someone else — Tier 2 (app to app)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/04-key-flows-6-dark.svg">
+  <img alt="6. Remind someone else — Tier 2 (app to app) — diagram" src="diagrams/04-key-flows-6-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 sequenceDiagram
@@ -180,6 +238,8 @@ sequenceDiagram
     Note over R: on accept, a local Reminder is created<br/>carrying senderName and any recurrence rule
 ```
 
+</details>
+
 Facts worth holding:
 
 - A missing or dead push token never fails the send. The recipient still
@@ -197,6 +257,14 @@ Facts worth holding:
 
 ## 7. Where statistics come from
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/04-key-flows-7-dark.svg">
+  <img alt="7. Where statistics come from — diagram" src="diagrams/04-key-flows-7-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
+
 ```mermaid
 flowchart LR
     R[("Reminder records<br/>createdAt · completedAt<br/>snoozeCount · snoozeHistory<br/>originalDatetime · notifiedAt · openedAt")]
@@ -211,6 +279,8 @@ flowchart LR
 
     style NULL fill:#6b3d3d,color:#fff
 ```
+
+</details>
 
 There is **no event log**, deliberately. Accepted costs: a notification the
 user swiped away is invisible, and deleting a reminder deletes its history.

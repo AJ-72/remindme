@@ -31,6 +31,14 @@ it happen.
 
 ## Supported today — by area
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/06-features-1-dark.svg">
+  <img alt="Supported today — by area — diagram" src="diagrams/06-features-1-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
+
 ```mermaid
 mindmap
   root((Reminders))
@@ -76,6 +84,8 @@ mindmap
       Analytics and crash reports
 ```
 
+</details>
+
 Full table with file paths and proof levels: [`docs/features.md`](../features.md).
 
 ## Deliberately absent
@@ -88,6 +98,14 @@ These are choices, not gaps.
 - **No repeating OS trigger.** One-shot triggers only.
 
 ## Planned — the shape of the backlog
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/06-features-2-dark.svg">
+  <img alt="Planned — the shape of the backlog — diagram" src="diagrams/06-features-2-light.svg">
+</picture>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
 
 ```mermaid
 flowchart TB
@@ -124,6 +142,8 @@ flowchart TB
     style B9 fill:#6b3d3d,color:#fff
     style B24 fill:#2d5f8a,color:#fff
 ```
+
+</details>
 
 Effort: S = hours. M = a day or more. L = needs its own spec, or touches
 architecture, or needs a native build or backend.
