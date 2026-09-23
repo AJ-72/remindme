@@ -1767,18 +1767,28 @@ export async function loadReminderById(id: string): Promise<Reminder | undefined
 }
 
 export async function markDoneById(id: string): Promise<void> {
-  const reminders = await loadReminders();
-  const target = reminders.find((r) => r.id === id);
-  if (!target) return;
-  await cancelNotification(target.notificationId);
-  // Shares completeOccurrence with toggleComplete so marking done from the
-  // notification tray advances a recurring series exactly the same way
-  // marking done in-app does - see that function's own doc comment.
-  const completionPatch = await completeOccurrence(target, id);
-  const updated = reminders.map((r) =>
-    r.id === id ? { ...r, ...completionPatch } : r
-  );
-  await saveReminders(updated);
+  // See withWriteLock and markNotifiedById's comment below - same race:
+  // this is the notification-tray "Mark Done" path, and it can run at the
+  // same moment as the app's mount-time rescheduleAllFutureReminders() (the
+  // body-tap-then-Mark-Done sequence in D15 launches the app, which starts
+  // the sweep, while the still-open notification's action fires seconds
+  // later in the same JS runtime). Without the lock, whichever finished
+  // saving last won, silently discarding the other's write - which is
+  // exactly how "Mark Done does nothing" was reported.
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    const target = reminders.find((r) => r.id === id);
+    if (!target) return;
+    await cancelNotification(target.notificationId);
+    // Shares completeOccurrence with toggleComplete so marking done from the
+    // notification tray advances a recurring series exactly the same way
+    // marking done in-app does - see that function's own doc comment.
+    const completionPatch = await completeOccurrence(target, id);
+    const updated = reminders.map((r) =>
+      r.id === id ? { ...r, ...completionPatch } : r
+    );
+    await saveReminders(updated);
+  });
 }
 
 /**

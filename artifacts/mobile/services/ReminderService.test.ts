@@ -1812,6 +1812,24 @@ describe("concurrent writes do not clobber each other", () => {
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].notifiedAt).toBeTruthy();
   });
+
+  // Regression for the "Mark Done chip does nothing" report: markDoneById
+  // did its own independent load-modify-save with no ordering guarantee
+  // against rescheduleAllFutureReminders' mount-time sweep - the exact same
+  // shape of race already fixed for markOpenedById/markNotifiedById above.
+  // This interleaving is real, not contrived: D15's own scenario (tap the
+  // notification body, which launches the app and kicks off the mount-time
+  // sweep, then press Mark Done on the still-open tray notification) runs
+  // both at once in the same JS runtime.
+  it("survives markDoneById racing rescheduleAllFutureReminders", async () => {
+    const r = makeReminder({ id: "r1", completed: false, notificationId: "notif-r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await Promise.all([rescheduleAllFutureReminders(), markDoneById("r1")]);
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].completed).toBe(true);
+  });
 });
 
 describe("snooze preset persistence", () => {
