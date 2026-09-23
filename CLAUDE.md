@@ -24,6 +24,20 @@ Two failure shapes have recurred here and are cheap to recognize:
 
 **Why:** a fix landed for one reported failure while a second, unrelated pre-existing failure was left in place; the user asked for both fixed and for this rule captured so future sessions don't stop at "the test I was asked about now passes."
 
+## Backend changes are not done until they are deployed and checked live
+
+The mobile app on a real device always talks to the **live** `remindme-tier2` project, whatever branch it was built from. A change to `lib/db/src/functions/*.sql`, `privileges.sql`, the Drizzle schema or `supabase/functions/**` is **not done** when it is committed and green. It is done only once it is deployed and the live state has been read back. Until then, report it as **"committed, NOT deployed"**, never as done or as only "unverified on hardware". Those are different gaps: a device test against an undeployed backend fails for a reason no test can reveal.
+
+Before reporting a backend-touching task complete:
+1. Deploy in dependency order: SQL functions and grants first (`push:sql`, or `apply_migration`), then `get_advisors` (security), then the Edge Functions that call them. An Edge Function deployed before the SQL it calls fails with a 500 error.
+2. Read the live state back, not the repo:
+   - `get_edge_function <slug>`: the `version` went up and the source contains the new code.
+   - `select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and proname in (...)`: every new function exists.
+   - `get_advisors security`: `anon` does not have `EXECUTE` on any new `SECURITY DEFINER` function.
+3. If deployment is blocked (no credentials, or a permission denial), stop and say so in the exit report. Don't let a green test suite stand in for a deploy.
+
+**Why the suites can't catch this:** every layer is tested against a stand-in for its neighbour. Jest mocks the service call, the Deno tests use a fake Supabase client, and PGlite runs the repo's own SQL. All three pass while production still runs the previous version. A new request field is also silently ignored by an old Edge Function, so an undeployed feature fails with the *old* behaviour's error, which looks like a logic bug rather than a missing deploy. This happened with B9's reset/migrate (2026-09-23), see `system_learnings.md`.
+
 ## What this is
 
 **Reminders** — a mobile app (React Native/Expo) for scheduling reminders with local notifications. Reminders are stored locally on-device via AsyncStorage. A Supabase backend for the "remind someone else" Tier 2 work (M4) is now deployed and live — see "The M4 Tier 2 backend is deployed" below for what that covers and what's still local-only. Supports voice dictation (English/Malayalam, user-selectable in Settings) and Malayalam-script text input/rendering throughout.

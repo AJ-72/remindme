@@ -61,7 +61,7 @@ Deno.serve(async (req: Request) => {
   if (!body.phoneE164) {
     return jsonError(400, "invalid_body", "phoneE164 is required");
   }
-  if (body.action && !(body.action in RPC_BY_ACTION)) {
+  if (body.action && !Object.hasOwn(RPC_BY_ACTION, body.action)) {
     return jsonError(400, "invalid_body", "action must be register, reset, or migrate");
   }
 
