@@ -22,6 +22,7 @@
 | [D96](#d96) | Skip today's occurrence of a recurring reminder vs. delete the series | `PASS` | 2026-09-20 | MANUAL |
 | [D97](#d97) | Same-weekday reminders/previews merge into one home-list group | `PASS` | 2026-09-20 | MANUAL |
 | [D98](#d98) | Recipient lookup finds a region-ambiguous number via retry (B9) | `PENDING` | — | MANUAL |
+| [D99](#d99) | Phone-number collision recovery: reset and migrate (B9, part 2) | `PENDING` | — | MANUAL |
 
 ---
 
@@ -1530,3 +1531,54 @@ the app (the retry did not run, or ran against the wrong candidate list), or
 the flow visibly hangs/retries for longer than a normal single lookup would
 (each extra candidate is a full round trip to the Edge Function, so a slow
 network could make this noticeably slower — worth timing).
+
+<a id="d99"></a>
+## D99 — Phone-number collision recovery: reset and migrate (B9, part 2) · `PENDING`
+
+*Added 2026-09-22.* PGlite proves both SQL functions' data effects
+(`reset_phone_number()`/`migrate_phone_number()` re-point or delete rows
+correctly against a real Postgres) and Jest proves `register-number.tsx`'s
+state machine, but nothing here has run against the live `remindme-tier2`
+project with a real `auth.uid()` collision, and RLS/grants behave
+differently on a real Supabase project than in a local PGlite instance (see
+CLAUDE.md's own warning about `anon`/`authenticated` default-privilege
+grants only being visible via `mcp__Supabase__get_advisors` on the real
+project).
+
+**Setup.** Two devices, as in D98/the 2026-09-11 two-device test. Register
+device A normally with a real number. On device B, do **not** register yet.
+
+**Steps — migrate.**
+1. On device B, send at least one invitation TO device A's number (so
+   device A's account has a real `invitations` row to check for
+   preservation), and have device A accept it.
+2. On device B, go to register-number.tsx and enter device A's number.
+   Confirm the "already registered" collision screen appears (not the old
+   dead-end error).
+3. Choose "Yes, it's my old account" (migrate), then confirm on the
+   following screen.
+4. On device A (now logically abandoned), try to open the app and interact
+   with anything that touches its old session/devices row.
+
+**Pass — migrate.** Device B ends up registered under the number with the
+success screen. The invitation from step 1 is visible from device B's
+account (query `invitations` by the new `auth.uid()` if UI doesn't
+surface it directly, or check `sender_id`/`recipient_id` in the DB). Device
+A's old push token is not still receiving pushes for that account (devices
+row gone). No duplicate/orphaned `users` row for the old account remains.
+
+**Steps — reset.** Repeat steps 1-2 with a fresh pair of test accounts, but
+choose "Start fresh — erase the old account" and confirm.
+
+**Pass — reset.** Device B registers successfully under the number. The
+invitation from the old account's history is gone (not visible from device
+B or anywhere), confirming the old row and its cascaded children were
+actually deleted, not just orphaned.
+
+**Fails if.** Either action reports success in the UI but the DB state
+doesn't match (e.g. migrate leaves invitations still pointing at the old,
+now-deleted `user_id`, which would be a foreign-key violation the app
+should have surfaced as an error, not silently swallowed); the collision
+screen appears for an error that isn't actually `number_taken`; or the
+irreversible confirm screen is reachable without its own explicit tap (i.e.
+collision alone silently triggers reset/migrate).

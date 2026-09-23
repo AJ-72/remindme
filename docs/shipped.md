@@ -18,6 +18,43 @@ advertise these until a device run logs a pass in `device-tests/`.
 
 ## 2026-09
 
+### Phone-number collision recovery: reset or migrate on registration (B9, part 2) — 2026-09-22 · jest only
+
+**User-facing:** None yet (unproven on hardware). If you register your number
+on a new phone and it's still tied to your old account, you can now choose
+either to bring your sending/receiving history over to the new phone, or to
+erase the old account and start fresh — instead of a dead-end "already
+registered" error with no way forward.
+
+Two gaps, raised together: (1) the national-number length used to normalize
+a bare phone number (no `+`, no leading `00`) was hardcoded to 10 digits
+everywhere, which happens to fit India/US/UK but silently rejected valid
+numbers from most other supported regions (Germany 7-11 digits, UAE 8-9,
+etc.) — `artifacts/mobile/utils/phoneNumber.ts` now carries a per-region
+`NATIONAL_LENGTH_RANGE` table instead, defaulting to 10-10 for any
+unlisted region so existing behavior is unchanged there. (2)
+`self_register()`'s existing "number already registered to a different
+account" refusal was a hard dead end — OTP verification (the eventual fix)
+is still deferred, so there was no way to recover a number honestly tied to
+you. Two new SQL functions close this: `reset_phone_number()`
+(`lib/db/src/functions/resetPhoneNumber.sql`) deletes the old account and
+everything that cascades from it, then claims the number fresh; `migrate_
+phone_number()` (`migratePhoneNumber.sql`) instead re-points that account's
+`invitations` (both sender and recipient side) and `blocks` onto the new
+caller's own id before deleting the emptied old row — devices deliberately
+do not carry over, matching `devices.ts`'s existing "a rebind revokes every
+device" design. Both are the same SECURITY DEFINER / no-caller-liable-
+argument / search_path-pinned risk class as `self_register()` and
+`bind_via_invite_token()`, and are trusted the same way (no OTP yet means
+no proof beyond the caller's own assertion). The `self-register` Edge
+Function now takes an `action: "register" | "reset" | "migrate"` field
+routing to the matching RPC, and `register-number.tsx` offers the
+reset/migrate choice — behind an explicit, irreversible confirmation
+screen — only at the exact moment `self_register()` reports `number_taken`,
+never proactively. 174 db tests (PGlite), 6 new Deno Edge Function tests,
+27 register-number.tsx tests, all green; not yet verified against a real
+two-device collision on hardware.
+
 ### Recipient lookup retries alternate regions on an ambiguous miss (B9) — 2026-09-22 · jest only
 
 **User-facing:** None yet (bug fix, unproven on hardware). Sending a

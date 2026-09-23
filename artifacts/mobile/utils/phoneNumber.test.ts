@@ -86,6 +86,23 @@ describe("normalizePhone", () => {
     (getLocales as jest.Mock).mockReturnValue([{ regionCode: "IN" }]);
     expect(normalizePhone("98765432109")).toBeNull();
   });
+
+  it("accepts a region whose national length isn't 10, e.g. UAE (8-9 digits)", () => {
+    (getLocales as jest.Mock).mockReturnValue([{ regionCode: "AE" }]);
+    expect(normalizePhone("501234567")).toBe("+971501234567"); // 9 digits
+    expect(normalizePhone("50123456")).toBe("+97150123456"); // 8 digits
+  });
+
+  it("accepts Germany's wide national-length range (7-11 digits)", () => {
+    (getLocales as jest.Mock).mockReturnValue([{ regionCode: "DE" }]);
+    expect(normalizePhone("15123456789")).toBe("+4915123456789"); // 11 digits
+    expect(normalizePhone("1512345")).toBe("+491512345"); // 7 digits
+  });
+
+  it("still rejects a length outside even a wide region's range", () => {
+    (getLocales as jest.Mock).mockReturnValue([{ regionCode: "DE" }]);
+    expect(normalizePhone("123")).toBeNull(); // too short even for DE's 7-11
+  });
 });
 
 describe("toWhatsAppDigits", () => {
@@ -156,6 +173,17 @@ describe("normalizeForIdentity", () => {
     expect(normalizeForIdentity("not a phone", "IN")).toEqual({
       e164: null,
       ambiguous: false,
+    });
+  });
+
+  it("resolves a bare national number for a region whose length isn't 10", () => {
+    expect(normalizeForIdentity("501234567", "AE")).toEqual({
+      e164: "+971501234567",
+      ambiguous: true,
+    });
+    expect(normalizeForIdentity("15123456789", "DE")).toEqual({
+      e164: "+4915123456789",
+      ambiguous: true,
     });
   });
 });

@@ -51,6 +51,66 @@ const CALLING_CODES: Record<string, string> = {
   MX: "52",
 };
 
+/**
+ * National significant number length, min/max digits, per region.
+ *
+ * A bare national number (no +, no leading 00) is only resolvable by
+ * checking it against ITS OWN region's plausible length - a single hardcoded
+ * "10 digits" (India's and the US's length, coincidentally) silently
+ * rejected every valid number outside that shape, e.g. a German mobile
+ * number (10-11 digits with area code) or a Emirati one (8-9). Unlisted
+ * regions fall back to {10, 10}, matching this file's behavior before this
+ * table existed.
+ */
+const NATIONAL_LENGTH_RANGE: Record<string, { min: number; max: number }> = {
+  IN: { min: 10, max: 10 },
+  US: { min: 10, max: 10 },
+  CA: { min: 10, max: 10 },
+  GB: { min: 10, max: 10 },
+  AE: { min: 8, max: 9 },
+  SA: { min: 8, max: 9 },
+  QA: { min: 7, max: 8 },
+  KW: { min: 7, max: 8 },
+  OM: { min: 7, max: 8 },
+  BH: { min: 7, max: 8 },
+  SG: { min: 8, max: 8 },
+  MY: { min: 8, max: 9 },
+  AU: { min: 9, max: 9 },
+  NZ: { min: 8, max: 9 },
+  DE: { min: 7, max: 11 },
+  FR: { min: 9, max: 9 },
+  IT: { min: 9, max: 10 },
+  ES: { min: 9, max: 9 },
+  NL: { min: 9, max: 9 },
+  IE: { min: 7, max: 9 },
+  CH: { min: 9, max: 9 },
+  SE: { min: 7, max: 9 },
+  NO: { min: 8, max: 8 },
+  DK: { min: 8, max: 8 },
+  ZA: { min: 9, max: 9 },
+  NG: { min: 7, max: 10 },
+  KE: { min: 9, max: 9 },
+  LK: { min: 9, max: 9 },
+  NP: { min: 8, max: 10 },
+  BD: { min: 8, max: 10 },
+  PK: { min: 9, max: 10 },
+  JP: { min: 9, max: 10 },
+  KR: { min: 8, max: 10 },
+  CN: { min: 11, max: 11 },
+  HK: { min: 8, max: 8 },
+  PH: { min: 9, max: 10 },
+  ID: { min: 8, max: 11 },
+  TH: { min: 8, max: 9 },
+  VN: { min: 9, max: 10 },
+  BR: { min: 10, max: 11 },
+  MX: { min: 10, max: 10 },
+};
+
+function nationalLengthRange(region: string | null | undefined): { min: number; max: number } {
+  const key = region?.toUpperCase();
+  return (key && NATIONAL_LENGTH_RANGE[key]) || { min: 10, max: 10 };
+}
+
 const REGION_NAMES: Record<string, string> = {
   IN: "India",
   US: "United States",
@@ -160,16 +220,19 @@ export function normalizePhone(raw: string | null | undefined): string | null {
     return rest.length >= 8 ? `+${rest}` : null;
   }
 
+  const region = getLocales()[0]?.regionCode;
   const cc = deviceCallingCode();
   if (!cc) return null;
+  const { min, max } = nationalLengthRange(region);
 
-  // National trunk prefix: 0 followed by exactly 10 digits.
-  if (digits.startsWith("0") && digits.length === 11) {
+  // National trunk prefix: 0 followed by a plausible national length for
+  // this region.
+  if (digits.startsWith("0") && digits.length - 1 >= min && digits.length - 1 <= max) {
     return `+${cc}${digits.slice(1)}`;
   }
 
   // Bare national number.
-  if (digits.length === 10) {
+  if (digits.length >= min && digits.length <= max) {
     return `+${cc}${digits}`;
   }
 
@@ -238,11 +301,13 @@ export function normalizeForIdentity(
   // in another region would answer differently.
   const cc = callingCodeForRegion(region);
   if (cc) {
-    // National trunk prefix: 0 followed by exactly 10 digits.
-    if (digits.startsWith("0") && digits.length === 11) {
+    const { min, max } = nationalLengthRange(region);
+    // National trunk prefix: 0 followed by a plausible national length for
+    // this region.
+    if (digits.startsWith("0") && digits.length - 1 >= min && digits.length - 1 <= max) {
       return { e164: `+${cc}${digits.slice(1)}`, ambiguous: !regionExplicit };
     }
-    if (digits.length === 10) {
+    if (digits.length >= min && digits.length <= max) {
       return { e164: `+${cc}${digits}`, ambiguous: !regionExplicit };
     }
   }

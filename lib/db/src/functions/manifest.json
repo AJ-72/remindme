@@ -3,6 +3,8 @@
   "functions": [
     "bindViaInviteToken.sql",
     "selfRegister.sql",
+    "resetPhoneNumber.sql",
+    "migratePhoneNumber.sql",
     "claimInvitations.sql",
     "hashLookup.sql",
     "getSenderDisplayName.sql",
