@@ -538,6 +538,15 @@ export function RemindersProvider({
   );
 }
 
+/**
+ * useReminders without the throw, for a component that must still work when
+ * rendered outside the provider (NotificationResponseHandler's own unit
+ * tests do exactly that). Returns null there.
+ */
+export function useOptionalReminders() {
+  return useContext(RemindersContext);
+}
+
 export function useReminders() {
   const ctx = useContext(RemindersContext);
   if (!ctx)

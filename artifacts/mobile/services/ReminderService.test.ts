@@ -1813,14 +1813,10 @@ describe("concurrent writes do not clobber each other", () => {
     expect(stored[0].notifiedAt).toBeTruthy();
   });
 
-  // Regression for the "Mark Done chip does nothing" report: markDoneById
-  // did its own independent load-modify-save with no ordering guarantee
-  // against rescheduleAllFutureReminders' mount-time sweep - the exact same
-  // shape of race already fixed for markOpenedById/markNotifiedById above.
-  // This interleaving is real, not contrived: D15's own scenario (tap the
-  // notification body, which launches the app and kicks off the mount-time
-  // sweep, then press Mark Done on the still-open tray notification) runs
-  // both at once in the same JS runtime.
+  // Same shape of race as markOpenedById/markNotifiedById above: without
+  // the lock, a Mark Done started in the same tick as the mount-time sweep
+  // lost its write. Hardening, not the 2026-09-23 bug itself - see
+  // NotificationResponseHandler.test.tsx for that one.
   it("survives markDoneById racing rescheduleAllFutureReminders", async () => {
     const r = makeReminder({ id: "r1", completed: false, notificationId: "notif-r1" });
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));

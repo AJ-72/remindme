@@ -1767,14 +1767,12 @@ export async function loadReminderById(id: string): Promise<Reminder | undefined
 }
 
 export async function markDoneById(id: string): Promise<void> {
-  // See withWriteLock and markNotifiedById's comment below - same race:
-  // this is the notification-tray "Mark Done" path, and it can run at the
-  // same moment as the app's mount-time rescheduleAllFutureReminders() (the
-  // body-tap-then-Mark-Done sequence in D15 launches the app, which starts
-  // the sweep, while the still-open notification's action fires seconds
-  // later in the same JS runtime). Without the lock, whichever finished
-  // saving last won, silently discarding the other's write - which is
-  // exactly how "Mark Done does nothing" was reported.
+  // See withWriteLock and markNotifiedById's comment below - same shape of
+  // race. Hardening: a Mark Done handled in the same tick as the mount-time
+  // rescheduleAllFutureReminders() sweep could otherwise lose its write to
+  // whichever save finished last. Not the cause of the 2026-09-23 "Mark Done
+  // does nothing" report - that was the list never re-reading storage (see
+  // components/NotificationResponseHandler.tsx).
   await withWriteLock(async () => {
     const reminders = await loadReminders();
     const target = reminders.find((r) => r.id === id);
