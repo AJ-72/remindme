@@ -39,7 +39,7 @@ const colors = {
     secondaryForeground: "#B8431F",
 
     muted: "#E4E8EF",
-    mutedForeground: "#67728A",
+    mutedForeground: "#5A6580",
 
     accent: "#F08768",
     accentForeground: "#FFFFFF",
@@ -51,7 +51,13 @@ const colors = {
     destructiveBorder: "#F2C0B4",
 
     border: "#E3E6EC",
-    input: "#E3E6EC",
+    input: "#D5DAE3",
+    // A control's own edge — the unchecked complete-circle, outline buttons.
+    // Kept apart from `border`, which only separates surfaces and is meant
+    // to be quiet; a control has to clear 3:1 (WCAG 1.4.11) to be seen.
+    control: "#7F8AA0",
+    // Idle action-row icons (repeat, notes, alarm off, insights).
+    icon: "#4E5870",
 
     success: "#0D9488",
     successForeground: "#FFFFFF",
@@ -92,17 +98,19 @@ const colors = {
     secondaryForeground: "#FBC0AE",
 
     muted: "#252E40",
-    mutedForeground: "#98A2B3",
+    mutedForeground: "#AEB7C6",
 
     accent: "#F79B84",
     accentForeground: "#141A26",
 
     destructive: "#F4775A",
     destructiveForeground: "#141A26",
-    destructiveBorder: "#7A3B39",
+    destructiveBorder: "#8A4440",
 
-    border: "#283245",
-    input: "#283245",
+    border: "#3A465E",
+    input: "#4A5670",
+    control: "#7C879E",
+    icon: "#C3CAD6",
 
     success: "#2DD4BF",
     successForeground: "#062A26",
