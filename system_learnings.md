@@ -17,7 +17,12 @@ Newest entries at the top.
 
 **PREVENT:** CLAUDE.md now has a "Backend changes are not done until they are deployed and checked live" section. It sets the deploy order (SQL, then advisors, then Edge Functions) and the three read-back checks (`get_edge_function` version and source, a `pg_proc` query, `get_advisors`), and says to report "committed, NOT deployed" when deploy is blocked. Also worth doing (not built yet): make the client treat `number_taken` returned from a `reset`/`migrate` call as "server out of date", since the new functions can never raise it.
 
-**WHERE:** `supabase/functions/self-register/index.ts`, `lib/db/src/functions/resetPhoneNumber.sql`, `lib/db/src/functions/migratePhoneNumber.sql`, the CLAUDE.md section above. The deploy attempt on 2026-09-23 (`apply_migration`) was blocked by the session's permission classifier, so the fix is **still not live** until a human-approved deploy runs.
+**WHERE:** `supabase/functions/self-register/index.ts`, `lib/db/src/functions/resetPhoneNumber.sql`, `lib/db/src/functions/migratePhoneNumber.sql`, the CLAUDE.md section above. The first deploy attempt was blocked by the session's permission classifier. It was re-run after the user explicitly approved it on 2026-09-23:
+- migration `b9_reset_and_migrate_phone_number` applied;
+- `has_function_privilege` read-back shows `anon` = false and `authenticated` = true for both functions;
+- `self-register` deployed as **version 2**, and the source read back through `get_edge_function` contains the `action` routing.
+
+The MCP deploy reports the entrypoint as `source/source/index.ts`. That's expected: the files are named `source/index.ts` and `_shared/*.ts` and get nested under the bundle's own `source/` directory, so `../_shared` still resolves. The live run could not be checked from the CLI because the project uses an `sb_publishable_` key, which is not a JWT, and `verify_jwt` rejects it without a real user session. The first real call is the device test.
 
 ---
 
