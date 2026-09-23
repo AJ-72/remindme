@@ -1,3 +1,4 @@
+import fc from "fast-check";
 import {
   DEFAULT_QUIET_HOURS,
   formatQuietTime,
@@ -94,5 +95,48 @@ describe("minutesFromDate", () => {
   it("converts a date to minutes since local midnight", () => {
     expect(minutesFromDate(at(0))).toBe(0);
     expect(minutesFromDate(at(22, 30))).toBe(22 * 60 + 30);
+  });
+});
+
+// Property-based tests (fast-check): instead of picking individual example
+// times, these check a rule against many random inputs, including boundary
+// values fast-check biases toward (0, 1, 1439, etc.). See the mutation
+// testing / formal verification report for why these two properties were
+// chosen: they are the exact boundary-operator invariants a wrong `>=`/`<`
+// mutant in isQuietAt/quietHoursEndAfter would break.
+describe("quietHoursEndAfter (property-based)", () => {
+  const minuteOfDay = fc.integer({ min: 0, max: 1439 }); // minutes in a day, MINUTES_PER_DAY - 1
+  // A fixed local-time range keeps this independent of the runner's epoch
+  // and matches the fixture style used above (local `new Date(...)`, not UTC).
+  const anyDate = fc.integer({ min: 2020, max: 2035 }).chain((year) =>
+    fc
+      .tuple(
+        fc.integer({ min: 0, max: 11 }),
+        fc.integer({ min: 1, max: 28 }),
+        fc.integer({ min: 0, max: 23 }),
+        fc.integer({ min: 0, max: 59 })
+      )
+      .map(([month, day, hour, minute]) => new Date(year, month, day, hour, minute, 0, 0))
+  );
+
+  it("is always strictly later than the input date", () => {
+    fc.assert(
+      fc.property(anyDate, minuteOfDay, minuteOfDay, (date, startMinute, endMinute) => {
+        fc.pre(startMinute !== endMinute); // an empty window means "no quiet hours"
+        const end = quietHoursEndAfter(date, { startMinute, endMinute });
+        expect(end.getTime()).toBeGreaterThan(date.getTime());
+      })
+    );
+  });
+
+  it("never lands back inside the quiet window it just ended", () => {
+    fc.assert(
+      fc.property(anyDate, minuteOfDay, minuteOfDay, (date, startMinute, endMinute) => {
+        fc.pre(startMinute !== endMinute);
+        const window = { startMinute, endMinute };
+        const end = quietHoursEndAfter(date, window);
+        expect(isQuietAt(end, window)).toBe(false);
+      })
+    );
   });
 });

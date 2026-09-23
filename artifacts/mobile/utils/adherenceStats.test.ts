@@ -1,3 +1,4 @@
+import fc from "fast-check";
 import type { Reminder } from "@/services/ReminderService";
 import {
   computeAdherenceStats,
@@ -390,5 +391,35 @@ describe("robustness", () => {
     expect(() =>
       computeAdherenceStats([reminder({ datetime: "not-a-date" })], NOW)
     ).not.toThrow();
+  });
+});
+
+// Property-based test (fast-check): the app must never show a completion
+// rate computed from too small a sample (MIN_SCORED_FOR_RATE is the floor,
+// see "Adherence is derived, not logged" in CLAUDE.md -- returning a number
+// the sample can't support is worse than returning nothing). This checks
+// the floor holds for many random reminder-list shapes, not just the
+// hand-picked counts in the tests above.
+describe("computeAdherenceStats completionRate floor (property-based)", () => {
+  const reminderArb = fc
+    .record({
+      daysFromNow: fc.integer({ min: -30, max: -1 }), // always past due -> scored
+      completed: fc.boolean(),
+    })
+    .map(({ daysFromNow, completed }) => reminder({ datetime: at(daysFromNow, 9), completed }));
+
+  it("is null below MIN_SCORED_FOR_RATE and a 0-1 fraction at or above it", () => {
+    fc.assert(
+      fc.property(fc.array(reminderArb, { minLength: 0, maxLength: 20 }), (reminders) => {
+        const stats = computeAdherenceStats(reminders, NOW);
+        if (stats.scored < MIN_SCORED_FOR_RATE) {
+          expect(stats.completionRate).toBeNull();
+        } else {
+          expect(stats.completionRate).not.toBeNull();
+          expect(stats.completionRate as number).toBeGreaterThanOrEqual(0);
+          expect(stats.completionRate as number).toBeLessThanOrEqual(1);
+        }
+      })
+    );
   });
 });
