@@ -249,3 +249,56 @@ export function normalizeForIdentity(
 
   return { e164: null, ambiguous: false };
 }
+
+/**
+ * Regions to retry an ambiguous identity lookup against, beyond the device
+ * region already tried. Short and fixed rather than exhaustive - this app's
+ * actual cohort (per the CALLING_CODES comment) is Malayalam speakers plus
+ * their NRI/Gulf diaspora, not every region in CALLING_CODES.
+ */
+const FALLBACK_IDENTITY_REGIONS = ["IN", "US", "GB", "AE", "SA"];
+
+/**
+ * When normalizeForIdentity's first guess misses, the number may still be
+ * resolvable under a different region - a contact saved as bare digits on a
+ * device whose region doesn't match the number's real country. Returns
+ * additional E.164 candidates worth trying, most-plausible first, excluding
+ * whatever normalizeForIdentity already tried.
+ *
+ * Only meaningful when the original result was ambiguous (unambiguous means
+ * there is nothing to retry - a +prefixed number is already definitive).
+ */
+export function alternateIdentityCandidates(
+  raw: string | null | undefined,
+  triedRegion: string | null | undefined
+): string[] {
+  const trimmed = (raw ?? "").trim();
+  const hasPlus = trimmed.startsWith("+") || /^\(\s*\+/.test(trimmed);
+  const digits = trimmed.replace(/\D/g, "");
+  if (hasPlus || digits.startsWith("00") || !digits) return [];
+
+  const triedUpper = triedRegion?.toUpperCase() ?? null;
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+
+  for (const region of FALLBACK_IDENTITY_REGIONS) {
+    if (region === triedUpper) continue;
+    const cc = callingCodeForRegion(region);
+    if (!cc) continue;
+
+    let national: string | null = null;
+    if (digits.startsWith("0") && digits.length === 11) {
+      national = digits.slice(1);
+    } else if (digits.length === 10) {
+      national = digits;
+    }
+    if (!national) continue;
+
+    const e164 = `+${cc}${national}`;
+    if (seen.has(e164)) continue;
+    seen.add(e164);
+    candidates.push(e164);
+  }
+
+  return candidates;
+}
