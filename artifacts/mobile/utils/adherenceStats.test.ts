@@ -125,6 +125,32 @@ describe("computeAdherenceStats counting", () => {
     expect(stats.medianSlipMinutes).toBe(120);
   });
 
+  it("averages the two middle slips on an even-sized sample", () => {
+    // Found by mutation testing (Stryker): a single-value sample can't tell
+    // `(sorted[mid - 1] + sorted[mid]) / 2` apart from `* 2`, since the
+    // even-length averaging branch is never reached. Two completions with
+    // different slips (60 and 120 minutes) forces that branch and pins the
+    // exact average (90), not just "a number".
+    const stats = computeAdherenceStats(
+      [
+        reminder({
+          completed: true,
+          originalDatetime: at(-1, 9),
+          datetime: at(-1, 9),
+          completedAt: at(-1, 10), // 60 minutes slip
+        }),
+        reminder({
+          completed: true,
+          originalDatetime: at(-2, 9),
+          datetime: at(-2, 9),
+          completedAt: at(-2, 11), // 120 minutes slip
+        }),
+      ],
+      NOW
+    );
+    expect(stats.medianSlipMinutes).toBe(90);
+  });
+
   it("counts snoozes in total and counts postponed reminders once each", () => {
     const stats = computeAdherenceStats(
       [
