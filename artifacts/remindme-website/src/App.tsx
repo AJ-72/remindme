@@ -2,6 +2,8 @@ import { useState } from "react";
 import { ArrowRight, Bell, Check, Clock3, Globe2, HeartHandshake, LockKeyhole, Menu, Mic, Repeat2, Sparkles, UsersRound, X } from "lucide-react";
 
 const shot = (name: string) => `/screenshots/${name}`;
+const WAITLIST_ENDPOINT = import.meta.env.VITE_WAITLIST_ENDPOINT ?? "https://zeeanhbvcjslzirftass.supabase.co/functions/v1/join-waitlist";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "sb_publishable_ZKMC7VDK6_xnFoppRd7ViQ_7JyujWL_";
 
 function Phone({ src, alt, className = "" }: { src: string; alt: string; className?: string }) {
   return <div className={`phone ${className}`}><div className="phone-speaker" /><img src={src} alt={alt} /></div>;
@@ -11,12 +13,37 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
-  const submit = (e: React.FormEvent) => { e.preventDefault(); if (email.trim()) setSubmitted(true); };
-  const buttonLabel = submitted ? <><Check size={16} /> You’re on the list</> : <>Join the waitlist <ArrowRight size={16} /></>;
+  const [submitting, setSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (submitting || submitted) return;
+
+    setSubmitting(true);
+    setSubmissionError(null);
+    try {
+      const website = new FormData(e.currentTarget).get("website");
+      const response = await fetch(WAITLIST_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
+        body: JSON.stringify({ email, website }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error?.message ?? "Could not join the waitlist. Please try again.");
+      }
+      setSubmitted(true);
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : "Could not join the waitlist. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const buttonLabel = submitted ? <><Check size={16} /> You’re on the list</> : submitting ? "Joining…" : <>Join the waitlist <ArrowRight size={16} /></>;
   return <main>
     <nav className="nav shell"><a className="brand" href="#top"><span className="brand-mark"><Bell size={17} strokeWidth={2.6} /></span><span>Remind<span>Me</span></span></a><div className={`nav-links ${menuOpen ? "is-open" : ""}`}><a href="#features" onClick={() => setMenuOpen(false)}>Features</a><a href="#how-it-works" onClick={() => setMenuOpen(false)}>How it works</a><a href="#privacy" onClick={() => setMenuOpen(false)}>Privacy</a><a className="nav-cta" href="#waitlist" onClick={() => setMenuOpen(false)}>Join the waitlist <ArrowRight size={15} /></a></div><button className="menu-button" aria-label="Toggle menu" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button></nav>
 
-    <section className="hero shell" id="top"><div className="hero-copy"><div className="eyebrow"><span className="eyebrow-dot" /> Android early access · A reminder app that listens</div><h1>Say it once.<br />Keep it <em>close.</em></h1><p className="hero-lede">A smart, voice-first Android reminder app that sets the time, repeats what matters, and helps you remember for the people you love.</p><form className="waitlist-form hero-form" onSubmit={submit}><label className="sr-only" htmlFor="hero-email">Your email address</label><input id="hero-email" type="email" placeholder="Your email address" value={email} onChange={(e) => setEmail(e.target.value)} required /><button type="submit">{buttonLabel}</button></form>{submitted ? <p className="success-note"><Check size={13} /> You’re on the Android early-access list. We’ll email when invitations open.</p> : <p className="form-note"><LockKeyhole size={13} /> Android only, for now. No spam—just an invitation.</p>}</div><div className="hero-visual"><div className="sun-orb" /><div className="hero-note note-one"><span className="note-icon coral"><Mic size={14} /></span><span><b>Speak it</b><small>“Remind me to call Amma at 7”</small></span></div><div className="hero-note note-two"><span className="note-icon mint"><Sparkles size={14} /></span><span><b>It gets the details</b><small>Tomorrow · 7:00 PM</small></span></div><div className="hero-note note-three"><span className="note-icon peach"><UsersRound size={14} /></span><span><b>And the right people</b><small>Remind Amma · accepted</small></span></div><Phone src={shot("malayalam-voice.png")} alt="RemindMe voice input screen in Malayalam" className="hero-phone" /><div className="scribble scribble-a">made for real life</div><div className="scribble scribble-b">↗</div></div></section>
+    <section className="hero shell" id="top"><div className="hero-copy"><div className="eyebrow"><span className="eyebrow-dot" /> Android early access · A reminder app that listens</div><h1>Say it once.<br />Keep it <em>close.</em></h1><p className="hero-lede">A smart, voice-first Android reminder app that sets the time, repeats what matters, and helps you remember for the people you love.</p><form className="waitlist-form hero-form" onSubmit={submit}><label className="sr-only" htmlFor="hero-email">Your email address</label><input id="hero-email" type="email" placeholder="Your email address" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={submitted || submitting} /><input className="honeypot" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" /><button type="submit" disabled={submitted || submitting}>{buttonLabel}</button></form>{submitted ? <p className="success-note"><Check size={13} /> You’re on the Android early-access list. We’ll email when invitations open.</p> : submissionError ? <p className="error-note">{submissionError}</p> : <p className="form-note"><LockKeyhole size={13} /> Android only, for now. No spam—just an invitation.</p>}</div><div className="hero-visual"><div className="sun-orb" /><div className="hero-note note-one"><span className="note-icon coral"><Mic size={14} /></span><span><b>Speak it</b><small>“Remind me to call Amma at 7”</small></span></div><div className="hero-note note-two"><span className="note-icon mint"><Sparkles size={14} /></span><span><b>It gets the details</b><small>Tomorrow · 7:00 PM</small></span></div><div className="hero-note note-three"><span className="note-icon peach"><UsersRound size={14} /></span><span><b>And the right people</b><small>Remind Amma · accepted</small></span></div><Phone src={shot("malayalam-voice.png")} alt="RemindMe voice input screen in Malayalam" className="hero-phone" /><div className="scribble scribble-a">made for real life</div><div className="scribble scribble-b">↗</div></div></section>
 
     <section className="trust-strip"><div className="shell trust-inner"><span>Malayalam available now</span><span>Send reminders to your people</span><span>Recurring reminders included</span><span>Private by default</span></div></section>
 
@@ -30,7 +57,7 @@ function App() {
 
     <section className="privacy-section" id="privacy"><div className="shell privacy-inner"><div className="privacy-mark"><LockKeyhole size={23} /></div><div><div className="eyebrow">Quietly private</div><h2>Your reminders belong to you.</h2><p>The core of RemindMe works without an account. Your reminders stay on your device, with backup and restore when you want it.</p></div><div className="privacy-points"><span><Check size={13} /> No account required</span><span><Check size={13} /> No noisy social feed</span><span><Check size={13} /> Dark mode included</span></div></div></section>
 
-    <section className="waitlist-section shell" id="waitlist"><div className="waitlist-card"><div className="waitlist-copy"><div className="eyebrow">Android early access</div><h2>Make room for what matters.</h2><p>Join the early list for RemindMe on Android. We’ll email when invitations open.</p></div><div><form className="waitlist-form bottom-form" onSubmit={submit}><label className="sr-only" htmlFor="bottom-email">Your email address</label><input id="bottom-email" type="email" placeholder="Your email address" value={email} onChange={(e) => setEmail(e.target.value)} required /><button type="submit">{buttonLabel}</button></form>{submitted && <p className="success-note bottom-success"><Check size={13} /> You’re on the Android early-access list.</p>}</div></div></section>
+    <section className="waitlist-section shell" id="waitlist"><div className="waitlist-card"><div className="waitlist-copy"><div className="eyebrow">Android early access</div><h2>Make room for what matters.</h2><p>Join the early list for RemindMe on Android. We’ll email when invitations open.</p></div><div><form className="waitlist-form bottom-form" onSubmit={submit}><label className="sr-only" htmlFor="bottom-email">Your email address</label><input id="bottom-email" type="email" placeholder="Your email address" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={submitted || submitting} /><input className="honeypot" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" /><button type="submit" disabled={submitted || submitting}>{buttonLabel}</button></form>{submitted ? <p className="success-note bottom-success"><Check size={13} /> You’re on the Android early-access list.</p> : submissionError ? <p className="error-note bottom-success">{submissionError}</p> : null}</div></div></section>
     <footer className="footer shell"><a className="brand" href="#top"><span className="brand-mark"><Bell size={15} strokeWidth={2.6} /></span><span>Remind<span>Me</span></span></a><span>Made with care for everyday life.</span><span>© 2026 CuriousMind Labs</span></footer>
   </main>;
 }

@@ -16,7 +16,7 @@ describe("schema-wide guarantees", () => {
 
   it("gives an unauthenticated caller no access to anything", async () => {
     const db = await createSchemaTestDb();
-    const tables = ["users", "devices", "blocks", "invitations", "link_codes"];
+    const tables = ["users", "devices", "blocks", "invitations", "link_codes", "waitlist_signups"];
     for (const table of tables) {
       await expect(db.asAnon(`select * from ${table}`)).rejects.toThrow(/permission denied/i);
     }
@@ -39,6 +39,7 @@ describe("schema-wide guarantees", () => {
       "link_codes",
       "lookup_rate_limits",
       "users",
+      "waitlist_signups",
     ]);
     await db.close();
   });
