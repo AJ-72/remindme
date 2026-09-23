@@ -269,6 +269,26 @@ describe("recurring reminder occurrence tallies", () => {
     expect(stats.completionRate).toBeCloseTo(0.6);
   });
 
+  it("tallies the same completed/missed counts into that hour's bucket, not just the total", () => {
+    // Found by mutation testing: only the running totals above were pinned,
+    // so hourBucket.scored/dayBucket.scored's own += vs -= (and + vs -
+    // inside tallyCompleted + tallyMissed) had nothing to fail against.
+    const dailyRule = { freq: "daily" as const, interval: 1 };
+    const mixed = reminder({
+      recurrence: dailyRule,
+      datetime: at(1, 9), // hour 9, whatever weekday `at()` lands on
+      occurrencesCompleted: 6,
+      occurrencesMissed: 4,
+    });
+    const stats = computeAdherenceStats([mixed], NOW);
+    const weekday = at(1, 9);
+    const dayIndex = new Date(weekday).getDay();
+    expect(stats.byHour[9].scored).toBe(10);
+    expect(stats.byHour[9].completed).toBe(6);
+    expect(stats.byWeekday[dayIndex].scored).toBe(10);
+    expect(stats.byWeekday[dayIndex].completed).toBe(6);
+  });
+
   it("does not double-count: a non-recurring reminder's own decided outcome is unaffected by these fields being absent", () => {
     const stats = computeAdherenceStats(
       [reminder({ completed: true, completedAt: at(-1, 9) })],
@@ -329,6 +349,81 @@ describe("hour advice", () => {
     );
     expect(stats.byHour[7].scored).toBe(4);
     expect(stats.byHour[23].scored).toBe(0);
+  });
+
+  it("counts a completion exactly at the on-time boundary as on time, not late", () => {
+    // ON_TIME_WINDOW_MS is 60 minutes; slipMs <= ON_TIME_WINDOW_MS must
+    // include the boundary itself (found by mutation testing: <= mutated to
+    // < or > both survived against the existing tests, which never hit the
+    // boundary exactly).
+    const stats = computeAdherenceStats(
+      [
+        reminder({
+          completed: true,
+          originalDatetime: at(-1, 9),
+          datetime: at(-1, 9),
+          completedAt: at(-1, 10), // exactly 60 minutes later
+        }),
+      ],
+      NOW
+    );
+    expect(stats.onTime).toBe(1);
+    expect(stats.late).toBe(0);
+  });
+
+  it("withholds advice below MIN_SCORED_FOR_HOUR_ADVICE even with two distinct well-sampled hours", () => {
+    // Two hours each at the per-bucket floor (3), with clearly different
+    // rates, so a broken `enoughData` guard would produce a real
+    // best !== worst pair here -- unlike the single-hour test above, where
+    // the tie-check alone (best.hour === worst.hour) already masks the bug.
+    // Total scored is 6, below MIN_SCORED_FOR_HOUR_ADVICE (8).
+    const good = Array.from({ length: 3 }, () =>
+      reminder({ completed: true, datetime: at(-2, 8), completedAt: at(-2, 8) })
+    );
+    const bad = Array.from({ length: 3 }, () => reminder({ datetime: at(-2, 22) }));
+    const stats = computeAdherenceStats([...good, ...bad], NOW);
+    expect(stats.scored).toBe(6);
+    expect(stats.bestHour).toBeNull();
+    expect(stats.worstHour).toBeNull();
+  });
+
+  it("gives advice at exactly MIN_SCORED_FOR_HOUR_ADVICE, not only strictly above it", () => {
+    const good = Array.from({ length: 4 }, () =>
+      reminder({ completed: true, datetime: at(-2, 8), completedAt: at(-2, 8) })
+    );
+    const bad = Array.from({ length: 4 }, () => reminder({ datetime: at(-2, 22) }));
+    const stats = computeAdherenceStats([...good, ...bad], NOW);
+    expect(stats.scored).toBe(8);
+    expect(stats.bestHour?.hour).toBe(8);
+    expect(stats.worstHour?.hour).toBe(22);
+  });
+
+  it("treats a bucket at exactly MIN_BUCKET_FOR_HOUR_ADVICE as eligible, not only above it", () => {
+    // 3 is the floor; a `>` mutant on this filter would exclude a
+    // just-at-the-floor bucket entirely.
+    const good = Array.from({ length: 3 }, () =>
+      reminder({ completed: true, datetime: at(-2, 8), completedAt: at(-2, 8) })
+    );
+    const bad = Array.from({ length: 3 }, () => reminder({ datetime: at(-2, 22) }));
+    const stats = computeAdherenceStats([...good, ...bad, ...bad], NOW); // pad past the 8-scored floor
+    expect(stats.bestHour?.hour).toBe(8);
+  });
+
+  it("breaks a tied rate by sample size, not arbitrarily", () => {
+    // Two hours at a 100% completion rate but different sample sizes: the
+    // sort's `|| b.scored - a.scored` tie-break must put the larger sample
+    // first. Without it (or with the sort neutered), which hour lands as
+    // best vs. worst is unspecified and this assertion would be flaky
+    // rather than reliably correct.
+    const bigSample = Array.from({ length: 5 }, () =>
+      reminder({ completed: true, datetime: at(-2, 8), completedAt: at(-2, 8) })
+    );
+    const smallSample = Array.from({ length: 3 }, () =>
+      reminder({ completed: true, datetime: at(-2, 14), completedAt: at(-2, 14) })
+    );
+    const stats = computeAdherenceStats([...bigSample, ...smallSample], NOW);
+    expect(stats.bestHour?.hour).toBe(8);
+    expect(stats.worstHour?.hour).toBe(14);
   });
 });
 
