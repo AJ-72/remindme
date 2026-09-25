@@ -366,6 +366,11 @@ export default function QuickAddInput({ onSaved }: Props) {
       setPinnedDate(value);
     } else if (activePillEditor === "time") {
       setPinnedTime(value);
+    } else {
+      // The "no time found" flow picks a full date+time; pin both so the
+      // chips show it and the next save uses it, rather than dropping it.
+      setPinnedDate(value);
+      setPinnedTime(value);
     }
     setActivePillEditor(null);
     setPickerMode(null);

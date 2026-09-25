@@ -2089,6 +2089,34 @@ describe("QuickAddInput — recurrence", () => {
       }
     });
 
+    it("Android: picking a time from the no-time sheet shows it as chips", async () => {
+      // Regression (B23): the chained date→time picker closed the sheet via
+      // handlePickerConfirmWith with no pill editor active, pinning nothing.
+      const originalPlatform = Platform.OS;
+      Platform.OS = "android";
+      try {
+        const { findByTestId, getByText, queryByTestId } = renderComponent();
+        fireEvent.changeText(await findByTestId("quick-add-input"), "Buy milk");
+        fireEvent.press(await findByTestId("quick-add-save"));
+        await findByTestId("date-time-picker-sheet");
+        expect(queryByTestId("quick-add-time-pill")).toBeNull();
+
+        fireEvent.press(getByText("Change"));
+        const pickedDate = new Date();
+        pickedDate.setDate(pickedDate.getDate() + 2);
+        fireEvent(await findByTestId("mock-date-time-picker"), "press", pickedDate);
+        const pickedTime = new Date();
+        pickedTime.setHours(9, 30, 0, 0);
+        fireEvent(await findByTestId("mock-date-time-picker"), "press", pickedTime);
+
+        const timePill = await findByTestId("quick-add-time-pill");
+        expect(timePill.props.accessibilityLabel).toMatch(/9:30/);
+        expect(await findByTestId("quick-add-date-pill")).toBeTruthy();
+      } finally {
+        Platform.OS = originalPlatform;
+      }
+    });
+
     it("saves with the pinned recurrence when both pinned and parsed exist", async () => {
       const { findByTestId } = renderComponent();
 
