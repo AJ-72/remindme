@@ -1,9 +1,11 @@
 import { Feather } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { EVENTS } from "@/constants/analytics";
 import { useReminders } from "@/contexts/RemindersContext";
+import { type DialogButton } from "@/components/AppDialog";
+import { useAppDialog } from "@/hooks/useAppDialog";
 import { useColors } from "@/hooks/useColors";
 import { track } from "@/services/AnalyticsService";
 import {
@@ -36,23 +38,21 @@ function errorCopy(error: DriveError): string {
   }
 }
 
-function ask(title: string, message: string, buttons: { text: string; value: string; style?: "cancel" | "destructive" }[]) {
-  return new Promise<string>((resolve) => {
-    Alert.alert(
-      title,
-      message,
-      buttons.map((b) => ({ text: b.text, style: b.style, onPress: () => resolve(b.value) })),
-      { cancelable: true, onDismiss: () => resolve("cancel") }
-    );
-  });
-}
-
 export default function DriveBackupCard() {
   const colors = useColors();
   const { reminders, refreshFromStorage } = useReminders();
   const drive = getDriveBackup();
   const [status, setStatus] = useState<DriveStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const { show, notify, dialog } = useAppDialog();
+  // A choice that can lose data gets the warning tone.
+  const ask = (title: string, message: string, buttons: DialogButton[]) =>
+    show({
+      title,
+      message,
+      buttons,
+      tone: buttons.some((b) => b.style === "destructive") ? "warning" : "info",
+    });
 
   const reload = useCallback(async () => setStatus(await drive.getStatus()), [drive]);
 
@@ -83,24 +83,24 @@ export default function DriveBackupCard() {
     });
     await refreshFromStorage();
     if (!result.ok) {
-      Alert.alert("Couldn't restore", "The backup in Google Drive couldn't be read. Nothing was changed.");
+      await notify("Couldn't restore", "The backup in Google Drive couldn't be read. Nothing was changed.", "error");
       return;
     }
     // Drive now holds the merged set, not just what was there before.
     await drive.uploadBackup("restore");
-    Alert.alert("Restored", `${result.added} added${result.duplicates ? `, ${result.duplicates} already here` : ""}.`);
+    await notify("Restored", `${result.added} added${result.duplicates ? `, ${result.duplicates} already here` : ""}.`, "success");
   };
 
   const connect = () =>
     run(async () => {
       const signedIn = await drive.signIn();
       if (!signedIn.ok) {
-        if (signedIn.error !== "cancelled") Alert.alert("Couldn't sign in", errorCopy(signedIn.error));
+        if (signedIn.error !== "cancelled") await notify("Couldn't sign in", errorCopy(signedIn.error), "error");
         return;
       }
       const found = await drive.findBackup();
       if (!found.ok) {
-        Alert.alert("Couldn't check Google Drive", errorCopy(found.error));
+        await notify("Couldn't check Google Drive", errorCopy(found.error), "error");
         await drive.signOut();
         return;
       }
@@ -142,18 +142,18 @@ export default function DriveBackupCard() {
         if (choice !== "replace") return;
         result = await drive.uploadBackup("manual", { allowReplaceWithEmpty: true });
       }
-      if (!result.ok) Alert.alert("Backup failed", errorCopy(result.error));
+      if (!result.ok) await notify("Backup failed", errorCopy(result.error), "error");
     });
 
   const restoreNow = () =>
     run(async () => {
       const found = await drive.findBackup();
       if (!found.ok) {
-        Alert.alert("Couldn't check Google Drive", errorCopy(found.error));
+        await notify("Couldn't check Google Drive", errorCopy(found.error), "error");
         return;
       }
       if (!found.backup) {
-        Alert.alert("No backup yet", "There's nothing in Google Drive to restore.");
+        await notify("No backup yet", "There's nothing in Google Drive to restore.");
         return;
       }
       const { backup } = found;
@@ -207,6 +207,7 @@ export default function DriveBackupCard() {
           </View>
           {busy && <ActivityIndicator size="small" color={colors.primary} />}
         </Pressable>
+        {dialog}
       </View>
     );
   }
@@ -241,6 +242,7 @@ export default function DriveBackupCard() {
         <Feather name="x-circle" size={18} color={colors.mutedForeground} />
         <Text style={styles.label}>Stop backing up</Text>
       </Pressable>
+      {dialog}
     </View>
   );
 }

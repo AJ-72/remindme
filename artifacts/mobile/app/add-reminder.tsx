@@ -4,7 +4,6 @@ import { getLocales } from "expo-localization";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -20,6 +19,7 @@ import { useReminders } from "@/contexts/RemindersContext";
 import { EVENTS } from "@/constants/analytics";
 import { track } from "@/services/AnalyticsService";
 import { contentScript } from "@/utils/analyticsProps";
+import { useAppDialog } from "@/hooks/useAppDialog";
 import { useColors } from "@/hooks/useColors";
 import { applySuggestedHour, suggestBetterHour } from "@/utils/adherenceCopy";
 import { computeAdherenceStats } from "@/utils/adherenceStats";
@@ -57,6 +57,7 @@ type PickerMode = "date" | "time" | null;
 
 export default function AddReminderScreen() {
   const colors = useColors();
+  const { notify, dialog } = useAppDialog();
   const insets = useSafeAreaInsets();
   const {
     reminders,
@@ -214,7 +215,10 @@ export default function AddReminderScreen() {
    */
   const timeSuggestion = useMemo(
     () =>
-      suggestionDismissed
+      // In edit mode parsedDate is a placeholder ("now") until the reminder
+      // loads; judging that placeholder flashed a suggestion about an hour the
+      // user never picked (and failed tests run near the weak hour).
+      suggestionDismissed || (isEditing && !seededFromExisting.current)
         ? null
         : suggestBetterHour(adherence, parsedDate.getHours(), { isRecurring: !!recurrence }),
     [adherence, parsedDate, suggestionDismissed, recurrence]
@@ -232,7 +236,7 @@ export default function AddReminderScreen() {
   const handleSave = async () => {
     const title = isEditing ? editTitle : parsedTitle || input.trim();
     if (!title.trim()) {
-      Alert.alert("Title required", 'Describe your reminder, e.g. "Call dentist tomorrow at 3pm".');
+      void notify("Title required", 'Describe your reminder, e.g. "Call dentist tomorrow at 3pm".', "warning");
       return;
     }
     setSaving(true);
@@ -296,7 +300,7 @@ export default function AddReminderScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
     } catch {
-      Alert.alert("Error", "Could not save reminder. Please try again.");
+      void notify("Couldn't save reminder", "Please try again.", "error");
     } finally {
       setSaving(false);
     }
@@ -1122,6 +1126,7 @@ export default function AddReminderScreen() {
           onChange={handlePickerChange}
         />
       )}
+      {dialog}
     </View>
   );
 }

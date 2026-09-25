@@ -1,5 +1,4 @@
 import React from "react";
-import { Alert } from "react-native";
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
 
 import DriveBackupCard from "@/components/DriveBackupCard";
@@ -31,16 +30,8 @@ const BACKUP = {
   identity: {},
 };
 
-/** Answers the next Alert.alert by pressing the button with this label. */
-function answerAlertWith(label: string) {
-  jest.spyOn(Alert, "alert").mockImplementationOnce((_t, _m, buttons) => {
-    buttons?.find((b) => b.text === label)?.onPress?.();
-  });
-}
-
 beforeEach(() => {
   jest.clearAllMocks();
-  jest.spyOn(Alert, "alert").mockImplementation(() => {});
   mockReminders = [];
   (getDriveBackup as jest.Mock).mockReturnValue(drive);
   drive.isConfigured.mockReturnValue(true);
@@ -69,9 +60,9 @@ describe("DriveBackupCard", () => {
   // overwritten just because this install signed in.
   it("asks before touching an existing backup, and restores when asked to", async () => {
     drive.findBackup.mockResolvedValue({ ok: true, backup: BACKUP });
-    answerAlertWith("Restore it");
     const { findByTestId } = render(<DriveBackupCard />);
     fireEvent.press(await findByTestId("drive-connect"));
+    fireEvent.press(await findByTestId("app-dialog-btn-restore"));
 
     await waitFor(() => expect(drive.restoreFromBackup).toHaveBeenCalledWith("{raw}"));
     expect(mockRefresh).toHaveBeenCalled();
@@ -81,23 +72,44 @@ describe("DriveBackupCard", () => {
 
   it("offers no replace option on an empty phone", async () => {
     drive.findBackup.mockResolvedValue({ ok: true, backup: BACKUP });
-    const { findByTestId } = render(<DriveBackupCard />);
+    const { findByTestId, queryByTestId, getByTestId } = render(<DriveBackupCard />);
     fireEvent.press(await findByTestId("drive-connect"));
 
-    await waitFor(() => expect(Alert.alert).toHaveBeenCalled());
-    const buttons = (Alert.alert as jest.Mock).mock.calls[0][2].map((b: { text: string }) => b.text);
-    expect(buttons).toEqual(["Restore it", "Cancel"]);
+    expect(await findByTestId("app-dialog-btn-restore")).toBeTruthy();
+    expect(queryByTestId("app-dialog-btn-replace")).toBeNull();
+    expect(getByTestId("app-dialog-btn-cancel")).toBeTruthy();
   });
 
   it("signs back out when the user cancels the choice", async () => {
     mockReminders = [{ id: "a" }];
     drive.findBackup.mockResolvedValue({ ok: true, backup: BACKUP });
-    answerAlertWith("Cancel");
     const { findByTestId } = render(<DriveBackupCard />);
     fireEvent.press(await findByTestId("drive-connect"));
+    fireEvent.press(await findByTestId("app-dialog-btn-cancel"));
 
     await waitFor(() => expect(drive.signOut).toHaveBeenCalled());
     expect(drive.uploadBackup).not.toHaveBeenCalled();
+  });
+
+  it("treats dismissing the sheet as cancel", async () => {
+    mockReminders = [{ id: "a" }];
+    drive.findBackup.mockResolvedValue({ ok: true, backup: BACKUP });
+    const { findByTestId } = render(<DriveBackupCard />);
+    fireEvent.press(await findByTestId("drive-connect"));
+    fireEvent.press(await findByTestId("app-dialog-overlay"));
+
+    await waitFor(() => expect(drive.signOut).toHaveBeenCalled());
+    expect(drive.uploadBackup).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed backup in the app's own dialog", async () => {
+    drive.getStatus.mockResolvedValue({ email: "me@example.com", lastBackupAt: null, lastError: null });
+    drive.uploadBackup.mockResolvedValueOnce({ ok: false, error: "quota" });
+    const { findByTestId, getByTestId } = render(<DriveBackupCard />);
+    fireEvent.press(await findByTestId("drive-backup-now"));
+
+    expect((await findByTestId("app-dialog-title")).props.children).toBe("Backup failed");
+    expect(getByTestId("app-dialog-message").props.children).toBe("Your Google Drive is full");
   });
 
   it("shows the account and when it last backed up", async () => {
@@ -110,9 +122,9 @@ describe("DriveBackupCard", () => {
   it("confirms before replacing a backup with an empty one", async () => {
     drive.getStatus.mockResolvedValue({ email: "me@example.com", lastBackupAt: null, lastError: null });
     drive.uploadBackup.mockResolvedValueOnce({ ok: true, uploaded: false, skipped: "guard" });
-    answerAlertWith("Replace");
     const { findByTestId } = render(<DriveBackupCard />);
     fireEvent.press(await findByTestId("drive-backup-now"));
+    fireEvent.press(await findByTestId("app-dialog-btn-replace"));
 
     await waitFor(() =>
       expect(drive.uploadBackup).toHaveBeenLastCalledWith("manual", { allowReplaceWithEmpty: true })
