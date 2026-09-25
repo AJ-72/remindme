@@ -1767,18 +1767,26 @@ export async function loadReminderById(id: string): Promise<Reminder | undefined
 }
 
 export async function markDoneById(id: string): Promise<void> {
-  const reminders = await loadReminders();
-  const target = reminders.find((r) => r.id === id);
-  if (!target) return;
-  await cancelNotification(target.notificationId);
-  // Shares completeOccurrence with toggleComplete so marking done from the
-  // notification tray advances a recurring series exactly the same way
-  // marking done in-app does - see that function's own doc comment.
-  const completionPatch = await completeOccurrence(target, id);
-  const updated = reminders.map((r) =>
-    r.id === id ? { ...r, ...completionPatch } : r
-  );
-  await saveReminders(updated);
+  // See withWriteLock and markNotifiedById's comment below - same shape of
+  // race. Hardening: a Mark Done handled in the same tick as the mount-time
+  // rescheduleAllFutureReminders() sweep could otherwise lose its write to
+  // whichever save finished last. Not the cause of the 2026-09-23 "Mark Done
+  // does nothing" report - that was the list never re-reading storage (see
+  // components/NotificationResponseHandler.tsx).
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    const target = reminders.find((r) => r.id === id);
+    if (!target) return;
+    await cancelNotification(target.notificationId);
+    // Shares completeOccurrence with toggleComplete so marking done from the
+    // notification tray advances a recurring series exactly the same way
+    // marking done in-app does - see that function's own doc comment.
+    const completionPatch = await completeOccurrence(target, id);
+    const updated = reminders.map((r) =>
+      r.id === id ? { ...r, ...completionPatch } : r
+    );
+    await saveReminders(updated);
+  });
 }
 
 /**

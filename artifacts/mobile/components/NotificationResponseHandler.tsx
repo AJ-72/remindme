@@ -17,6 +17,7 @@ import {
   markResponseHandled,
 } from "@/services/handledResponses";
 import { handleNotificationResponse } from "@/services/notificationResponseHandler";
+import { useOptionalReminders } from "@/contexts/RemindersContext";
 import { EVENTS } from "@/constants/analytics";
 import { track } from "@/services/AnalyticsService";
 import { checkForInvitations, resolveSenderNames } from "@/services/InvitationService";
@@ -57,20 +58,48 @@ function trackResponse(response: any, launch: "cold_start" | "foreground"): void
 
 export default function NotificationResponseHandler() {
   const lastHandledId = useRef<string | null>(null);
+  // A ref, because the effect below subscribes once and must still reach
+  // the provider's current callback.
+  const refreshRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  refreshRef.current = useOptionalReminders()?.refreshFromStorage;
 
   useEffect(() => {
     if (!Notifications) return;
+
+    // The tray actions write AsyncStorage directly, behind the provider's
+    // back. With the app in the foreground this listener is the ONLY handler
+    // (the headless task runs only when the app is not in the foreground),
+    // and pulling down the tray does not change AppState - so the
+    // provider's AppState-"active" reload never runs. Without this refresh
+    // the list kept showing a done reminder as pending, and the next in-app
+    // write saved that stale array back over the completion: "Mark Done
+    // does nothing".
+    const refreshList = async () => {
+      try {
+        await refreshRef.current?.();
+      } catch {}
+    };
 
     const deps = {
       defaultActionIdentifier: Notifications.DEFAULT_ACTION_IDENTIFIER,
       lastHandledId,
       hasHandledResponse,
       markResponseHandled,
-      markDoneById,
+      markDoneById: async (id: string) => {
+        await markDoneById(id);
+        await refreshList();
+      },
       cancelScheduledForReminder,
       cancelNotification,
       scheduleSnoozeNotification,
-      updateSnoozeById,
+      updateSnoozeById: async (
+        id: string,
+        datetime: string,
+        notificationId: string | undefined
+      ) => {
+        await updateSnoozeById(id, datetime, notificationId);
+        await refreshList();
+      },
       getSnoozePreset,
       loadReminderById,
       navigateToSend: (id: string) => {

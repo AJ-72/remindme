@@ -1812,6 +1812,20 @@ describe("concurrent writes do not clobber each other", () => {
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].notifiedAt).toBeTruthy();
   });
+
+  // Same shape of race as markOpenedById/markNotifiedById above: without
+  // the lock, a Mark Done started in the same tick as the mount-time sweep
+  // lost its write. Hardening, not the 2026-09-23 bug itself - see
+  // NotificationResponseHandler.test.tsx for that one.
+  it("survives markDoneById racing rescheduleAllFutureReminders", async () => {
+    const r = makeReminder({ id: "r1", completed: false, notificationId: "notif-r1" });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([r]));
+
+    await Promise.all([rescheduleAllFutureReminders(), markDoneById("r1")]);
+
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].completed).toBe(true);
+  });
 });
 
 describe("snooze preset persistence", () => {
