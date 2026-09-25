@@ -214,7 +214,10 @@ export default function AddReminderScreen() {
    */
   const timeSuggestion = useMemo(
     () =>
-      suggestionDismissed
+      // In edit mode parsedDate is a placeholder ("now") until the reminder
+      // loads; judging that placeholder flashed a suggestion about an hour the
+      // user never picked (and failed tests run near the weak hour).
+      suggestionDismissed || (isEditing && !seededFromExisting.current)
         ? null
         : suggestBetterHour(adherence, parsedDate.getHours(), { isRecurring: !!recurrence }),
     [adherence, parsedDate, suggestionDismissed, recurrence]
