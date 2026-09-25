@@ -48,3 +48,5 @@ yarn-error.*
 .vercel
 
 .env
+.stryker-tmp/
+reports/mutation/

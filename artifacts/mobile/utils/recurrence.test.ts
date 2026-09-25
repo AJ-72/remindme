@@ -1,3 +1,4 @@
+import fc from "fast-check";
 import {
   computeNextOccurrence,
   computeNthOccurrence,
@@ -641,5 +642,87 @@ describe("isValidRecurrenceRule", () => {
     expect(
       isValidRecurrenceRule({ freq: "daily", interval: 1, evil: "__proto__" })
     ).toBe(true);
+  });
+});
+
+// Property-based tests (fast-check). See computeNthOccurrence's own doc
+// comment: it must equal one clamp computed directly from the anchor, never
+// the result of chaining computeNextOccurrence N times (which double-clamps
+// day-of-month across months, e.g. Jan 31 -> Feb 28 -> Mar 28 instead of
+// Mar 31). These properties check that invariant across many random rules
+// and anchors, not just the one hand-picked Jan 31 example above.
+describe("computeNthOccurrence (property-based)", () => {
+  const ruleArb: fc.Arbitrary<RecurrenceRule> = fc
+    .record({
+      freq: fc.constantFrom<RecurrenceRule["freq"]>("daily", "weekly", "monthly", "yearly"),
+      interval: fc.integer({ min: 1, max: 12 }),
+    });
+  const anchorArb = fc
+    .tuple(
+      fc.integer({ min: 2020, max: 2035 }),
+      fc.integer({ min: 0, max: 11 }),
+      fc.integer({ min: 1, max: 28 }),
+      fc.integer({ min: 0, max: 23 }),
+      fc.integer({ min: 0, max: 59 })
+    )
+    .map(([y, mo, d, h, mi]) => new Date(y, mo, d, h, mi, 0, 0));
+
+  it("is always strictly after the anchor for any periods >= 1", () => {
+    fc.assert(
+      fc.property(ruleArb, anchorArb, fc.integer({ min: 1, max: 24 }), (rule, anchor, periods) => {
+        const result = computeNthOccurrence(rule, anchor, periods);
+        expect(result.getTime()).toBeGreaterThan(anchor.getTime());
+      })
+    );
+  });
+
+  it("is monotonically non-decreasing as periods increases", () => {
+    fc.assert(
+      fc.property(ruleArb, anchorArb, fc.integer({ min: 1, max: 12 }), (rule, anchor, periods) => {
+        const earlier = computeNthOccurrence(rule, anchor, periods);
+        const later = computeNthOccurrence(rule, anchor, periods + 1);
+        expect(later.getTime()).toBeGreaterThan(earlier.getTime());
+      })
+    );
+  });
+
+  it("matches computeNextOccurrence chained N times for daily/weekly (no clamp to compound)", () => {
+    // Monthly/yearly are deliberately excluded here: chaining vs. scaling
+    // only disagrees once a day-of-month clamp is involved, which is exactly
+    // the bug computeNthOccurrence's anchor-scaled design avoids -- see its
+    // doc comment. Daily/weekly never clamp, so the two methods must agree.
+    const dailyOrWeeklyRule = ruleArb.filter((r) => r.freq === "daily" || r.freq === "weekly");
+    fc.assert(
+      fc.property(
+        dailyOrWeeklyRule,
+        anchorArb,
+        fc.integer({ min: 1, max: 6 }),
+        (rule, anchor, periods) => {
+          let chained = anchor;
+          for (let i = 0; i < periods; i++) {
+            chained = computeNextOccurrence(rule, chained);
+          }
+          const scaled = computeNthOccurrence(rule, anchor, periods);
+          expect(scaled.getTime()).toBe(chained.getTime());
+        }
+      )
+    );
+  });
+});
+
+describe("isValidRecurrenceRule (property-based)", () => {
+  it("rejects any interval that is not a positive integer", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom("daily", "weekly", "monthly", "yearly"),
+        fc.oneof(
+          fc.integer({ max: 0 }),
+          fc.float().filter((n) => !Number.isInteger(n))
+        ),
+        (freq, interval) => {
+          expect(isValidRecurrenceRule({ freq, interval })).toBe(false);
+        }
+      )
+    );
   });
 });
