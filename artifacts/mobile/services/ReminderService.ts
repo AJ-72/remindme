@@ -76,16 +76,16 @@ export const NAME_PROMPT_KEY = "@name_prompt_v1";
 // have it silently marked seen by some other onboarding flag settling.
 export const FEATURE_TOUR_KEY = "@feature_tour_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
-// NOTE: the value must stay "SNOOZE_10" even though snooze is now
-// user-configurable. It is written into the categoryIdentifier of every
-// scheduled notification, so notifications already sitting in a user's tray
-// across an upgrade carry this exact string — changing it makes their Snooze
-// button silently do nothing. Renaming needs a dual-registration migration
-// (backlog item 17).
-export const SNOOZE_ACTION_ID = "SNOOZE_10";
+// Safe to rename freely: Android resolves a notification's action buttons by
+// looking up SNOOZE_CATEGORY_ID in expo-notifications' category store at
+// build/display time (not at schedule time), and setupSnoozeCategory() below
+// re-registers that category on every app launch. So a tray notification
+// scheduled under the old identifier still gets the current buttons the next
+// time the app runs — no dual-registration migration needed.
+export const SNOOZE_ACTION_ID = "SNOOZE_ACTION";
 // Opens the app to the snooze sheet instead of snoozing directly. Android
 // notification actions can't show a sub-menu, so the full preset list is only
-// reachable in-app. Unlike SNOOZE_ACTION_ID this value has no legacy baggage.
+// reachable in-app.
 export const SNOOZE_MORE_ACTION_ID = "SNOOZE_MORE";
 export const MARK_DONE_ACTION_ID = "MARK_DONE";
 

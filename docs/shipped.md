@@ -18,6 +18,24 @@ advertise these until a device run logs a pass in `device-tests/`.
 
 ## 2026-09
 
+### Rename `SNOOZE_ACTION_ID` tech debt (B5) — 2026-09-25
+
+**User-facing:** None (internal rename only, no behavior change).
+
+`SNOOZE_ACTION_ID` in `artifacts/mobile/services/ReminderService.ts` was
+`"SNOOZE_10"`, a leftover from when snooze was a fixed 10-minute duration —
+misleading now that snooze presets are user-configurable (5/15/30/60
+min/tomorrow). The backlog entry assumed this needed a dual-registration
+migration because the value is written into every scheduled notification's
+`categoryIdentifier`. Verified before changing anything (confirmed via
+`expo-notifications`' Android source, `ExpoNotificationBuilder.kt`) that the
+category's action buttons are resolved fresh from the category store at
+notification *build/display* time, not baked in at schedule time — and
+`setupSnoozeCategory()` re-registers the category on every app launch. So a
+straight rename is safe: renamed to `SNOOZE_ACTION_ID = "SNOOZE_ACTION"`, no
+migration needed. Typecheck and full test suite (79 suites / 1641 tests) both
+green.
+
 ### Phone-number collision recovery: reset or migrate on registration (B9, part 2) — 2026-09-22 · jest only
 
 **User-facing:** None yet (unproven on hardware). If you register your number
