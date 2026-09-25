@@ -26,6 +26,8 @@ deepen those two things over ones that widen the app's surface.**
 | [M7](#m7-group-reminders-with-rsvp) | Group reminders with RSVP | `OPEN` (needs spec) |
 | [M8](#m8-mcp-server) | MCP server for the app | `DEFERRED` |
 | [M9](#m9-smart-re-nudge) | Smart re-nudge | `OPEN`, ready to spec |
+| [M10](#m10-voice-reminders) | Voice reminders | `OPEN`, needs spec |
+| [M11](#m11-habits-and-care-nudges) | Habits and care nudges | `OPEN`, needs spec |
 | [M-persona](#persona-based-personalization-onboarding) | Persona onboarding | `DEFERRED`, unreviewed branch |
 
 ---
@@ -305,6 +307,96 @@ slot, repeatedly overwriting the user's real clock alarm, and trip OEM
 "frequently wakes your system" heuristics. **The re-nudge scheduling path
 must force the non-alarm-clock route explicitly** — the reminder's own alarm
 flag must not propagate to its rungs.
+
+### M10. Voice reminders
+
+*Brainstormed 2026-09-25.* Started as "self-improvement nudges" (journal,
+gratitude, walk, meditate) and was reshaped during the brainstorm into
+three layered ideas: voice reminders (this item), habits and care nudges
+([M11](#m11-habits-and-care-nudges)), and an alarm style for medicines
+(later — see the full-screen-intent B24 row in backlog.md).
+
+**Target user:** people in Indian metros setting reminders for family —
+an adult child for parents in another city, a parent for a child, a
+spouse for a spouse. The reminder speaks in the setter's own recorded
+voice ("Amma, time for your walk" in her son's voice). This deepens M4, the
+roadmap item with no incumbent, which is what the strategic context above
+asks for.
+
+**Decisions made:**
+- **Real recordings only. No AI voice cloning** — legal, ethical and cost
+  risk, and a recording carries the consent of the person who made it.
+- **Voice is an option on every reminder type**, not only habits: one-time,
+  recurring, sent to someone else (M4 Tier 2), and later M11's habits.
+- **Two clip sources:** (1) in-app, the **same flow as dictation** — the
+  user taps the mic and speaks the reminder; the text becomes the title and
+  time via `parseNaturalLanguage`, and the audio is kept as the sound;
+  (2) a shared WhatsApp voice note, through the existing
+  `SharedTextContext` → `transcribeAudioFile` pipeline, keeping the audio
+  instead of discarding it after transcription.
+- **The recording makes the title.** The clip holds the whole sentence
+  (time included); the recipient hears it as spoken.
+- **Maximum 30 seconds** (also iOS's notification-sound limit), with a
+  visible counter and a hard stop.
+- **Silent mode: no bypass in v1.** The voice plays only when the phone
+  has sound on; the notification text ("Walk — from Arun") covers the silent
+  case. An alarm style that plays through silent comes later, for medicines
+  only.
+- The notification still shows text alongside the clip.
+
+**Build order:** (1) voice on a local reminder, (2) voice on a reminder sent
+to someone else, then M11.
+
+**Open risks, to settle in the spec:**
+- **Android notification sound (spike first).** A channel's sound is fixed
+  at creation, and `expo-notifications` only accepts sounds bundled at build
+  time. A clip recorded or received at runtime likely needs a native module
+  creating one channel per clip with a file/`content://` URI. **Run a device
+  spike before any other work; if it fails, stop and report — the user
+  decides the fallback then** (e.g. default sound, voice plays on tap). iOS
+  can play a runtime file from `Library/Sounds` (≤30 s).
+- **Saving dictation audio.** As understood, `expo-speech-recognition`
+  (v3.1.3 here) can persist the recognizer's audio on Android 13+ and iOS
+  only — confirm in the spike. Acceptable: the recorder is usually the
+  adult child on a newer phone; any Android version can *play* a clip.
+- **Transfer (step 2).** The backend stores no files today; clips need
+  Supabase Storage with access rules matching the invitation's RLS, and the
+  recipient must accept before a clip plays. `send_invitation()`'s 30-day
+  content cap may interact with recurring voice reminders — check.
+- **Privacy.** A voice is personal data under India's DPDP Act 2023. Keep
+  audio out of analytics and crash reports (extend `scrubEvent()` if needed).
+- **Stale clips.** The same clip 365 times a year goes stale; allow a few
+  clips per reminder and rotate them.
+
+### M11. Habits and care nudges
+
+*Brainstormed 2026-09-25, after [M10](#m10-voice-reminders).* One model, two
+layers:
+- **Habit** — a recurring item with a "Done" check-off, presets (walk,
+  water, journal, gratitude, meditate, read), and a **soft consistency
+  measure** ("5 of the last 7 days") rather than a hard streak: a broken
+  long streak is a common reason users abandon habit apps, and it fits the
+  gentle "dread override" stance of [M9](#m9-smart-re-nudge).
+- **Care nudge** — a habit one person sets for another, over M4 Tier 2's
+  invitation flow, with an optional M10 voice clip. The recipient can
+  accept, pause, stop and block, and chooses what the setter can see.
+
+Recommended data shape: a habit is a recurring reminder with a flag, not a
+separate store.
+
+**Decision needed first:** CLAUDE.md's "adherence is derived, not logged"
+rule. A recurring reminder keeps only totals (`occurrencesCompleted`/
+`occurrencesMissed`); a per-day consistency view needs per-occurrence
+history the record does not keep.
+
+**Risks:** spouse nudges can read as control rather than care (hence full
+recipient control); data about children under 18 falls under DPDP's
+verifiable-parental-consent rules — get legal advice before storing it
+server-side; a small child often has no phone, so the parent-for-child case
+may be a same-device reminder rather than a sent one; health habits (BP
+check, sugar test) are sensitive content — keep them out of analytics, as
+today. Links to [B27](../backlog.md) (tell the setter when a recipient
+misses one). **Later:** an optional alarm style for medicine habits.
 
 ### Persona-based personalization onboarding
 
