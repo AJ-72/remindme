@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import DriveBackupCard from "@/components/DriveBackupCard";
 import { useReminders } from "@/contexts/RemindersContext";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -267,6 +268,9 @@ export default function BackupScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Renders nothing in a build without Drive support. */}
+        <DriveBackupCard />
+
         <Text style={styles.sectionLabel}>Your reminders</Text>
         <View style={styles.card}>
           <Pressable style={styles.row} onPress={shareBackup} testID="backup-row">

@@ -16,21 +16,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
-import { registerDeviceForPush } from "@/services/DeviceRegistrationService";
-import {
-  claimPendingInvitations,
-  selfRegister,
-  syncDisplayName,
-  type ClaimedInvitation,
-} from "@/services/InvitationService";
+import { selfRegister, type ClaimedInvitation } from "@/services/InvitationService";
+import { completeRegistration } from "@/services/registration";
 import { EVENTS } from "@/constants/analytics";
 import { track } from "@/services/AnalyticsService";
-import {
-  clearRegisteredPhone,
-  getRegisteredPhone,
-  getUserName,
-  setRegisteredPhone,
-} from "@/services/ReminderService";
+import { clearRegisteredPhone, getRegisteredPhone } from "@/services/ReminderService";
 import { callingCodeForRegion, listCountries, normalizeForIdentity } from "@/utils/phoneNumber";
 
 /**
@@ -198,35 +188,11 @@ export default function RegisterNumberScreen() {
 
   // Shared by the ordinary register path and both collision-recovery
   // actions (reset/migrate) - all three end the same way, with a session
-  // bound to phoneE164 and pending invitations claimed.
+  // bound to phoneE164 and pending invitations claimed. The sequence itself
+  // lives in services/registration.ts, shared with the Drive welcome-back
+  // restore (B3).
   const finishRegistration = async (phoneE164: string, method: "self_register" | "reset" | "migrate") => {
-    await setRegisteredPhone(phoneE164);
-    // B11: this is the first moment a session/users row exists for someone
-    // who set their name before ever registering - syncDisplayName() from
-    // setUserName() would have no-op'd back then (no session yet), so it's
-    // repeated here now that one does. Fire-and-forget, same precedent as
-    // registerDeviceForPush() below.
-    getUserName().then((name) => {
-      if (name) syncDisplayName(name);
-    });
-    // Fire-and-forget, same precedent as bind-invite.tsx: this is exactly
-    // the moment a `users` row starts existing (a valid FK target for
-    // devices.user_id), but a missing/failed push registration must never
-    // block or fail the primary action.
-    registerDeviceForPush();
-
-    const claimed = await claimPendingInvitations();
-    // `claimed` is the number that makes this event worth having: it is how
-    // many reminders somebody had already been sent and could not receive
-    // until this moment. A stranded invitation is the exact bug that was
-    // found live-testing on two devices (see CLAUDE.md), so it is measured
-    // now rather than rediscovered.
-    track(EVENTS.NUMBER_REGISTERED, {
-      method,
-      ok: true,
-      error: null,
-      claimed: claimed.length,
-    });
+    const claimed = await completeRegistration(phoneE164, method);
     setState({ phase: "success", claimed });
 
     // For exactly one claimed invitation, skip the intermediate list and go

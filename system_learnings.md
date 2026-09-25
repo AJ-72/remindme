@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-25 — B3: Android Auto Backup restores the Supabase session too, and `bmgr` refuses a force-stopped app
+
+**WHAT:** D1 closed as PASS. Auto Backup brings back all of AsyncStorage — reminders, settings, name, `@registered_phone_v1` **and** supabase-js's persisted session (`SessionService.ts` uses `storage: AsyncStorage`). Confirmed from the database, not the UI: no new anonymous `auth.users` row after reinstall, and the same user refreshed its token right after launch. So a restored install is fully "still you" with no extra step, and B3's Drive welcome-back flow is deliberately offered only on an **empty** install.
+
+**WHY this matters / traps:** (1) `adb shell bmgr backupnow <pkg>` returns "Backup is not allowed" for a **force-stopped** app (Android's stopped state excludes it from backup). Launch once and press Home, then retry. The same rule plausibly lets an OEM battery killer that force-stops the app block scheduled Auto Backup silently — unmeasured. (2) Check a "restore failed" result against `dumpsys backup`'s last-backup time first: in the first manual attempt the only backup on record was taken 32 s *after* the reinstall, i.e. of the empty app. (3) Because the session is restored, two phones can hold the same refresh token after an Android → Android transfer while the old one stays active — rotation probably signs one out; untested (D100). (4) For Drive backup the number has to live in the backup file itself: the server stores only a peppered HMAC of it, so it cannot be recovered server-side, by design.
+
+**WHERE:** `device-tests/cross-cutting.md#d1`, `services/DriveBackupService.ts` (header invariants), `components/NameOnboarding.tsx` (empty-install gate).
+
+---
+
 ## 2026-09-22 — B9: phone-number collision recovery can't reuse the old account's row, because `users.id` IS `auth.uid()`
 
 **WHAT:** `self_register()` has always hard-refused a phone number already owned by a different account, with no recovery path — a real dead end now that OTP verification (the eventual fix) is still deferred. Added `reset_phone_number()` (delete the old account; cascades clear everything referencing it) and `migrate_phone_number()` (re-point the old account's `invitations`/`blocks` onto the new caller, then delete the emptied row) so a user re-registering on a new phone/install has a way forward. The design constraint that shaped `migrate_phone_number()`: every RLS policy on `users` is literally `id = auth.uid()`, and a new device/install always gets its own fresh `auth.uid()` — there is no Postgres operation that hands an existing row to a different auth identity. So "migrate" cannot simply update the old row's `phone_hash`; it has to insert the caller's row first (with a placeholder hash that can't collide with a real E.164-derived one, so the FK-referencing UPDATEs on `invitations`/`blocks` have something to point at), re-point those rows, delete the old row, then finalize the caller's real `phone_hash`. Getting this ordering wrong throws a foreign-key violation (`invitations_sender_id_users_id_fk`) — caught by `migratePhoneNumber.test.ts`, not by inspection.

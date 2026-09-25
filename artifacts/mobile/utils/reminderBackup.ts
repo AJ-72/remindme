@@ -7,7 +7,9 @@ import type { SnoozePreset } from "@/utils/snoozePresets";
 // importing nothing (a bare `reminders` array is not enough — plenty of
 // unrelated files would match that).
 export const BACKUP_FORMAT = "curiousmind.reminders.backup";
-export const BACKUP_VERSION = 1;
+// v2 (B3) added the optional `identity` block. v1 files still import - they
+// simply restore no identity.
+export const BACKUP_VERSION = 2;
 
 export interface BackupSettings {
   defaultAlarmEnabled?: boolean;
@@ -19,12 +21,25 @@ export interface BackupSettings {
   quietHours?: QuietHours;
 }
 
+/**
+ * Who the user is, as opposed to what they scheduled. Carried so a restore on
+ * a fresh install (Drive welcome-back) can bring back the registered number -
+ * the server only keeps an irreversible hash of it, so without this copy a
+ * fresh install has no way to recover it but retyping.
+ */
+export interface BackupIdentity {
+  userName?: string;
+  /** E.164. Absent when the user never registered a number. */
+  registeredPhone?: string;
+}
+
 export interface ReminderBackup {
   format: string;
   version: number;
   exportedAt: string;
   reminders: Reminder[];
   settings: BackupSettings;
+  identity: BackupIdentity;
 }
 
 export type ParseResult =
@@ -49,9 +64,24 @@ function withoutNotificationId(reminder: Reminder): Reminder {
   return rest;
 }
 
+const E164 = /^\+[1-9]\d{6,14}$/;
+
+// Blank or malformed fields are dropped, never written or restored as-is: a
+// malformed number reaching selfRegister() would register the wrong identity,
+// and it must not cost the user the reminders in the same file either.
+function cleanIdentity(identity: BackupIdentity | undefined): BackupIdentity {
+  const clean: BackupIdentity = {};
+  const name = typeof identity?.userName === "string" ? identity.userName.trim() : "";
+  if (name) clean.userName = name;
+  const phone = identity?.registeredPhone;
+  if (typeof phone === "string" && E164.test(phone)) clean.registeredPhone = phone;
+  return clean;
+}
+
 export function serializeBackup(
   reminders: Reminder[],
-  settings: BackupSettings
+  settings: BackupSettings,
+  identity?: BackupIdentity
 ): string {
   const backup: ReminderBackup = {
     format: BACKUP_FORMAT,
@@ -59,8 +89,31 @@ export function serializeBackup(
     exportedAt: new Date().toISOString(),
     reminders: reminders.map(withoutNotificationId),
     settings,
+    identity: cleanIdentity(identity),
   };
   return JSON.stringify(backup, null, 2);
+}
+
+/**
+ * A fingerprint of a serialized backup's CONTENT - everything except
+ * `exportedAt`, which changes on every build and would make every backup
+ * look new. Drive auto-backup uploads only when this differs from the last
+ * upload. Change detection only, not security: FNV-1a over the JSON.
+ */
+export function backupContentHash(json: string): string {
+  let content = json;
+  try {
+    const { exportedAt: _drop, ...rest } = JSON.parse(json);
+    content = JSON.stringify(rest);
+  } catch {
+    // Not JSON: hash the raw text, which still detects change.
+  }
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < content.length; i++) {
+    hash ^= content.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 function isValidReminder(value: unknown): value is Reminder {
@@ -131,6 +184,11 @@ export function parseBackup(raw: string): ParseResult {
         typeof candidate.exportedAt === "string" ? candidate.exportedAt : new Date().toISOString(),
       reminders,
       settings,
+      identity: cleanIdentity(
+        typeof (candidate as { identity?: unknown }).identity === "object"
+          ? (candidate.identity as BackupIdentity)
+          : undefined
+      ),
     },
   };
 }

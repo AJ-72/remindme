@@ -18,6 +18,39 @@ advertise these until a device run logs a pass in `device-tests/`.
 
 ## 2026-09
 
+### Google Drive backup + one-tap "welcome back" restore (B3) — 2026-09-25 · jest only
+
+**User-facing:** None yet (unproven on hardware). Your reminders can now back
+themselves up to your Google Drive automatically. On a new phone — including
+one you didn't set up from your old phone's backup — tap *I've used Reminders
+before* on the first screen, sign in with Google, and one tap brings back your
+reminders, your settings, and your number, so reminders people send you
+arrive on the new phone.
+
+Before this, the only restore paths were Android Auto Backup (which D1 proved
+on 2026-09-25 does restore everything, session included — but only for an
+Android phone set up *from* the old one) and a manual paste-the-JSON export
+most people never make. The backup file (v2, `utils/reminderBackup.ts`) now
+also carries the user's name and registered number, because the server only
+keeps an irreversible hash of the number: without this copy, a fresh install
+cannot get it back except by retyping it.
+`services/DriveBackupService.ts` keeps one file in the hidden per-app Drive
+folder (`drive.appdata`, non-sensitive — no Google verification), uploads
+debounced 5 s after any change, on backgrounding, and from the existing
+BackgroundFetch task, and only when the content hash changed. Two invariants
+protect the one copy a returning user depends on: nothing auto-uploads before
+the install has settled its restore decision, and an empty install never
+replaces a backup that has reminders without an explicit confirm. The
+welcome-back flow (`app/welcome-back.tsx`, `services/welcomeBack.ts`) restores
+reminders first and then, if the box stays ticked, moves the number via
+`selfRegister` → `migrate` on `number_taken` (never `reset`); a number-move
+failure never rolls back the reminders. register-number's success path moved
+to the shared `services/registration.ts` so both flows claim invitations the
+same way. Settings → Backup gains a Drive card (connect, back up now,
+restore, stop). Spec: `docs/superpowers/specs/2026-09-25-google-drive-backup-design.md`.
+Setup: `docs/setup/google-drive-oauth.md`. Device checks:
+`device-tests/data-safety.md#d100`. iOS needs an iOS OAuth client and a build.
+
 ### Phone-number collision recovery: reset or migrate on registration (B9, part 2) — 2026-09-22 · jest only
 
 **User-facing:** None yet (unproven on hardware). If you register your number

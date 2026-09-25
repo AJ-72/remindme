@@ -1,6 +1,7 @@
 import {
   BACKUP_FORMAT,
   BACKUP_VERSION,
+  backupContentHash,
   isSameReminder,
   mergeReminders,
   parseBackup,
@@ -294,5 +295,69 @@ describe("quiet hours in a backup", () => {
       startMinute: 1320,
       endMinute: 480,
     });
+  });
+});
+
+// B3: v2 adds an optional identity block (name + registered number) so a
+// Drive restore on a fresh install can bring back who the user is, not just
+// what they had scheduled. See
+// docs/superpowers/specs/2026-09-25-google-drive-backup-design.md.
+describe("identity in a backup (v2)", () => {
+  it("writes version 2", () => {
+    expect(BACKUP_VERSION).toBe(2);
+  });
+
+  it("round-trips name and registered number", () => {
+    const json = serializeBackup([reminder()], {}, { userName: "Anand", registeredPhone: "+919876543210" });
+    const result = parseBackup(json);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.backup.identity).toEqual({ userName: "Anand", registeredPhone: "+919876543210" });
+  });
+
+  it("still parses a v1 file, which has no identity", () => {
+    const v1 = JSON.stringify({
+      format: BACKUP_FORMAT,
+      version: 1,
+      exportedAt: "2026-08-10T00:00:00.000Z",
+      reminders: [reminder()],
+      settings: {},
+    });
+    const result = parseBackup(v1);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.backup.reminders).toHaveLength(1);
+    expect(result.backup.identity).toEqual({});
+  });
+
+  it("drops a malformed number but keeps the file — reminders matter more", () => {
+    const json = serializeBackup([reminder()], {}, { userName: "Anand", registeredPhone: "98765 43210" });
+    const result = parseBackup(json);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.backup.reminders).toHaveLength(1);
+    expect(result.backup.identity).toEqual({ userName: "Anand" });
+  });
+
+  it("omits empty identity fields rather than writing blanks", () => {
+    const parsed = JSON.parse(serializeBackup([], {}, { userName: "  ", registeredPhone: undefined }));
+    expect(parsed.identity).toEqual({});
+  });
+});
+
+describe("backupContentHash", () => {
+  it("ignores exportedAt, so an unchanged backup hashes the same", () => {
+    const a = serializeBackup([reminder()], { vibrationEnabled: true });
+    const b = JSON.stringify({ ...JSON.parse(a), exportedAt: "2030-01-01T00:00:00.000Z" }, null, 2);
+    expect(backupContentHash(a)).toBe(backupContentHash(b));
+  });
+
+  it("changes when a reminder changes", () => {
+    const a = serializeBackup([reminder()], {});
+    const b = serializeBackup([reminder({ title: "Call Achan" })], {});
+    expect(backupContentHash(a)).not.toBe(backupContentHash(b));
+  });
+
+  it("changes when identity changes", () => {
+    const a = serializeBackup([], {}, { registeredPhone: "+919876543210" });
+    const b = serializeBackup([], {}, { registeredPhone: "+919876543211" });
+    expect(backupContentHash(a)).not.toBe(backupContentHash(b));
   });
 });

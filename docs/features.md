@@ -27,6 +27,8 @@ design, see [docs/roadmap.md](roadmap.md).
 | Boot/mount reschedule sweep (survives reboot and app update) | `rescheduleAllFutureReminders()` | `device` |
 | Home list: chronological, completed newest-first | `app/(tabs)/index.tsx` | `device` |
 | Manual JSON backup / restore (Settings → Back up) | Settings | `device` |
+| Android Auto Backup restores reminders, settings, name, number and session on an Android → Android transfer (no code — D1) | OS | `device` |
+| Automatic Google Drive backup (Settings → Backup), plus one-tap "welcome back" restore of reminders + registered number on a fresh install | `services/DriveBackupService.ts`, `app/welcome-back.tsx` | `jest` |
 | 12-hour AM/PM time display everywhere | `utils/formatDatetime.ts` | `jest` |
 
 ## Recurring reminders (M2)

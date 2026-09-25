@@ -8,6 +8,7 @@
 | [D18](#d18) | Backup carries the new fields | `PARTIAL` | 2026-09-04 | AUTO (partial) |
 | [D21](#d21) | Un-completing re-arms the reminder | `PASS` | 2026-08-29 | AUTO |
 | [D23](#d23) | Pre-existing reminders re-arm on launch after an update | `PASS` | 2026-08-30 | AUTO |
+| [D100](#d100) | Google Drive backup and welcome-back restore (B3) | `PARTIAL` | 2026-09-25 | MANUAL |
 
 ---
 
@@ -317,3 +318,66 @@ The entire argument for choosing Sentry over Crashlytics.
 **Fails if.** Frames stay minified — usually a missing `SENTRY_AUTH_TOKEN`, or
 `@sentry/cli` installed as a stub because its build script was not allowed (see
 `onlyBuiltDependencies` in `pnpm-workspace.yaml`).
+
+---
+
+<a id="d100"></a>
+## D100 — Google Drive backup and welcome-back restore (B3) · `PARTIAL` (2026-09-25, device `b81a371a`, local debug build)
+
+*Added 2026-09-25.* Jest fakes Google entirely (`DriveBackupService.test.ts`,
+`welcomeBack.test.ts`, `welcome-back.test.tsx`, `DriveBackupCard.test.tsx`),
+so nothing here has ever talked to real Google.
+
+**Setup.** An **EAS-signed** build (`build:android` preview): its SHA-1
+`88:84:…:EC:59` is the one registered as an Android OAuth client. A local
+`expo run:android` debug build fails sign-in with `DEVELOPER_ERROR` until the
+debug keystore's SHA-1 is registered too (`docs/setup/google-drive-oauth.md`).
+The Google account must be a **test user** while the consent screen is in
+Testing.
+
+**Checks.**
+1. **Sign in.** Settings → Backup → *Back up to Google Drive* → the Google
+   account picker opens, and after choosing, the card shows the email and
+   *Last backed up just now*.
+2. **Auto-backup.** Edit a reminder, wait about 1 minute (or send the app to
+   the background) → *Last backed up* updates. Nothing uploads while nothing
+   changes.
+3. **Fresh install → welcome back.** Clear app data (or uninstall and, to
+   bypass Auto Backup, reinstall with `adb install` after
+   `adb shell bmgr wipe` for the package). First launch → name sheet shows
+   *I've used Reminders before* → sign in → *We found your backup* with the
+   right count and the masked number → Restore → reminders back.
+4. **Number moved.** After step 3 with the number box ticked: Settings shows
+   the number registered, and a reminder sent to that number from a second
+   device arrives on **this** phone. The old phone stops receiving (migrate
+   semantics — expected).
+5. **The guard.** On a fresh install, sign in from the welcome-back screen
+   and **back out before restoring** (close the app). Wait 2 minutes, then
+   repeat step 3: the Drive backup must still hold its reminders. An empty
+   install must never overwrite it.
+6. **Stop backing up.** The card returns to *Back up to Google Drive*; the
+   Drive file is untouched (step 3 still restores).
+
+**Run 2026-09-25** — local `expo run:android` debug build (debug SHA-1
+registered), Metro-served JS, user watching the screen; storage read back via
+`run-as` + the pulled `RKStorage` DB, server state via SQL.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Entry point | Seen by user | Link rendered (only happens when the native module loads). User found it too faint → now an outlined button. |
+| 1 Sign in | Seen by user | Card showed the email and *Last backed up just now*. |
+| 2 Auto-backup | Seen by user, with a fix | A new reminder updated *Last backed up*; an **edit followed by Home** did not upload until the next open. Cause: Android froze the backgrounded app inside the 30 s debounce. Debounce cut to 5 s; re-test uploaded while the app was open. Remaining gap: an edit made under 5 s before leaving still uploads on next open or the BackgroundFetch run. |
+| 3 Welcome back | Seen by user | Fresh data wipe → restore button → sign in → *We found your backup* → Restore → reminders and settings back. Name restored too (second run, after setting the name and confirming a backup at 15:59:47 UTC). |
+| 4 Number moved | Server half only | New account `fe37d7ec` holds `phone_hash` + 1 device; both earlier accounts lost their `public.users` row. *A reminder sent from a second phone arrives here* — not run, needs two phones. |
+| 5 Guard | Seen by user | Ran via Skip → Settings → sign in on an empty install (not the back-out variant above). Dialog offered only *Restore it* / *Cancel* — no *Replace*; Restore it brought the backup's reminders back (storage confirms). |
+| 6 Stop backing up | Storage evidence, user did the steps | After *Stop backing up*, `@drive_account_v1` / last-backup / hash keys are gone; a reminder created at 16:22:20 UTC produced no backup record 47 s later. |
+
+Also changed from this run: the welcome-back screen's reminders line looked
+like a checkbox that couldn't be unticked — now a plain statement; only the
+number option is a checkbox.
+
+**Not runnable yet.** iOS — no iOS OAuth client and no iOS build. And the
+two-phone case from D1's session finding: an Auto Backup transfer while the
+old phone is still active leaves both holding one Supabase refresh token;
+rotation probably signs one out silently. Needs two phones.
+
