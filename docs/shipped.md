@@ -18,23 +18,31 @@ advertise these until a device run logs a pass in `device-tests/`.
 
 ## 2026-09
 
-### Rename `SNOOZE_ACTION_ID` tech debt (B5) — 2026-09-25
+### Rename `SNOOZE_ACTION_ID` tech debt (B5) — 2026-09-25 · jest only
 
 **User-facing:** None (internal rename only, no behavior change).
 
 `SNOOZE_ACTION_ID` in `artifacts/mobile/services/ReminderService.ts` was
-`"SNOOZE_10"`, a leftover from when snooze was a fixed 10-minute duration —
-misleading now that snooze presets are user-configurable (5/15/30/60
-min/tomorrow). The backlog entry assumed this needed a dual-registration
-migration because the value is written into every scheduled notification's
-`categoryIdentifier`. Verified before changing anything (confirmed via
-`expo-notifications`' Android source, `ExpoNotificationBuilder.kt`) that the
-category's action buttons are resolved fresh from the category store at
-notification *build/display* time, not baked in at schedule time — and
-`setupSnoozeCategory()` re-registers the category on every app launch. So a
-straight rename is safe: renamed to `SNOOZE_ACTION_ID = "SNOOZE_ACTION"`, no
-migration needed. Typecheck and full test suite (79 suites / 1641 tests) both
-green.
+`"SNOOZE_10"`, left over from when snooze was a fixed 10 minutes. That name is
+misleading now that the presets are user-configurable (5/15/30/60
+min/tomorrow). It is now `"SNOOZE_ACTION"`.
+
+The old value is still accepted for one release as `LEGACY_SNOOZE_ACTION_ID`.
+Notifications fall into two cases across the upgrade:
+
+- **Scheduled but not yet fired.** expo-notifications builds a notification's
+  buttons when it displays, looking up the category that
+  `setupSnoozeCategory()` re-registers on every launch. These pick up the new id
+  with no extra work.
+- **Already posted to the tray.** Android never rebuilds a posted
+  notification, so its Snooze button still sends `"SNOOZE_10"`. Without the
+  fallback the handler matched no branch and the tap silently did nothing.
+  A first version of this change shipped without the fallback. Review caught
+  it before merge. `handleNotificationResponse` now accepts both ids. Removal
+  is tracked as B28.
+
+Device proof is pending as
+[D100](../device-tests/notifications.md#d100).
 
 ### Phone-number collision recovery: reset or migrate on registration (B9, part 2) — 2026-09-22 · jest only
 
