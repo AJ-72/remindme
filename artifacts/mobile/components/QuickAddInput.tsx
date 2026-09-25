@@ -270,7 +270,7 @@ export default function QuickAddInput({ onSaved }: Props) {
 
   useEffect(() => {
     const { title, date, ambiguity: parsedAmbiguity, recurrence: parsedRecurrence } =
-      parseNaturalLanguage(input);
+      parseNaturalLanguage(input, new Date(), { eodMinute: quietHours.startMinute });
     setParsedTitle(title);
     setParsedDate(date);
     setAmbiguity(parsedAmbiguity ?? null);
@@ -291,7 +291,7 @@ export default function QuickAddInput({ onSaved }: Props) {
         Animated.timing(pillTranslate, { toValue: -6, duration: 140, useNativeDriver: true }),
       ]).start();
     }
-  }, [input]);
+  }, [input, quietHours.startMinute]);
 
   const doSave = async (dateToUse: Date, titleOverride?: string) => {
     // Once per save, not once per keystroke - the parse effect above runs on
@@ -1652,16 +1652,21 @@ export default function QuickAddInput({ onSaved }: Props) {
           <Pressable onPress={() => {}} style={styles.sheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>
-              Is &quot;{ambiguityPrompt?.numberText}&quot; the time?
+              {ambiguityPrompt?.kind === "meridiem"
+                ? `${ambiguityPrompt.numberText} in the morning or evening?`
+                : `Is "${ambiguityPrompt?.numberText}" the time?`}
             </Text>
             <Text style={styles.sheetSubtitle}>
-              It could be the hour, or part of what you are reminding yourself about.
+              {ambiguityPrompt?.kind === "meridiem"
+                ? "You didn't say AM or PM."
+                : "It could be the hour, or part of what you are reminding yourself about."}
             </Text>
 
             {ambiguityPrompt && (
               <>
                 <Pressable
                   style={styles.choiceRow}
+                  testID="ambiguity-choice-time"
                   onPress={() => handleAmbiguityChoice(ambiguityPrompt.asTime)}
                   disabled={saving}
                 >
@@ -1683,6 +1688,7 @@ export default function QuickAddInput({ onSaved }: Props) {
 
                 <Pressable
                   style={styles.choiceRow}
+                  testID="ambiguity-choice-text"
                   onPress={() => handleAmbiguityChoice(ambiguityPrompt.asText)}
                   disabled={saving}
                 >
