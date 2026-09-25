@@ -15,6 +15,7 @@
 | [D88](#d88) | Several missed occurrences catch up to the next future one, no burst | `PENDING` | — | SEMI |
 | [D89](#d89) | Marking done from the notification tray advances the series | `PENDING` | — | SEMI |
 | [D90](#d90) | Daily 8am reminder survives a DST transition at 8am wall-clock | `PENDING` | — | SEMI |
+| [D100](#d100) | Mark Done / Snooze from the tray, app open | `PENDING` | — | SEMI |
 
 ## Known ColorOS harness limitation (affects D3 and D15)
 
@@ -394,3 +395,34 @@ transition.
 **Fails if.** The reminder fires an hour off after the transition, which
 would indicate the schedule was computed from a raw millisecond offset
 instead of local calendar components.
+
+---
+
+<a id="d100"></a>
+## D100 — Mark Done / Snooze from the tray while the app is open · `PENDING`
+
+*Added 2026-09-23.* D3 covers the app fully closed (headless task) and D15
+leaves the app before pressing the action. Neither covers the case that was
+actually broken: the app is **open on screen**, so Android runs only the
+foreground listener, and pulling down the tray does not change AppState. The
+action wrote storage, but the list never re-read it, and the next in-app edit
+saved the stale list back over the completion. Jest now covers this with the
+real provider (`components/NotificationResponseHandler.test.tsx`, "inside
+RemindersProvider"), but the claim that the tray pull leaves AppState alone is
+an Android fact Jest cannot check.
+
+**Steps.**
+1. Create a reminder 2 minutes out, titled `D100 open`. Stay on the home list.
+2. When it fires, pull down the tray **without leaving the app** and press
+   **Mark Done**.
+3. Close the tray. Look at the list.
+4. Tick any other reminder's checkbox, then look at `D100 open` again.
+5. Repeat steps 1–3 with a fresh reminder, pressing **Snooze** at step 2.
+
+**Pass.** At step 3 the reminder is already under **Completed**, with no
+app restart. It is still completed after step 4. At step 5 the card shows the
+snoozed time.
+
+**Fails if.** The reminder still shows as pending at step 3, or it goes back
+to pending after step 4 (the stale-list overwrite).
+

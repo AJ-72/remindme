@@ -1,6 +1,6 @@
 # Google Drive backup + "welcome back" restore (B3) — design
 
-*2026-09-25. Backlog item **B3**. Status: implemented 2026-09-25 (jest only; device checks D100). One deviation: `completeRegistration` lives in `services/registration.ts`, not `InvitationService.ts`, so tests that auto-mock InvitationService still exercise it.*
+*2026-09-25. Backlog item **B3**. Status: implemented 2026-09-25 (jest only; device checks D101). One deviation: `completeRegistration` lives in `services/registration.ts`, not `InvitationService.ts`, so tests that auto-mock InvitationService still exercise it.*
 
 ## Why
 

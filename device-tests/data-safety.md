@@ -8,7 +8,7 @@
 | [D18](#d18) | Backup carries the new fields | `PARTIAL` | 2026-09-04 | AUTO (partial) |
 | [D21](#d21) | Un-completing re-arms the reminder | `PASS` | 2026-08-29 | AUTO |
 | [D23](#d23) | Pre-existing reminders re-arm on launch after an update | `PASS` | 2026-08-30 | AUTO |
-| [D100](#d100) | Google Drive backup and welcome-back restore (B3) | `PARTIAL` | 2026-09-25 | MANUAL |
+| [D101](#d101) | Google Drive backup and welcome-back restore (B3) | `PARTIAL` | 2026-09-25 | MANUAL |
 
 ---
 
@@ -322,7 +322,7 @@ The entire argument for choosing Sentry over Crashlytics.
 ---
 
 <a id="d100"></a>
-## D100 — Google Drive backup and welcome-back restore (B3) · `PARTIAL` (2026-09-25, device `b81a371a`, local debug build)
+## D101 — Google Drive backup and welcome-back restore (B3) · `PARTIAL` (2026-09-25, device `b81a371a`, local debug build)
 
 *Added 2026-09-25.* Jest fakes Google entirely (`DriveBackupService.test.ts`,
 `welcomeBack.test.ts`, `welcome-back.test.tsx`, `DriveBackupCard.test.tsx`),

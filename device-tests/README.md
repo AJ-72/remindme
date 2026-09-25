@@ -16,10 +16,10 @@ ships it.**
 | File | Covers | IDs |
 | --- | --- | --- |
 | [cross-cutting.md](cross-cutting.md) | Alarm delivery mechanics — the OEM battery/Doze/AlarmManager behavior everything else depends on | D1, D7, D19-D20, D22, D25-D26 |
-| [notifications.md](notifications.md) | Notification actions, channels, dedupe, recurrence re-arm | D2-D4, D15-D16, D85-D90 |
+| [notifications.md](notifications.md) | Notification actions, channels, dedupe, recurrence re-arm | D2-D4, D15-D16, D85-D90, D100 |
 | [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9-D13, D40-D43, D45, D47-D78, D78b, D82-D84, D91-D93, D95 |
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14, D94 |
-| [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete, telemetry privacy | D17-D18, D21, D23, D79-D81, D100 |
+| [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete, telemetry privacy | D17-D18, D21, D23, D79-D81, D101 |
 | [malayalam-parsing.md](malayalam-parsing.md) | On-device Malayalam input/parsing (numerals, ambiguous readings, AM/PM) | D24, + 2 unnumbered checklists |
 | [remind-others.md](remind-others.md) | M4 Tier 2, app-to-app delivery. **The backend shipped 2026-09-09 and the core loop passed live 2026-09-11** — the `BLOCKED` rows here predate that and are now merely untested; re-triage before running. | D27-D39, D44, D46 |
 
@@ -71,7 +71,7 @@ places when this table was last regenerated.
 | [D16](notifications.md#d16) | Personalized snooze re-alert | `PARTIAL` | 2026-09-04 | notifications |
 | [D17](data-safety.md#d17) | Corrupt-store quarantine | `PARTIAL` | 2026-09-04 | data-safety |
 | [D18](data-safety.md#d18) | Backup carries the new fields | `PARTIAL` | 2026-09-04 | data-safety |
-| [D100](data-safety.md#d100) | Google Drive backup and welcome-back restore (B3) | `PARTIAL` | 2026-09-25 | data-safety |
+| [D101](data-safety.md#d101) | Google Drive backup and welcome-back restore (B3) | `PARTIAL` | 2026-09-25 | data-safety |
 | [D22](cross-cutting.md#d22) | Alarm toggle copy and the status-bar icon explainer | `PARTIAL` | — | cross-cutting |
 | [D3](notifications.md#d3) | Mark Done / Snooze with the app fully closed | `PENDING` | — | notifications |
 | [D6](feature-e2e.md#d6) | Malayalam dictation end-to-end | `PASS` | 2026-09-20 | feature-e2e |
@@ -128,6 +128,7 @@ places when this table was last regenerated.
 | [D88](notifications.md#d88) | Several missed occurrences catch up to the next future one, no burst | `PENDING` | — | notifications |
 | [D89](notifications.md#d89) | Marking done from the notification tray advances the series | `PENDING` | — | notifications |
 | [D90](notifications.md#d90) | Daily 8am reminder survives a DST transition at 8am wall-clock | `PENDING` | — | notifications |
+| [D100](notifications.md#d100) | Mark Done / Snooze from the tray while the app is open | `PENDING` | — | notifications |
 | [D93](feature-e2e.md#d93) | System-wide "Remind Me" text-selection menu | `PENDING` | — | feature-e2e |
 | [D94](visual-layout.md#d94) | Ink & Coral palette, on device | `PENDING` | — | visual-layout |
 | [D95](feature-e2e.md#d95) | Parsed date/time/recurrence chips are editable in place | `PENDING` | — | feature-e2e |
