@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-26 — chrono-node silently misreads common English date phrases; normalize before parsing
+
+**WHAT:** `parseNaturalLanguage.ts` now runs `normalizeEnglishDatePhrases()` before chrono, rewriting phrases chrono-node@2.9.1 gets wrong into forms it parses correctly. It also post-corrects bare "day after tomorrow", and returns an AM/PM ambiguity (`ParsedAmbiguity.kind: "meridiem"`) that reuses QuickAddInput's existing choice sheet.
+
+**WHY (non-obvious):** chrono fails *silently*. It doesn't return "no match"; it matches a sub-span and returns a plausible wrong date. Bare "day after tomorrow" matches only "tomorrow" (a day early, with "day after" left in the title). "end of the month" matches only "the month". "a week from tomorrow" splits into two matches. "next to next week" reads as next week. "at 5" becomes 5 AM. Probe with `chrono.parse(...)` and check the matched `text` span, not just whether a date came back. To detect AM/PM ambiguity, use `start.isCertain("hour") && !start.isCertain("meridiem")`, excluding hours past 12, a leading zero ("08:00") and any period word in the text. Decisions the user made: "eod" = start of quiet hours (`eodMinute` option; the rewrite emits an explicit am/pm so it never trips the ambiguity check); "coming <weekday>" said on that weekday = next week's. Keep each rewrite target a phrase chrono is verified to parse, and only rewrite words that get stripped from the title anyway.
+
+**Not covered:** `app/add-reminder.tsx` still takes chrono's AM guess without asking (it shows the parsed time for the user to check). **WHERE:** `utils/parseNaturalLanguage.ts`, `utils/malayalamDateParser.ts` (`ParsedAmbiguity.kind`), `components/QuickAddInput.tsx`, `app/add-reminder.tsx`.
+
+---
+
 ## 2026-09-23 — Mark Done from the tray with the app open wrote storage, but the list never re-read it
 
 **Symptom:** with the app open, a reminder fires, the user pulls down the tray and presses **Mark Done**. Nothing appears to happen: the reminder stays pending in the list.
