@@ -26,6 +26,7 @@ import { Platform } from "react-native";
 import * as BackgroundFetch from "expo-background-fetch";
 import * as TaskManager from "expo-task-manager";
 
+import { getDriveBackup } from "@/services/DriveBackupService";
 import { rescheduleAllFutureReminders } from "@/services/ReminderService";
 
 export const RESCHEDULE_TASK_NAME = "RESCHEDULE_REMINDERS_ON_BOOT";
@@ -37,6 +38,10 @@ if (Platform.OS !== "web") {
   TaskManager.defineTask(RESCHEDULE_TASK_NAME, async () => {
     try {
       await rescheduleAllFutureReminders();
+      // B3: the periodic wake-up doubles as Drive auto-backup's safety net
+      // for changes whose debounce timer died with a killed app. Cheap when
+      // nothing changed (content-hash skip, no network), and never throws.
+      await getDriveBackup().uploadBackup("background");
       return BackgroundFetch.BackgroundFetchResult.NewData;
     } catch {
       return BackgroundFetch.BackgroundFetchResult.Failed;

@@ -219,108 +219,22 @@ describe("HomeScreen", () => {
     expect(titles).toEqual(["Completed newer", "Completed older"]);
   });
 
-  it("deleting a reminder shows a styled confirm sheet, then removes it from the visible list on confirm", async () => {
-    await AsyncStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify([makeReminder({ id: "r1", title: "Delete me" })])
-    );
-    const { findByText, findByTestId, queryByText, UNSAFE_getAllByType } = renderScreen();
-    await findByText("Delete me");
-
-    const Feather = require("@expo/vector-icons").Feather;
-    const trashIcon = UNSAFE_getAllByType(Feather).find(
-      (node: any) => node.props.name === "trash-2"
-    );
-    fireEvent.press(trashIcon.parent);
-
-    expect(await findByText("Delete Reminder")).toBeTruthy();
-    const confirmButton = await findByTestId("confirm-sheet-confirm");
-    await act(async () => {
-      fireEvent.press(confirmButton);
-    });
-
-    await waitFor(() => expect(queryByText("Delete me")).toBeNull(), { timeout: 5000 });
-  });
-
-  it("deleting a recurring reminder offers skip-this-occurrence vs delete-the-series, and skip keeps it on the list at its next occurrence", async () => {
-    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
-    await AsyncStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify([
-        makeReminder({
-          id: "r1",
-          title: "Recurring task",
-          datetime: PAST,
-          recurrenceAnchor: PAST,
-          recurrence: dailyRule,
-        }),
-      ])
-    );
-    const { findByTestId } = renderScreen();
-    fireEvent.press(await findByTestId("delete-reminder-r1"));
-
-    const skipButton = await findByTestId("confirm-sheet-extra");
-    await act(async () => {
-      fireEvent.press(skipButton);
-    });
-
-    // Still exactly one stored reminder (the series continues), advanced
-    // to a future occurrence rather than removed entirely.
-    await waitFor(async () => {
-      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
-      expect(stored).toHaveLength(1);
-      expect(new Date(stored[0].datetime).getTime()).toBeGreaterThan(Date.now());
-    });
-  });
-
-  it("choosing delete-the-series for a recurring reminder removes it entirely", async () => {
-    const dailyRule: RecurrenceRule = { freq: "daily", interval: 1 };
-    await AsyncStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify([
-        makeReminder({
-          id: "r1",
-          title: "Recurring task",
-          datetime: PAST,
-          recurrenceAnchor: PAST,
-          recurrence: dailyRule,
-        }),
-      ])
-    );
-    const { findByTestId } = renderScreen();
-    fireEvent.press(await findByTestId("delete-reminder-r1"));
-
-    const confirmButton = await findByTestId("confirm-sheet-confirm");
-    await act(async () => {
-      fireEvent.press(confirmButton);
-    });
-
-    await waitFor(async () => {
-      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
-      expect(stored).toHaveLength(0);
-    });
-  });
-
-  it("cancelling the delete confirm sheet keeps the reminder", async () => {
+  // Delete moved to the detail screen when the complete toggle moved to the
+  // right edge, where the trash button used to be: a destructive control next
+  // to the most-tapped one is a mis-tap waiting. The skip-vs-series choice is
+  // covered in reminder-detail.test.tsx.
+  it("shows no delete button on a card", async () => {
     await AsyncStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([makeReminder({ id: "r1", title: "Keep me" })])
     );
-    const { findByText, findByTestId, UNSAFE_getAllByType } = renderScreen();
+    const { findByText, queryByTestId, UNSAFE_queryAllByType } = renderScreen();
     await findByText("Keep me");
-
+    expect(queryByTestId("delete-reminder-r1")).toBeNull();
     const Feather = require("@expo/vector-icons").Feather;
-    const trashIcon = UNSAFE_getAllByType(Feather).find(
-      (node: any) => node.props.name === "trash-2"
-    );
-    fireEvent.press(trashIcon.parent);
-
-    const cancelButton = await findByTestId("confirm-sheet-cancel");
-    fireEvent.press(cancelButton);
-
-    await waitFor(async () => {
-      expect(await findByText("Keep me")).toBeTruthy();
-    });
+    expect(
+      UNSAFE_queryAllByType(Feather).filter((n: any) => n.props.name === "trash-2")
+    ).toHaveLength(0);
   });
 });
 

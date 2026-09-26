@@ -27,6 +27,14 @@ Newest entries at the top.
 
 **Not covered:** `app/add-reminder.tsx` still takes chrono's AM guess without asking (it shows the parsed time for the user to check). **WHERE:** `utils/parseNaturalLanguage.ts`, `utils/malayalamDateParser.ts` (`ParsedAmbiguity.kind`), `components/QuickAddInput.tsx`, `app/add-reminder.tsx`.
 
+## 2026-09-25 — B3: Android Auto Backup restores the Supabase session too, and `bmgr` refuses a force-stopped app
+
+**WHAT:** D1 closed as PASS. Auto Backup brings back all of AsyncStorage — reminders, settings, name, `@registered_phone_v1` **and** supabase-js's persisted session (`SessionService.ts` uses `storage: AsyncStorage`). Confirmed from the database, not the UI: no new anonymous `auth.users` row after reinstall, and the same user refreshed its token right after launch. So a restored install is fully "still you" with no extra step, and B3's Drive welcome-back flow is deliberately offered only on an **empty** install.
+
+**WHY this matters / traps:** (1) `adb shell bmgr backupnow <pkg>` returns "Backup is not allowed" for a **force-stopped** app (Android's stopped state excludes it from backup). Launch once and press Home, then retry. The same rule plausibly lets an OEM battery killer that force-stops the app block scheduled Auto Backup silently — unmeasured. (2) Check a "restore failed" result against `dumpsys backup`'s last-backup time first: in the first manual attempt the only backup on record was taken 32 s *after* the reinstall, i.e. of the empty app. (3) Because the session is restored, two phones can hold the same refresh token after an Android → Android transfer while the old one stays active — rotation probably signs one out; untested (D101). (4) For Drive backup the number has to live in the backup file itself: the server stores only a peppered HMAC of it, so it cannot be recovered server-side, by design.
+
+**WHERE:** `device-tests/cross-cutting.md#d1`, `services/DriveBackupService.ts` (header invariants), `components/NameOnboarding.tsx` (empty-install gate).
+
 ---
 
 ## 2026-09-23 — Mark Done from the tray with the app open wrote storage, but the list never re-read it

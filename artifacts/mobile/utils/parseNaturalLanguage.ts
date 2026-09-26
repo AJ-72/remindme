@@ -229,12 +229,12 @@ export function parseNaturalLanguage(
     !PERIOD_OF_DAY.test(text)
   ) {
     const reading = (h24: number) => {
-      const d = new Date(date);
-      // An unstated day means the next time it comes round, per reading. Start
-      // from today: chrono has already rolled its own (AM) reading forward, so
-      // building PM on top of that date would skip today's PM entirely.
-      if (!start.isCertain("day")) d.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
-      d.setHours(h24, d.getMinutes(), 0, 0);
+      // An unstated day means the next time it comes round, per reading - so
+      // start from today, not chrono's date: chrono has already rolled the
+      // day forward for ITS (AM) reading, which put "at 5" typed at 3 PM on
+      // tomorrow's 5 PM instead of today's.
+      const d = new Date(start.isCertain("day") ? date : now);
+      d.setHours(h24, date.getMinutes(), 0, 0);
       if (!start.isCertain("day") && d.getTime() <= now.getTime()) d.setDate(d.getDate() + 1);
       return { ...result, date: d };
     };

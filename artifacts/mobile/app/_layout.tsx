@@ -35,6 +35,7 @@ import {
   hasSeenFeatureTour,
 } from "@/services/ReminderService";
 import { initAnalytics } from "@/services/AnalyticsService";
+import { startAppAutoBackup } from "@/services/DriveBackupService";
 import {
   captureHandledError,
   initCrashReporting,
@@ -67,6 +68,7 @@ function RootLayoutNav() {
       <Stack.Screen name="smart-alerts" options={{ headerShown: false }} />
       <Stack.Screen name="delivery-check" options={{ headerShown: false }} />
       <Stack.Screen name="backup" options={{ headerShown: false }} />
+      <Stack.Screen name="welcome-back" options={{ headerShown: false }} />
       <Stack.Screen name="why-tasks-slip" options={{ headerShown: false }} />
       <Stack.Screen name="bind-invite" options={{ headerShown: false }} />
       <Stack.Screen
@@ -136,6 +138,11 @@ export default function RootLayout() {
     registerRescheduleTask();
     registerNotificationResponseTask();
   }, []);
+
+  // B3: debounced Drive auto-backup after any change, flushed when the app
+  // leaves the foreground. A no-op until the user signs in to Drive, and
+  // until this install has settled its restore decision.
+  useEffect(() => startAppAutoBackup(), []);
 
   // Telemetry starts here, and consent is read back FIRST. Both services
   // no-op without their env-var credentials, so this is inert in local dev

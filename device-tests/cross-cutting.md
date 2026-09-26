@@ -14,7 +14,7 @@ new to this — several other items are meaningless if alarms do not fire.
 | [D20](#d20) | EAS re-verify after setAlarmClock | `PASS` | 2026-08-29 | SEMI |
 | [D7](#d7) | OEM battery-killer survival | `PARTIAL` | 2026-08-24 | SEMI |
 | [D22](#d22) | Alarm copy + status-bar explainer | `PARTIAL` | 2026-08-29 | SEMI |
-| [D1](#d1) | Android Auto Backup restores reminders | `PENDING` | — | AUTO |
+| [D1](#d1) | Android Auto Backup restores reminders | `PASS` | 2026-09-25 | AUTO |
 
 ---
 
@@ -554,9 +554,33 @@ the one to run. **Re-run needed** on a build carrying the change: all of steps
 ---
 
 <a id="d1"></a>
-## D1 — Does Android Auto Backup actually restore reminders? · `PENDING`
+## D1 — Does Android Auto Backup actually restore reminders? · `PASS` (2026-09-25, OnePlus `b81a371a`, EAS preview build, user-confirmed on screen)
 
 *Highest value: could close backlog **B3** (Google Drive sync) on Android.*
+
+**Result, 2026-09-25.** Reminders, settings, the user's name, the registered
+number **and the Supabase session** all came back after `bmgr backupnow` →
+`adb uninstall` → `adb install` of the same pulled APK. Session evidence, read
+from `remindme-tier2` before and after: no new anonymous `auth.users` row was
+created, and the existing user (`a1b3cf60`) refreshed its token right after
+the reinstalled app launched. Notification permission and scheduled alarms do
+**not** come back (Android restores data, not runtime permissions); the app's
+"Notifications are off" banner covered it, and after granting permission the
+"Will not ring" badges cleared (user-confirmed; an actual ring after restore
+was not separately checked).
+
+Two findings worth keeping:
+- **`bmgr backupnow` refuses a force-stopped app** ("Backup is not allowed").
+  Launch the app once, press Home, then retry — it succeeded at ~75 KB. The
+  same rule applies to scheduled Auto Backup, so an OEM battery manager that
+  force-stops the app can silently block it.
+- The user's own earlier manual attempt "failed" only because the one backup
+  on record had been taken 32 s *after* the reinstall — it held the empty
+  install. `dumpsys backup` shows the last-backup timestamp; check it first.
+
+Auto Backup only covers Android → Android set up *from* the old phone's
+backup. iOS and fresh setups are what B3's Drive backup is for — see
+[data-safety.md#d100](data-safety.md#d100).
 
 Evidence so far (2026-08-10, user's OEM device): Settings → Back up other
 data lists Reminders at 11 MB with the toggle on, so Auto Backup is enabled

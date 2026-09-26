@@ -367,3 +367,16 @@ describe("parseNaturalLanguage — 'coming <weekday>'", () => {
     expect(title).toBe("Call mom");
   });
 });
+
+// Pinned to the hour that exposed it: typed at 3 PM, chrono rolls its AM
+// reading to tomorrow, and the PM reading must not inherit that day.
+describe("parseNaturalLanguage — AM/PM readings keep today when it still fits", () => {
+  it("reads 'at 5' typed at 3 PM as today 5 PM or tomorrow 5 AM", () => {
+    const now = new Date(2026, 8, 26, 15, 0, 0);
+    const { ambiguity } = parseNaturalLanguage("Call mom at 5", now);
+    const pm = ambiguity!.asText.date!;
+    const am = ambiguity!.asTime.date!;
+    expect([pm.getDate(), pm.getHours()]).toEqual([26, 17]);
+    expect([am.getDate(), am.getHours()]).toEqual([27, 5]);
+  });
+});
