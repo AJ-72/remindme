@@ -9,19 +9,58 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-26 — Stryker's Babel 8 hoisted over Babel 7 and broke every Metro bundle
+
+**Symptom:** after a reinstall, every Android bundle (debug via Metro, and the release Gradle bundle) fails with `WorkletsBabelPluginError: [Worklets] Babel plugin exception`. The failing file varies between runs (`reanimated/src/isSharedValue.ts`: "Cannot read properties of undefined (reading 'length')"; `gesture-handler/.../hoverGesture.ts`: "NumericLiterals must be non-negative finite numbers"). `expo start --clear` does not help: it is not a cache problem.
+
+**ROOT CAUSE:** `react-native-worklets`' Babel plugin `require`s `@babel/types`, `@babel/generator` and `@babel/traverse` without declaring them, so it gets whatever pnpm hoists into `node_modules/.pnpm/node_modules/@babel/*`. Stryker 10 (added in PR #31 for the mutation-testing pilot) depends on Babel 8, and Babel 8 won that hoist. The plugin then ran Babel 8 `types`/`traverse` against Expo's Babel 7 `@babel/core` AST. To diagnose, check what the plugin resolves: `require.resolve('@babel/types/package.json', {paths: [<worklets dir>]})`.
+
+**FIX:** add `packageExtensions` in `pnpm-workspace.yaml` that pins the three to Babel 7 for `react-native-worklets`. Commit it **together with** `pnpm-lock.yaml`: the lockfile carries a `packageExtensionsChecksum`, and a frozen install (EAS, CI) fails if the two disagree. **Rule:** any new devDependency that brings a different Babel major can break the app bundle without a single test failing, because Jest uses its own transform and the suite stays green. After adding a toolchain devDependency, bundle once (`curl localhost:3011/artifacts/mobile/index.ts.bundle?platform=android` with Metro running). **WHERE:** `pnpm-workspace.yaml` (`packageExtensions`), `pnpm-lock.yaml`.
+
+---
+
+## 2026-09-26 — chrono-node silently misreads common English date phrases; normalize before parsing
+
+**WHAT:** `parseNaturalLanguage.ts` now runs `normalizeEnglishDatePhrases()` before chrono, rewriting phrases chrono-node@2.9.1 gets wrong into forms it parses correctly. It also post-corrects bare "day after tomorrow", and returns an AM/PM ambiguity (`ParsedAmbiguity.kind: "meridiem"`) that reuses QuickAddInput's existing choice sheet.
+
+**WHY (non-obvious):** chrono fails *silently*. It doesn't return "no match"; it matches a sub-span and returns a plausible wrong date. Bare "day after tomorrow" matches only "tomorrow" (a day early, with "day after" left in the title). "end of the month" matches only "the month". "a week from tomorrow" splits into two matches. "next to next week" reads as next week. "at 5" becomes 5 AM. Probe with `chrono.parse(...)` and check the matched `text` span, not just whether a date came back. To detect AM/PM ambiguity, use `start.isCertain("hour") && !start.isCertain("meridiem")`, excluding hours past 12, a leading zero ("08:00") and any period word in the text. Decisions the user made: "eod" = start of quiet hours (`eodMinute` option; the rewrite emits an explicit am/pm so it never trips the ambiguity check); "coming <weekday>" said on that weekday = next week's. Keep each rewrite target a phrase chrono is verified to parse, and only rewrite words that get stripped from the title anyway.
+
+**Not covered:** `app/add-reminder.tsx` still takes chrono's AM guess without asking (it shows the parsed time for the user to check). **WHERE:** `utils/parseNaturalLanguage.ts`, `utils/malayalamDateParser.ts` (`ParsedAmbiguity.kind`), `components/QuickAddInput.tsx`, `app/add-reminder.tsx`.
+
+## 2026-09-25 — B3: Android Auto Backup restores the Supabase session too, and `bmgr` refuses a force-stopped app
+
+**WHAT:** D1 closed as PASS. Auto Backup brings back all of AsyncStorage — reminders, settings, name, `@registered_phone_v1` **and** supabase-js's persisted session (`SessionService.ts` uses `storage: AsyncStorage`). Confirmed from the database, not the UI: no new anonymous `auth.users` row after reinstall, and the same user refreshed its token right after launch. So a restored install is fully "still you" with no extra step, and B3's Drive welcome-back flow is deliberately offered only on an **empty** install.
+
+**WHY this matters / traps:** (1) `adb shell bmgr backupnow <pkg>` returns "Backup is not allowed" for a **force-stopped** app (Android's stopped state excludes it from backup). Launch once and press Home, then retry. The same rule plausibly lets an OEM battery killer that force-stops the app block scheduled Auto Backup silently — unmeasured. (2) Check a "restore failed" result against `dumpsys backup`'s last-backup time first: in the first manual attempt the only backup on record was taken 32 s *after* the reinstall, i.e. of the empty app. (3) Because the session is restored, two phones can hold the same refresh token after an Android → Android transfer while the old one stays active — rotation probably signs one out; untested (D101). (4) For Drive backup the number has to live in the backup file itself: the server stores only a peppered HMAC of it, so it cannot be recovered server-side, by design.
+
+**WHERE:** `device-tests/cross-cutting.md#d1`, `services/DriveBackupService.ts` (header invariants), `components/NameOnboarding.tsx` (empty-install gate).
+
+---
+
+## 2026-09-23 — Mark Done from the tray with the app open wrote storage, but the list never re-read it
+
+**Symptom:** with the app open, a reminder fires, the user pulls down the tray and presses **Mark Done**. Nothing appears to happen: the reminder stays pending in the list.
+
+**ROOT CAUSE:** with the app in the foreground, expo-notifications runs only the foreground listener (`components/NotificationResponseHandler.tsx`); the headless task runs only when the app is *not* in the foreground. That listener called `ReminderService.markDoneById()` directly, which writes AsyncStorage correctly — but nothing told `RemindersContext` to re-read it. The provider's only automatic reload is its AppState-`active` listener, and pulling down the tray does not change AppState. So the list kept its stale in-memory array. Worse, the next in-app write (e.g. `toggleComplete(current, …)`, which saves the array it is handed) wrote that stale array back over the completion. `updateSnoozeById` from the tray had the same gap. Proved by a test that renders the real provider around the handler: storage reads `completed: true` while the list still shows `false`.
+
+**FIX:** the foreground deps wrap `markDoneById` and `updateSnoozeById` and call the provider's `refreshFromStorage()` after each write. The component reads the provider through a new non-throwing `useOptionalReminders()`, because its own unit tests render it without a provider. The headless path is unchanged; the AppState reload already covers the return to the app.
+
+**Also on this branch, as hardening only:** `markDoneById` is now inside `withWriteLock`, like `markNotifiedById`/`markOpenedById`. A test shows it can lose a write if it starts in the same tick as the mount-time `rescheduleAllFutureReminders()`. That window is milliseconds, so it is **not** the cause of this report. An earlier version of this entry claimed it was, and called the report "intermittent" — the user never said that. Both claims were withdrawn after review.
+
+**Why regression testing missed it:** every existing handler test rendered `NotificationResponseHandler` *without* `RemindersProvider`, so they checked the storage write and never the screen. And no device test covered the app-open case: D3 closes the app, D15 leaves it before pressing the action. Separately, D3/D15 were marked `PASS` in the `device-tests/notifications.md` summary table on 2026-09-20 (commit `119ba573`) while their detail sections still read `PENDING` with no `Result` recorded — that status should not be trusted until a real run is written up. **Rule:** a test for a handler that writes storage behind a context must render the context and assert on what the context shows. **WHERE:** `components/NotificationResponseHandler.tsx`, `contexts/RemindersContext.tsx` (`useOptionalReminders`), `components/NotificationResponseHandler.test.tsx`, `services/ReminderService.ts` (`markDoneById`), `device-tests/notifications.md` (D102, renumbered 2026-09-26 — was D100, collided with visual-layout.md's D100).
 ## 2026-09-25 — B5: renaming a notification action id needs a fallback, because posted notifications keep the old one
 
 **WHAT:** Renamed `SNOOZE_ACTION_ID` from `"SNOOZE_10"` to `"SNOOZE_ACTION"`. `handleNotificationResponse` keeps accepting `"SNOOZE_10"` as `LEGACY_SNOOZE_ACTION_ID` for one release (removal is B28).
 
 **WHY:** across an upgrade there are two kinds of notification, and they behave differently:
-- **Scheduled, not yet displayed.** expo-notifications' Android builder (`ExpoNotificationBuilder.kt`) looks up the notification's `categoryIdentifier` in its own category store when it *displays* the notification. `setupSnoozeCategory()` re-registers that category on launch (`RemindersContext`, plus the boot reschedule path), so these get the new id without any help. Source: an AI summary of that file, not a line-by-line read. D100 checks it on a device.
+- **Scheduled, not yet displayed.** expo-notifications' Android builder (`ExpoNotificationBuilder.kt`) looks up the notification's `categoryIdentifier` in its own category store when it *displays* the notification. `setupSnoozeCategory()` re-registers that category on launch (`RemindersContext`, plus the boot reschedule path), so these get the new id without any help. Source: an AI summary of that file, not a line-by-line read. D104 checks it on a device.
 - **Already posted to the tray.** The buttons, and the action ids inside them, were fixed when Android posted the notification, and Android never rebuilds it. Pressing Snooze still delivers `"SNOOZE_10"`.
 
 The first version of this change covered only the first case and dropped the old id. The handler compares `actionIdentifier` against each known id and has no else branch, so `"SNOOZE_10"` fell through with no snooze, no error and no log. The backlog's original worry ("already sitting in a user's tray") was right. Review caught it before merge, and a test that sends a literal `"SNOOZE_10"` response now pins the fallback. The test failed before the fix, which showed the silent no-op.
 
 **Rule for any future action-id rename** (`SNOOZE_MORE_ACTION_ID`, `MARK_DONE_ACTION_ID`, or a new one): a new category definition is not enough. Accept the old id in the handler for at least one release. Renaming `SNOOZE_CATEGORY_ID` itself is riskier still: every scheduled notification points at that id, so a pending notification whose category no longer exists loses all its buttons.
 
-**WHERE:** `artifacts/mobile/services/ReminderService.ts` (both constants), `services/notificationResponseHandler.ts` (the snooze branch), `services/notificationResponseHandler.test.ts` (the legacy-id test), `device-tests/notifications.md#d100`.
+**WHERE:** `artifacts/mobile/services/ReminderService.ts` (both constants), `services/notificationResponseHandler.ts` (the snooze branch), `services/notificationResponseHandler.test.ts` (the legacy-id test), `device-tests/notifications.md#d104`.
 
 ---
 
@@ -1078,9 +1117,26 @@ APK onto a device. None are in `CLAUDE.md`'s existing Windows section.
 entry against the **repo root** instead of `artifacts/mobile`, even though
 `react.root` is correctly left at its default. The same bundle succeeds
 standalone via `npx expo export` from `artifacts/mobile`, so it is the
-Gradle-invoked path specifically. **Release APKs come from EAS. Use
-`--variant debug` locally** — unresolved, and not worth debugging unless local
-release builds become necessary.
+Gradle-invoked path specifically. ~~Release APKs come from EAS. Use `--variant debug` locally — unresolved.~~
+**Resolved 2026-09-26.** Root cause: the RN Gradle plugin passes the entry as
+`entryFile.cliPath(root)` — a path *relative* to `artifacts/mobile` — and in a
+pnpm monorepo Expo sets Metro's `server.unstable_serverRoot` to the workspace
+root, so `index.ts` resolves against the repo root. (`EXPO_NO_METRO_WORKSPACE_ROOT=1`
+is not a fix: the entry then resolves but root `node_modules` disappear —
+`Unable to resolve module expo-router/entry`.) Fix: `metro.config.js` pins the
+server root to the app folder only when `process.argv` contains `export:embed`
+(the release-bundling command; no dev server). A second, hidden trap:
+Gradle runs `@expo/cli` straight from the pnpm store, not via the `.bin` shim
+that `npx expo` uses — and only the shim puts `node_modules/.pnpm/node_modules`
+on `NODE_PATH`. So `babel.config.js`'s `babel-preset-expo` (then only a
+transitive dependency of `expo`) was unresolvable under Gradle
+(`Cannot find module 'babel-preset-expo'`) while every manual `npx expo
+export:embed` succeeded. Fixed by declaring `babel-preset-expo` as a direct
+devDependency. Watch for this shape generally: *works via npx, fails under
+Gradle* = an undeclared transitive dependency. Local release builds now go
+through `scripts/build-release-android.ps1`, which also builds only the
+device's CPU ABI (~4x less native work) and refuses to replace a store-signed
+install.
 
 **2. `react-native-worklets` needs `CMAKE_VERSION` in the environment.**
 `CLAUDE.md` notes the `:app` module needs an explicit
@@ -1823,3 +1879,60 @@ where that step found something the author's own process missed. See
 `docs/superpowers/plans/2026-08-30-remind-someone-else-tier2.md` (search
 "an independent review found two real bugs") for the full incident writeup
 and the fixed SQL/tests.
+
+---
+
+## 2026-09-26 — Battery-optimization "Fix in Settings" opened a dead-end page; two device-test IDs collided again
+
+**Bug found live-testing B26 (D103, `device-tests/notifications.md`).**
+`DeliveryHealthModule.kt`'s `openBatteryOptimizationSettings()` opened
+`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS` — Android's general list of
+every app's battery-optimization state — deliberately, per the existing code
+comment, to avoid `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`'s Play-policy
+restricted permission. On the user's OEM device this landed at Settings →
+Apps → Battery usage → Reminders, a page with **no toggle for this setting at
+all** — a dead end with no way to complete the fix the button promised.
+**First fix attempt was itself wrong** — it called
+`Settings.ACTION_APP_BATTERY_USAGE_SETTINGS`, a plausible-sounding constant
+name that does not exist in the Android SDK; the Kotlin build failed
+(`Unresolved reference`). Caught by actually trying the rebuild rather than
+trusting the edit, then confirmed the constant's absence directly against
+`android.jar` for this project's compileSdk with `javap` before picking a
+replacement, instead of guessing a second name. **Real fix:** try
+`Settings.ACTION_APPLICATION_DETAILS_SETTINGS` (verified to exist the same
+way) with a `package:` URI first — no special permission needed, opens the
+app's own "App info" page — falling back to the general list only if that
+intent fails to resolve. Rebuilt and confirmed on-device: the deep link now
+lands correctly (`lastUpdateTime` on the device matched the rebuild, checked
+via `adb shell dumpsys package`).
+
+**Landing correctly wasn't the whole fix.** The App info page has no toggle
+literally labeled "battery optimization" — the relevant control lives under an
+OEM-specific "Battery" / "Battery usage" sub-item that isn't obvious, so the
+user still had to explore the page to find it. The button landing somewhere
+real does not mean the user knows what to do once there. Fixed by adding that
+guidance directly into `utils/deliveryHealth.ts`'s battery detail copy (what
+to look for, what to choose), so the in-app text — not trial and error on an
+unfamiliar settings page — tells the user the next step. **General rule for
+any "Fix in Settings"-style deep link:** landing on the right *screen* is
+necessary but not sufficient evidence the fix is usable; the copy needs to
+name the specific control, since OEM settings UIs are not self-describing and
+wording/location varies by manufacturer.
+
+**Also found while updating the device-tests record for this run: D100 and
+D101 had each silently drifted into meaning two different things again** —
+notifications.md's "Mark Done/Snooze from the tray, app open" (added
+2026-09-23) and B26's delivery-self-check (added 2026-09-26) reused D100/D101,
+which visual-layout.md (home refresh) and data-safety.md (Google Drive backup)
+already owned from the same two dates. This is the third occurrence of the
+exact collision `device-tests/README.md` already has a documented rule and a
+grep one-liner for (see its "Keep IDs stable" section) — the rule was
+apparently not checked before either of the two new items was added. Renumbered
+the two notifications.md items to D102/D103 (the older, more-cited assignments
+kept their numbers) and updated every citing file (`docs/features.md` was
+already correct — it cites D100 for home refresh, unaffected;
+`docs/shipped.md`, `system_learnings.md`'s own tray-open-bug entry, and
+`device-tests/README.md`'s index all needed the rename). **Rule going forward:**
+before assigning a new device-test ID, actually run the collision-check grep
+`device-tests/README.md` documents, not just "highest number I can see in the
+file I'm editing" — that's the exact mistake this has now repeated three times.

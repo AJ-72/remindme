@@ -39,10 +39,6 @@ import NotificationNudge from "@/components/NotificationNudge";
 import RegisterNumberNudge from "@/components/RegisterNumberNudge";
 import { useTourTarget } from "@/contexts/TourContext";
 
-// Distinguishes the two confirm sheets that share pendingDelete* state below:
-// deleting one reminder vs. clearing every completed one at once.
-type PendingDelete = { kind: "single"; id: string } | { kind: "clear-completed" };
-
 /**
  * How many reminders a user saves before the app offers to take their number.
  * The offer is about being reachable by other people, which is worth nothing
@@ -65,15 +61,13 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const {
     reminders,
-    deleteReminder,
     deleteReminders,
-    skipOccurrence,
     loading,
     userName,
     setUserName,
   } = useReminders();
   const [refreshing, setRefreshing] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [confirmClearCompleted, setConfirmClearCompleted] = useState(false);
   const [nameSheetVisible, setNameSheetVisible] = useState(false);
   const insightsTourRef = useTourTarget("header-insights-button");
 
@@ -108,47 +102,14 @@ export default function HomeScreen() {
     return { upcomingGroups, upcomingCount: upcoming.length, sending, completed };
   }, [reminders]);
 
-  // Stable across renders (see ReminderCard's React.memo) so passing this
-  // down doesn't defeat memoization for every card whenever HomeScreen
-  // re-renders for an unrelated reason.
-  const handleDelete = useCallback((id: string) => {
-    setPendingDelete({ kind: "single", id });
-  }, []);
-
   const handleClearCompleted = () => {
-    setPendingDelete({ kind: "clear-completed" });
+    setConfirmClearCompleted(true);
   };
 
-  const handleConfirmDelete = async () => {
-    if (pendingDelete?.kind === "single") {
-      await deleteReminder(pendingDelete.id);
-    } else if (pendingDelete?.kind === "clear-completed") {
-      await deleteReminders(completed.map((r) => r.id));
-    }
-    setPendingDelete(null);
+  const handleConfirmClearCompleted = async () => {
+    await deleteReminders(completed.map((r) => r.id));
+    setConfirmClearCompleted(false);
   };
-
-  // B22: for a recurring reminder, "skip this occurrence" is a distinct
-  // choice from deleting the whole series - it advances the series past
-  // today rather than ending it. Only reachable when pendingDelete is
-  // "single" and that reminder is recurring (see the ConfirmSheet's
-  // extraLabel/onExtra below, which only render together).
-  const handleSkipOccurrence = async () => {
-    if (pendingDelete?.kind === "single") {
-      await skipOccurrence(pendingDelete.id);
-    }
-    setPendingDelete(null);
-  };
-
-  const handleCancelDelete = () => {
-    setPendingDelete(null);
-  };
-
-  const pendingDeleteReminder =
-    pendingDelete?.kind === "single"
-      ? reminders.find((r) => r.id === pendingDelete.id)
-      : undefined;
-  const pendingDeleteIsRecurring = !!pendingDeleteReminder && isRecurring(pendingDeleteReminder);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -462,7 +423,7 @@ export default function HomeScreen() {
             hitSlop={6}
             testID="header-insights-button"
           >
-            <Feather name="bar-chart-2" size={17} color={colors.mutedForeground} />
+            <Feather name="bar-chart-2" size={17} color={colors.icon} />
           </Pressable>
           <Pressable
             style={styles.headerAvatar}
@@ -540,7 +501,7 @@ export default function HomeScreen() {
                       isPreviewItem(item) ? (
                         <RecurrencePreviewCard key={item.id} preview={item} />
                       ) : (
-                        <ReminderCard key={item.id} reminder={item} onDelete={handleDelete} />
+                        <ReminderCard key={item.id} reminder={item} />
                       )
                     )}
                   </View>
@@ -560,7 +521,7 @@ export default function HomeScreen() {
                   <Text style={styles.sectionCount}>{sending.length}</Text>
                 </View>
                 {sending.map((r) => (
-                  <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
+                  <ReminderCard key={r.id} reminder={r} />
                 ))}
               </>
             )}
@@ -591,7 +552,7 @@ export default function HomeScreen() {
                   </View>
                 </View>
                 {completed.map((r) => (
-                  <ReminderCard key={r.id} reminder={r} onDelete={handleDelete} />
+                  <ReminderCard key={r.id} reminder={r} />
                 ))}
               </>
             )}
@@ -630,21 +591,13 @@ export default function HomeScreen() {
       />
 
       <ConfirmSheet
-        visible={pendingDelete !== null}
-        title={pendingDelete?.kind === "clear-completed" ? "Delete All Completed" : "Delete Reminder"}
-        message={
-          pendingDelete?.kind === "clear-completed"
-            ? `Are you sure you want to delete all ${completed.length} completed reminder${completed.length === 1 ? "" : "s"}? This can't be undone.`
-            : pendingDeleteIsRecurring
-              ? "This reminder repeats. Skip just today's occurrence, or delete the whole series?"
-              : "Are you sure you want to delete this reminder?"
-        }
-        confirmLabel={pendingDeleteIsRecurring ? "Delete Series" : "Delete"}
+        visible={confirmClearCompleted}
+        title="Delete All Completed"
+        message={`Are you sure you want to delete all ${completed.length} completed reminder${completed.length === 1 ? "" : "s"}? This can't be undone.`}
+        confirmLabel="Delete"
         destructive
-        onConfirm={handleConfirmDelete}
-        onCancel={handleCancelDelete}
-        extraLabel={pendingDeleteIsRecurring ? "Skip This Occurrence" : undefined}
-        onExtra={pendingDeleteIsRecurring ? handleSkipOccurrence : undefined}
+        onConfirm={handleConfirmClearCompleted}
+        onCancel={() => setConfirmClearCompleted(false)}
       />
     </View>
   );

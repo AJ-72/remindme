@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "pnpm",
+  "testRunner": "jest",
+  "plugins": ["@stryker-mutator/jest-runner"],
+  "reporters": ["clear-text", "html", "progress"],
+  "coverageAnalysis": "perTest",
+  "tempDirName": ".stryker-tmp",
+  "mutate": [
+    "utils/quietHours.ts",
+    "utils/recurrence.ts",
+    "utils/adherenceStats.ts"
+  ],
+  "jest": {
+    "projectType": "custom",
+    "configFile": "jest.config.js",
+    "enableFindRelatedTests": true
+  }
+}

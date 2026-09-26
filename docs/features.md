@@ -22,11 +22,15 @@ design, see [docs/roadmap.md](roadmap.md).
 | Create/edit/delete reminders, stored on-device (AsyncStorage, no account) | `services/ReminderService.ts`, `contexts/RemindersContext.tsx` | `device` |
 | Local notifications at the reminder time, incl. Android channels | `ReminderService.ts` (`setupNotificationChannel`) | `device` |
 | Alarm-style reminders (`setAlarmClock`, exact-alarm permission banner) | `ReminderService.ts`, `components/ExactAlarmBanner.tsx` | `device` |
+| Delivery self-check: permission / channel / exact-alarm / battery-optimization status with fix buttons, plus a real test-fire (B26) | `app/delivery-check.tsx`, `services/DeliveryHealthService.ts`, `modules/delivery-health` | `jest` |
 | Snooze (5/15/30/60 min, "tomorrow") from the notification tray | `services/notificationResponseHandler.ts` | `device` |
 | Mark done from the tray; un-completing re-arms the notification | `notificationResponseHandler.ts`, `toggleComplete` | `device` |
 | Boot/mount reschedule sweep (survives reboot and app update) | `rescheduleAllFutureReminders()` | `device` |
 | Home list: chronological, completed newest-first | `app/(tabs)/index.tsx` | `device` |
+| Home card: complete toggle on the right edge (48pt target); delete from the detail screen only | `components/ReminderCard.tsx` | `jest only` (D100) |
 | Manual JSON backup / restore (Settings → Back up) | Settings | `device` |
+| Android Auto Backup restores reminders, settings, name, number and session on an Android → Android transfer (no code — D1) | OS | `device` |
+| Automatic Google Drive backup (Settings → Backup), plus one-tap "welcome back" restore of reminders + registered number on a fresh install | `services/DriveBackupService.ts`, `app/welcome-back.tsx` | `jest` |
 | 12-hour AM/PM time display everywhere | `utils/formatDatetime.ts` | `jest` |
 
 ## Recurring reminders (M2)
@@ -53,6 +57,7 @@ advancing the series, DST — `device-tests/notifications.md` D85-D90.
 | Malayalam numeral clock times + ambiguous-numeral confirmation sheet | `malayalamDateParser.ts`, `QuickAddInput.tsx` | `jest` |
 | Per-string font selection (Inter vs. Noto Sans Malayalam) | `utils/getFontFamily.ts` | `device` |
 | Voice dictation, English or Malayalam (user-selectable) | `services/SpeechService.ts` | `device` |
+| Quick-add mic pill names its language in full ("English" / "മലയാളം"); switch on the listening bar | `components/QuickAddInput.tsx`, `components/ListeningSurface.tsx` | `jest only` (D100) |
 | Share-sheet intake: text, URLs | `contexts/SharedTextContext.tsx` | `device` |
 | Shared audio (WhatsApp voice notes) → transcription | `SpeechService.transcribeAudioFile` | `jest` — needs the B7 build |
 | System-wide "Remind Me" text-selection menu (Android) | `modules/process-text/`, `plugins/withProcessText.ts` | `device` |

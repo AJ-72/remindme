@@ -2,7 +2,6 @@ import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
-  Alert,
   Modal,
   Platform,
   Pressable,
@@ -14,7 +13,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import DriveBackupCard from "@/components/DriveBackupCard";
 import { useReminders } from "@/contexts/RemindersContext";
+import { useAppDialog } from "@/hooks/useAppDialog";
 import { useColors } from "@/hooks/useColors";
 import {
   clearDebugLogs,
@@ -35,6 +36,7 @@ import { track } from "@/services/AnalyticsService";
 // Appearance.
 export default function BackupScreen() {
   const colors = useColors();
+  const { show, notify, dialog } = useAppDialog();
   const insets = useSafeAreaInsets();
   const { refreshFromStorage, reminders } = useReminders();
 
@@ -100,21 +102,23 @@ export default function BackupScreen() {
       result.duplicates ? `${result.duplicates} already here` : "",
       result.skipped ? `${result.skipped} couldn't be read` : "",
     ].filter(Boolean);
-    Alert.alert("Restored", `${parts.join(", ")}.`);
+    void notify("Restored", `${parts.join(", ")}.`, "success");
   };
 
   const handleClearLogs = () => {
-    Alert.alert("Clear debug logs?", "This can't be undone.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Clear",
-        style: "destructive",
-        onPress: async () => {
-          await clearDebugLogs();
-          setLogsText("No debug logs recorded yet.");
-        },
-      },
-    ]);
+    void show({
+      title: "Clear debug logs?",
+      message: "This can't be undone.",
+      tone: "warning",
+      buttons: [
+        { text: "Cancel", value: "cancel", style: "cancel" },
+        { text: "Clear", value: "clear", style: "destructive" },
+      ],
+    }).then(async (choice) => {
+      if (choice !== "clear") return;
+      await clearDebugLogs();
+      setLogsText("No debug logs recorded yet.");
+    });
   };
 
   const styles = StyleSheet.create({
@@ -267,6 +271,9 @@ export default function BackupScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Renders nothing in a build without Drive support. */}
+        <DriveBackupCard />
+
         <Text style={styles.sectionLabel}>Your reminders</Text>
         <View style={styles.card}>
           <Pressable style={styles.row} onPress={shareBackup} testID="backup-row">
@@ -387,6 +394,7 @@ export default function BackupScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      {dialog}
     </View>
   );
 }

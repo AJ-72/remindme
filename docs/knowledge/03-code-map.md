@@ -35,7 +35,8 @@ Expo Router. The file path is the route. `@/` maps to the project root.
 | `insights.tsx` | "How you're doing". Reads `adherenceStats.ts`. |
 | `smart-alerts.tsx` | Quiet hours. |
 | `why-tasks-slip.tsx` | Cited explainer. |
-| `backup.tsx` | Manual JSON export and import. |
+| `backup.tsx` | Manual JSON export and import, plus the Google Drive card (`components/DriveBackupCard.tsx`). |
+| `welcome-back.tsx` | Fresh-install Drive restore: reminders + registered number in one confirm. Reached from the first-launch name sheet. |
 | `send-reminder.tsx` | Remind someone else — Tier 1 and Tier 2 entry. |
 | `register-number.tsx` | Self-registration of the user's own number. |
 | `bind-invite.tsx` | Binding by invite link. |
@@ -57,6 +58,10 @@ Expo Router. The file path is the route. `@/` maps to the project root.
 | `ContactsService.ts` | Contact picker access. |
 | `AnalyticsService.ts`, `CrashReportingService.ts` | PostHog and Sentry. No screen imports either SDK. |
 | `telemetryConsent.ts` | The single opt-out. Its own module, to break an import cycle. |
+| `DriveBackupService.ts` | Google Drive backup (B3). The only module that knows Google exists. Auto-backup, restore, the no-overwrite invariants. |
+| `backupDirty.ts` | "A backed-up value changed" signal from `ReminderService`. Its own module, to break an import cycle. |
+| `welcomeBack.ts` | Restore reminders, then optionally move the number (register → migrate). |
+| `registration.ts` | `completeRegistration()` — the one success path after a number is accepted, shared by register-number and welcome-back. |
 | `messageLinks.ts` | WhatsApp and SMS deep links. |
 | `DebugLogService.ts` | Ring-buffer log, 200 entries. |
 
@@ -100,16 +105,18 @@ Pure functions. Heavily tested.
 | `phoneNumber.ts` | `normalizeForIdentity()`. Region guessing lives here (see B9). |
 | `getFontFamily.ts` | Inter vs. Noto Sans Malayalam, per string. |
 | `formatDatetime.ts` | "Today · 8:00 PM" style output. |
-| `reminderBackup.ts` | Export and import shape. |
+| `reminderBackup.ts` | Export and import shape (v2 adds name + registered number), and the content hash auto-backup compares. |
 | `analyticsProps.ts` | The only builder of reminder-shaped analytics properties. |
 
 ## Components — `artifacts/mobile/components/`
 
-`QuickAddInput.tsx` is the largest and most complex: title field, mic button,
+`QuickAddInput.tsx` is the largest and most complex: title field, mic pill
+(names the dictation language; switch it on the listening bar),
 live parse preview, date and time picker, ambiguous-numeral sheet, tour
 target. Treat it with care.
 
-Others worth knowing: `ReminderCard.tsx` (list item and sender chip),
+Others worth knowing: `ReminderCard.tsx` (list item, sender chip, complete toggle on the right;
+no delete — that is on the detail screen),
 `NotificationResponseHandler.tsx` (listeners), `ExactAlarmBanner.tsx`
 (Android), `RecurrencePicker.tsx`, `SnoozeSheet.tsx`, `ErrorBoundary.tsx`.
 

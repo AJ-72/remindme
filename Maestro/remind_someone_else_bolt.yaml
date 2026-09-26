@@ -15,7 +15,7 @@ appId: com.curios.remindme
     id: "quick-add-input"
 - inputText: "Call padma tomorrow at 9am"
 - tapOn:
-    id: "quick-add-recipient"
+    id: "quick-add-remind-someone"
 - tapOn: "Search name or number"
 - inputText: "7306412884"
 - tapOn: "Padma"

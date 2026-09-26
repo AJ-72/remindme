@@ -1,5 +1,8 @@
 import React from "react";
-import { render, waitFor } from "@testing-library/react-native";
+import { Text } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { act, render, waitFor } from "@testing-library/react-native";
+import { RemindersProvider, useReminders } from "@/contexts/RemindersContext";
 import NotificationResponseHandler from "@/components/NotificationResponseHandler";
 import {
   addNotificationReceivedListener,
@@ -7,7 +10,11 @@ import {
   clearLastNotificationResponse,
   getLastNotificationResponseAsync,
 } from "expo-notifications";
-import { MARK_DONE_ACTION_ID } from "@/services/ReminderService";
+import {
+  MARK_DONE_ACTION_ID,
+  SNOOZE_ACTION_ID,
+  STORAGE_KEY,
+} from "@/services/ReminderService";
 import * as ReminderService from "@/services/ReminderService";
 import * as InvitationService from "@/services/InvitationService";
 import * as Throttle from "@/services/invitationClaimThrottle";
@@ -17,6 +24,7 @@ jest.mock("@/services/InvitationService", () => ({
 }));
 
 jest.mock("@/services/invitationClaimThrottle");
+jest.mock("expo-haptics");
 // Only markNotifiedById/applyRecipientTimeChangeByInvitationId are mocked;
 // everything else stays real so the existing tap-handling tests (which
 // exercise the real notificationResponseHandler deps) are unaffected.
@@ -214,5 +222,98 @@ describe("NotificationResponseHandler", () => {
     // Does not also go through the invitation-poll path - this push already
     // carries everything needed, unlike a plain "invitation" push.
     expect(InvitationService.checkForInvitations).not.toHaveBeenCalled();
+  });
+});
+
+// Regression for "Mark Done in the tray does nothing" with the app open.
+// Android runs only the foreground listener while the app is in the
+// foreground, and pulling down the tray does not change AppState - so the
+// provider's AppState-"active" reload never runs. markDoneById wrote
+// storage correctly, but the list kept showing the reminder as pending
+// until some unrelated reload, and the next in-app write saved that stale
+// array back over the completion. These render the real provider around
+// the handler, exactly as app/_layout.tsx does.
+describe("NotificationResponseHandler inside RemindersProvider", () => {
+  const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+  function Probe() {
+    const { reminders, loading } = useReminders();
+    if (loading) return null;
+    const r = reminders.find((x) => x.id === "r1");
+    return (
+      <Text testID="probe">
+        {r ? `${r.completed}|${r.datetime}` : "missing"}
+      </Text>
+    );
+  }
+
+  async function renderWithProvider() {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: "r1",
+          title: "Tray test",
+          description: "",
+          datetime: FUTURE,
+          completed: false,
+          notificationId: "notif-r1",
+        },
+      ])
+    );
+    const utils = render(
+      <RemindersProvider>
+        <NotificationResponseHandler />
+        <Probe />
+      </RemindersProvider>
+    );
+    await waitFor(() =>
+      expect(utils.getByTestId("probe").props.children).toBe(`false|${FUTURE}`)
+    );
+    const listener = (addNotificationResponseReceivedListener as jest.Mock).mock
+      .calls[0][0] as (response: unknown) => void;
+    return { utils, listener };
+  }
+
+  function responseFor(actionIdentifier: string, identifier: string) {
+    return {
+      actionIdentifier,
+      notification: {
+        request: { identifier, content: { data: { reminderId: "r1", title: "Tray test", body: "" } } },
+      },
+    };
+  }
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+  });
+
+  it("shows the reminder as completed after Mark Done is pressed in the tray", async () => {
+    const { utils, listener } = await renderWithProvider();
+
+    await act(async () => {
+      listener(responseFor(MARK_DONE_ACTION_ID, "notif-done"));
+    });
+
+    // Storage was always right; the bug was the list never re-reading it.
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored[0].completed).toBe(true);
+    });
+    await waitFor(() =>
+      expect(utils.getByTestId("probe").props.children).toBe(`true|${FUTURE}`)
+    );
+  });
+
+  it("shows the new time after Snooze is pressed in the tray", async () => {
+    const { utils, listener } = await renderWithProvider();
+
+    await act(async () => {
+      listener(responseFor(SNOOZE_ACTION_ID, "notif-snooze"));
+    });
+
+    await waitFor(() =>
+      expect(utils.getByTestId("probe").props.children).not.toBe(`false|${FUTURE}`)
+    );
   });
 });

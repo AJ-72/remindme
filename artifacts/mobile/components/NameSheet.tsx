@@ -23,6 +23,11 @@ interface Props {
   skippable?: boolean;
   onSave: (name: string) => void | Promise<void>;
   onDismiss: () => void;
+  /**
+   * An extra link under Skip. First launch uses it for "I've used Reminders
+   * before" (B3 Drive restore) - only offered on an empty install.
+   */
+  secondaryAction?: { label: string; onPress: () => void; testID: string };
 }
 
 /**
@@ -37,6 +42,7 @@ export default function NameSheet({
   skippable = false,
   onSave,
   onDismiss,
+  secondaryAction,
 }: Props) {
   const colors = useColors();
   const [name, setName] = useState(initialName);
@@ -111,6 +117,19 @@ export default function NameSheet({
     saveTextDisabled: {
       color: colors.mutedForeground,
     },
+    secondaryBtn: {
+      borderRadius: 12,
+      paddingVertical: 12,
+      marginTop: 10,
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+      alignItems: "center",
+    },
+    secondaryText: {
+      fontSize: 15,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
+    },
     dismissBtn: {
       paddingVertical: 12,
       alignItems: "center",
@@ -172,6 +191,18 @@ export default function NameSheet({
               Continue
             </Text>
           </Pressable>
+          {/* An outlined button, not a text link: a returning user who
+              misses it starts from an empty app and may never find the
+              restore again (device feedback, 2026-09-25). */}
+          {secondaryAction && (
+            <Pressable
+              style={styles.secondaryBtn}
+              onPress={secondaryAction.onPress}
+              testID={secondaryAction.testID}
+            >
+              <Text style={styles.secondaryText}>{secondaryAction.label}</Text>
+            </Pressable>
+          )}
           <Pressable
             style={styles.dismissBtn}
             onPress={onDismiss}

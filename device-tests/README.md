@@ -16,10 +16,10 @@ ships it.**
 | File | Covers | IDs |
 | --- | --- | --- |
 | [cross-cutting.md](cross-cutting.md) | Alarm delivery mechanics — the OEM battery/Doze/AlarmManager behavior everything else depends on | D1, D7, D19-D20, D22, D25-D26 |
-| [notifications.md](notifications.md) | Notification actions, channels, dedupe, recurrence re-arm | D2-D4, D15-D16, D85-D90, D100 |
+| [notifications.md](notifications.md) | Notification actions, channels, dedupe, recurrence re-arm | D2-D4, D15-D16, D85-D90, D102-D104 |
 | [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9-D13, D40-D43, D45, D47-D78, D78b, D82-D84, D91-D93, D95 |
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14, D94 |
-| [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete, telemetry privacy | D17-D18, D21, D23, D79-D81 |
+| [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete, telemetry privacy | D17-D18, D21, D23, D79-D81, D101 |
 | [malayalam-parsing.md](malayalam-parsing.md) | On-device Malayalam input/parsing (numerals, ambiguous readings, AM/PM) | D24, + 2 unnumbered checklists |
 | [remind-others.md](remind-others.md) | M4 Tier 2, app-to-app delivery. **The backend shipped 2026-09-09 and the core loop passed live 2026-09-11** — the `BLOCKED` rows here predate that and are now merely untested; re-triage before running. | D27-D39, D44, D46 |
 
@@ -49,7 +49,9 @@ ships it.**
 per-file heading is the source of truth for a scenario's status, not this
 table.
 
-**5 `PARTIAL` · 55 `PENDING` · 14 `BLOCKED` · 17 `PASS` · 2 `INFO`.**
+**6 `PARTIAL` · 54 `PENDING` · 14 `BLOCKED` · 18 `PASS` · 2 `INFO`.** (Updated
+2026-09-26 for D100/D103 only — the base counts above were not independently
+re-verified this session; regenerate fully before trusting them elsewhere.)
 
 Sorted by status (most-actionable first), then by ID. `PARTIAL` rows are the
 highest-value ones to finish: the setup and driving already work, only the
@@ -71,8 +73,8 @@ places when this table was last regenerated.
 | [D16](notifications.md#d16) | Personalized snooze re-alert | `PARTIAL` | 2026-09-04 | notifications |
 | [D17](data-safety.md#d17) | Corrupt-store quarantine | `PARTIAL` | 2026-09-04 | data-safety |
 | [D18](data-safety.md#d18) | Backup carries the new fields | `PARTIAL` | 2026-09-04 | data-safety |
+| [D101](data-safety.md#d101) | Google Drive backup and welcome-back restore (B3) | `PARTIAL` | 2026-09-25 | data-safety |
 | [D22](cross-cutting.md#d22) | Alarm toggle copy and the status-bar icon explainer | `PARTIAL` | — | cross-cutting |
-| [D1](cross-cutting.md#d1) | Does Android Auto Backup actually restore reminders? | `PENDING` | — | cross-cutting |
 | [D3](notifications.md#d3) | Mark Done / Snooze with the app fully closed | `PENDING` | — | notifications |
 | [D6](feature-e2e.md#d6) | Malayalam dictation end-to-end | `PASS` | 2026-09-20 | feature-e2e |
 | [D13](feature-e2e.md#d13) | "Why tasks slip" explainer | `PASS` | 2026-09-20 | feature-e2e |
@@ -128,7 +130,9 @@ places when this table was last regenerated.
 | [D88](notifications.md#d88) | Several missed occurrences catch up to the next future one, no burst | `PENDING` | — | notifications |
 | [D89](notifications.md#d89) | Marking done from the notification tray advances the series | `PENDING` | — | notifications |
 | [D90](notifications.md#d90) | Daily 8am reminder survives a DST transition at 8am wall-clock | `PENDING` | — | notifications |
-| [D100](notifications.md#d100) | Snooze on a notification posted before the B5 upgrade still works | `PENDING` | — | notifications |
+| [D102](notifications.md#d102) | Mark Done / Snooze from the tray while the app is open | `PENDING` | — | notifications |
+| [D103](notifications.md#d103) | Delivery self-check reads real device state (B26) | `PARTIAL` | 2026-09-26 | notifications |
+| [D104](notifications.md#d104) | Snooze on a notification posted before the B5 upgrade still works | `PENDING` | — | notifications |
 | [D93](feature-e2e.md#d93) | System-wide "Remind Me" text-selection menu | `PENDING` | — | feature-e2e |
 | [D94](visual-layout.md#d94) | Ink & Coral palette, on device | `PENDING` | — | visual-layout |
 | [D95](feature-e2e.md#d95) | Parsed date/time/recurrence chips are editable in place | `PENDING` | — | feature-e2e |
@@ -153,6 +157,7 @@ places when this table was last regenerated.
 | [D21](data-safety.md#d21) | Un-completing a reminder re-arms it | `PASS` | 2026-08-29 | data-safety |
 | [D23](data-safety.md#d23) | Pre-existing reminders re-arm on launch after an app update | `PASS` | 2026-08-30 | data-safety |
 | [D26](cross-cutting.md#d26) | Exact timing for non-alarm reminders | `PASS` | 2026-09-06 | cross-cutting |
+| [D1](cross-cutting.md#d1) | Does Android Auto Backup actually restore reminders? | `PASS` | 2026-09-25 | cross-cutting |
 | [D39](remind-others.md#d39) | Invitation push actually delivers to a real device, no reload | `PASS` | — | remind-others |
 | [D91](feature-e2e.md#d91) | Recurring reminder "Next 3" preview after repeated snoozes | `PASS` | 2026-09-19 | feature-e2e |
 | [D92](feature-e2e.md#d92) | Home screen: recurrence preview cards for next occurrences | `PASS` | 2026-09-20 | feature-e2e |
@@ -315,7 +320,10 @@ the UI* or *press a notification action*: D3, D11, D12, D15.
   was both the Ink & Coral palette and Tier 2 registration — in each case
   because a new item continued from the highest ID *in its own file*. The
   colliders were renumbered to `D93`/`D94`; the widely-cited meanings kept
-  their numbers. The highest ID in use is now **D94**. One command settles it:
+  their numbers. The highest ID in use is now **D103** (2026-09-26: D100/D101
+  collided again in notifications.md against visual-layout.md/data-safety.md's
+  older D100/D101 — renumbered notifications.md's two items to D102/D103; see
+  system_learnings.md). One command settles it:
 
   ```bash
   grep -rhoE '^#+ +D[0-9]+b? ' device-tests/*.md | grep -oE 'D[0-9]+b?' \

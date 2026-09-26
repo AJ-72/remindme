@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { markBackupDirty } from "@/services/backupDirty";
 import { Linking, Platform } from "react-native";
 import { getLocales } from "expo-localization";
 import {
@@ -427,6 +428,7 @@ async function quarantineCorruptStore(raw: string): Promise<void> {
 }
 
 export async function saveReminders(reminders: Reminder[]): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(reminders));
 }
 
@@ -475,6 +477,7 @@ export async function getUserName(): Promise<string> {
 }
 
 export async function setUserName(name: string): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.setItem(USER_NAME_KEY, name.trim());
 }
 
@@ -540,6 +543,7 @@ export async function getQuietHours(): Promise<QuietHours> {
 }
 
 export async function setQuietHours(window: QuietHours): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.setItem(QUIET_HOURS_KEY, JSON.stringify(window));
 }
 
@@ -552,6 +556,7 @@ export async function getDefaultAlarmEnabled(): Promise<boolean> {
 }
 
 export async function setDefaultAlarmEnabled(enabled: boolean): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(enabled));
 }
 
@@ -569,6 +574,7 @@ export async function getDefaultExactTimingEnabled(): Promise<boolean> {
 }
 
 export async function setDefaultExactTimingEnabled(enabled: boolean): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.setItem(DEFAULT_EXACT_TIMING_KEY, JSON.stringify(enabled));
 }
 
@@ -581,6 +587,7 @@ export async function getShowDescriptionEnabled(): Promise<boolean> {
 }
 
 export async function setShowDescriptionEnabled(enabled: boolean): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.setItem(SHOW_DESCRIPTION_KEY, JSON.stringify(enabled));
 }
 
@@ -598,6 +605,7 @@ export async function getVibrationEnabled(): Promise<boolean> {
 }
 
 export async function setVibrationEnabled(enabled: boolean): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.setItem(VIBRATION_KEY, JSON.stringify(enabled));
 }
 
@@ -611,6 +619,7 @@ export async function getDictationLanguage(): Promise<DictationLanguage> {
 }
 
 export async function setDictationLanguage(lang: DictationLanguage): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.setItem(DICTATION_LANGUAGE_KEY, lang);
 }
 
@@ -627,6 +636,7 @@ export async function getSnoozePreset(): Promise<SnoozePreset> {
 }
 
 export async function setSnoozePreset(preset: SnoozePreset): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.setItem(SNOOZE_PRESET_KEY, JSON.stringify(preset));
 }
 
@@ -853,10 +863,12 @@ export async function getRegisteredPhone(): Promise<string | null> {
 }
 
 export async function setRegisteredPhone(phoneE164: string): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.setItem(REGISTERED_PHONE_KEY, phoneE164);
 }
 
 export async function clearRegisteredPhone(): Promise<void> {
+  markBackupDirty();
   await AsyncStorage.removeItem(REGISTERED_PHONE_KEY);
 }
 
@@ -1765,18 +1777,26 @@ export async function loadReminderById(id: string): Promise<Reminder | undefined
 }
 
 export async function markDoneById(id: string): Promise<void> {
-  const reminders = await loadReminders();
-  const target = reminders.find((r) => r.id === id);
-  if (!target) return;
-  await cancelNotification(target.notificationId);
-  // Shares completeOccurrence with toggleComplete so marking done from the
-  // notification tray advances a recurring series exactly the same way
-  // marking done in-app does - see that function's own doc comment.
-  const completionPatch = await completeOccurrence(target, id);
-  const updated = reminders.map((r) =>
-    r.id === id ? { ...r, ...completionPatch } : r
-  );
-  await saveReminders(updated);
+  // See withWriteLock and markNotifiedById's comment below - same shape of
+  // race. Hardening: a Mark Done handled in the same tick as the mount-time
+  // rescheduleAllFutureReminders() sweep could otherwise lose its write to
+  // whichever save finished last. Not the cause of the 2026-09-23 "Mark Done
+  // does nothing" report - that was the list never re-reading storage (see
+  // components/NotificationResponseHandler.tsx).
+  await withWriteLock(async () => {
+    const reminders = await loadReminders();
+    const target = reminders.find((r) => r.id === id);
+    if (!target) return;
+    await cancelNotification(target.notificationId);
+    // Shares completeOccurrence with toggleComplete so marking done from the
+    // notification tray advances a recurring series exactly the same way
+    // marking done in-app does - see that function's own doc comment.
+    const completionPatch = await completeOccurrence(target, id);
+    const updated = reminders.map((r) =>
+      r.id === id ? { ...r, ...completionPatch } : r
+    );
+    await saveReminders(updated);
+  });
 }
 
 /**
@@ -1942,6 +1962,8 @@ export async function buildBackupJson(): Promise<string> {
     dictationLanguage,
     snoozePreset,
     quietHours,
+    userName,
+    registeredPhone,
   ] = await Promise.all([
     loadReminders(),
     getDefaultAlarmEnabled(),
@@ -1951,17 +1973,23 @@ export async function buildBackupJson(): Promise<string> {
     getDictationLanguage(),
     getSnoozePreset(),
     getQuietHours(),
+    getUserName(),
+    getRegisteredPhone(),
   ]);
 
-  return serializeBackup(reminders, {
-    defaultAlarmEnabled,
-    defaultExactTimingEnabled,
-    showDescriptionEnabled,
-    vibrationEnabled,
-    dictationLanguage,
-    snoozePreset,
-    quietHours,
-  });
+  return serializeBackup(
+    reminders,
+    {
+      defaultAlarmEnabled,
+      defaultExactTimingEnabled,
+      showDescriptionEnabled,
+      vibrationEnabled,
+      dictationLanguage,
+      snoozePreset,
+      quietHours,
+    },
+    { userName, registeredPhone: registeredPhone ?? undefined }
+  );
 }
 
 export type ImportResult =
@@ -2007,6 +2035,15 @@ export async function importRemindersFromJson(raw: string): Promise<ImportResult
   }
   if (settings.snoozePreset !== undefined && isSnoozePreset(settings.snoozePreset)) {
     await setSnoozePreset(settings.snoozePreset);
+  }
+
+  // Name only fills a blank - a name typed on this install wins. The
+  // registered number is deliberately NOT restored here: moving a number is
+  // a confirmed server-side action (welcome-back / register-number), never
+  // a side effect of opening a file (B3 spec, section 1).
+  const restoredName = parsed.backup.identity.userName;
+  if (restoredName && !(await getUserName())) {
+    await setUserName(restoredName);
   }
 
   return { ok: true, added, duplicates, skipped: parsed.skipped };

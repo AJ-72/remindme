@@ -1,0 +1,7 @@
+{
+  "name": "delivery-health",
+  "version": "0.1.0",
+  "description": "Reads Android battery-optimization exemption state for the delivery self-check (B26).",
+  "main": "index.ts",
+  "private": true
+}

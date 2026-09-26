@@ -52,8 +52,7 @@ import { contentScript } from "@/utils/analyticsProps";
 import type { ParsedAmbiguity } from "@/utils/malayalamDateParser";
 import { isQuietAt, quietHoursEndAfter } from "@/utils/quietHours";
 import { createDictationTimer, type DictationTimer } from "@/utils/dictationTimer";
-import DictationLanguageChooser from "@/components/DictationLanguageChooser";
-import ListeningSurface from "@/components/ListeningSurface";
+import ListeningSurface, { LANGUAGE_NAMES } from "@/components/ListeningSurface";
 import RegisterNumberNudge from "@/components/RegisterNumberNudge";
 import StarterExamples from "@/components/StarterExamples";
 import { detectPersonInTitle } from "@/utils/personInTitle";
@@ -270,7 +269,7 @@ export default function QuickAddInput({ onSaved }: Props) {
 
   useEffect(() => {
     const { title, date, ambiguity: parsedAmbiguity, recurrence: parsedRecurrence } =
-      parseNaturalLanguage(input);
+      parseNaturalLanguage(input, new Date(), { eodMinute: quietHours.startMinute });
     setParsedTitle(title);
     setParsedDate(date);
     setAmbiguity(parsedAmbiguity ?? null);
@@ -291,7 +290,7 @@ export default function QuickAddInput({ onSaved }: Props) {
         Animated.timing(pillTranslate, { toValue: -6, duration: 140, useNativeDriver: true }),
       ]).start();
     }
-  }, [input]);
+  }, [input, quietHours.startMinute]);
 
   const doSave = async (dateToUse: Date, titleOverride?: string) => {
     // Once per save, not once per keystroke - the parse effect above runs on
@@ -365,6 +364,11 @@ export default function QuickAddInput({ onSaved }: Props) {
     if (activePillEditor === "date") {
       setPinnedDate(value);
     } else if (activePillEditor === "time") {
+      setPinnedTime(value);
+    } else {
+      // The "no time found" flow picks a full date+time; pin both so the
+      // chips show it and the next save uses it, rather than dropping it.
+      setPinnedDate(value);
       setPinnedTime(value);
     }
     setActivePillEditor(null);
@@ -950,8 +954,12 @@ export default function QuickAddInput({ onSaved }: Props) {
       textAlignVertical: "top",
       ...(Platform.OS === "web" ? { outlineStyle: "none" } as any : {}),
     },
+    // 40x44: a thumb-sized target for each row icon.
     alarmBtn: {
-      padding: 4,
+      width: 40,
+      height: 44,
+      alignItems: "center",
+      justifyContent: "center",
     },
     saveBtn: {
       width: 32,
@@ -962,11 +970,19 @@ export default function QuickAddInput({ onSaved }: Props) {
       justifyContent: "center",
     },
     micBtn: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
+      flexDirection: "row",
+      height: 44,
+      paddingLeft: 12,
+      paddingRight: 14,
+      gap: 6,
+      borderRadius: 22,
       alignItems: "center",
       justifyContent: "center",
+      backgroundColor: colors.primary,
+    },
+    micLanguage: {
+      fontSize: 13,
+      color: colors.primaryForeground,
     },
     micBtnListening: {
       backgroundColor: colors.destructive,
@@ -1186,12 +1202,14 @@ export default function QuickAddInput({ onSaved }: Props) {
       paddingVertical: 11,
       borderRadius: 12,
       borderWidth: 1,
-      borderColor: colors.border,
+      // `control`: an outline button needs a 3:1 edge to read as a button.
+      borderColor: colors.control,
+      minHeight: 48,
     },
     remindSomeoneText: {
-      fontSize: 13,
+      fontSize: 14,
       fontFamily: "Inter_600SemiBold",
-      color: colors.mutedForeground,
+      color: colors.foreground,
     },
     webPickerWrap: {
       marginBottom: 16,
@@ -1290,50 +1308,40 @@ export default function QuickAddInput({ onSaved }: Props) {
           />
         )}
 
-        {/* Says which language the mic is listening for, before the user
-            speaks rather than after. Hidden while the listening card is up:
-            that card carries its own switch, and two controls for one setting
-            on one screen is a question, not an answer. */}
-        {!liveListening && (
-          <DictationLanguageChooser
-            value={dictationLanguage}
-            onChange={handleDictationLanguageChange}
-          />
-        )}
-
         <View style={styles.actionRow}>
+        {/* One control for voice: the button says the language it listens
+            in, written out in full in its own script, and a tap anywhere on
+            it starts dictation. The language changes on the listening bar,
+            the one moment a user finds out it is wrong. A separate chooser
+            beside the mic left users unsure which of the two to tap. */}
         <Pressable
           ref={micTourRef}
           style={[styles.micBtn, listening && styles.micBtnListening]}
           onPress={handleMicPress}
-          hitSlop={8}
+          hitSlop={4}
+          accessibilityRole="button"
+          accessibilityLabel={
+            listening ? "Stop listening" : `Speak in ${LANGUAGE_NAMES[dictationLanguage]}`
+          }
           testID="quick-add-mic"
         >
           <Animated.View style={{ transform: [{ scale: listening ? micPulse : 1 }] }}>
-            <Feather
-              name="mic"
-              size={16}
-              color={listening ? colors.primaryForeground : colors.mutedForeground}
-            />
+            <Feather name="mic" size={17} color={colors.primaryForeground} />
           </Animated.View>
-        </Pressable>
-        {/* Lets a reminder be aimed at someone without a trip through the
-            editor, which was the only place a recipient could be attached. */}
-        <Pressable
-          style={styles.alarmBtn}
-          onPress={() => setContactPickerVisible(true)}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={
-            recipient ? `Remind ${recipient.name}` : "Remind someone"
-          }
-          testID="quick-add-recipient"
-        >
-          <Feather
-            name={recipient ? "user-check" : "user-plus"}
-            size={16}
-            color={recipient ? colors.primary : colors.mutedForeground}
-          />
+          <Text
+            style={[
+              styles.micLanguage,
+              {
+                fontFamily: getFontFamily(
+                  LANGUAGE_NAMES[dictationLanguage],
+                  "600SemiBold"
+                ),
+              },
+            ]}
+            testID="quick-add-mic-language"
+          >
+            {LANGUAGE_NAMES[dictationLanguage]}
+          </Text>
         </Pressable>
         <Pressable
           style={styles.alarmBtn}
@@ -1344,7 +1352,7 @@ export default function QuickAddInput({ onSaved }: Props) {
           <Feather
             name="file-text"
             size={16}
-            color={notesVisible || description ? colors.primary : colors.mutedForeground}
+            color={notesVisible || description ? colors.primary : colors.icon}
           />
         </Pressable>
         <Pressable
@@ -1358,7 +1366,7 @@ export default function QuickAddInput({ onSaved }: Props) {
           <Feather
             name="repeat"
             size={16}
-            color={recurrence ? colors.primary : colors.mutedForeground}
+            color={recurrence ? colors.primary : colors.icon}
           />
         </Pressable>
         <Pressable
@@ -1376,7 +1384,7 @@ export default function QuickAddInput({ onSaved }: Props) {
           <Feather
             name={alarm ? "bell" : "bell-off"}
             size={16}
-            color={alarm ? colors.primary : colors.mutedForeground}
+            color={alarm ? colors.primary : colors.icon}
           />
         </Pressable>
         <View style={styles.actionSpacer} />
@@ -1397,16 +1405,23 @@ export default function QuickAddInput({ onSaved }: Props) {
       {/* A permanent way to aim a reminder at somebody else. It is on screen
           from install day and is never dismissed, which is what replaced the
           first-run "Add your number" modal: that was seen once, this is seen
-          every session. The action-row icon stays as the shortcut for a user
-          who already knows where it is. */}
+          every session. It is the only way in: the small action-row icon
+          that duplicated it was removed to keep the row simple. */}
       <Pressable
         ref={remindSomeoneTourRef}
         style={styles.remindSomeoneBtn}
         onPress={() => setContactPickerVisible(true)}
         accessibilityRole="button"
+        accessibilityLabel={
+          recipient ? `Remind ${recipient.name}` : "Remind someone else"
+        }
         testID="quick-add-remind-someone"
       >
-        <Feather name="user-plus" size={14} color={colors.mutedForeground} />
+        <Feather
+          name={recipient ? "user-check" : "user-plus"}
+          size={16}
+          color={recipient ? colors.primary : colors.foreground}
+        />
         <Text style={styles.remindSomeoneText}>Remind someone else</Text>
       </Pressable>
 
@@ -1647,16 +1662,21 @@ export default function QuickAddInput({ onSaved }: Props) {
           <Pressable onPress={() => {}} style={styles.sheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>
-              Is &quot;{ambiguityPrompt?.numberText}&quot; the time?
+              {ambiguityPrompt?.kind === "meridiem"
+                ? `${ambiguityPrompt.numberText} in the morning or evening?`
+                : `Is "${ambiguityPrompt?.numberText}" the time?`}
             </Text>
             <Text style={styles.sheetSubtitle}>
-              It could be the hour, or part of what you are reminding yourself about.
+              {ambiguityPrompt?.kind === "meridiem"
+                ? "You didn't say AM or PM."
+                : "It could be the hour, or part of what you are reminding yourself about."}
             </Text>
 
             {ambiguityPrompt && (
               <>
                 <Pressable
                   style={styles.choiceRow}
+                  testID="ambiguity-choice-time"
                   onPress={() => handleAmbiguityChoice(ambiguityPrompt.asTime)}
                   disabled={saving}
                 >
@@ -1678,6 +1698,7 @@ export default function QuickAddInput({ onSaved }: Props) {
 
                 <Pressable
                   style={styles.choiceRow}
+                  testID="ambiguity-choice-text"
                   onPress={() => handleAmbiguityChoice(ambiguityPrompt.asText)}
                   disabled={saving}
                 >

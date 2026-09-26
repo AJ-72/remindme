@@ -4,9 +4,19 @@ import { Linking } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NameOnboarding from "@/components/NameOnboarding";
 import { RemindersProvider } from "@/contexts/RemindersContext";
-import { NAME_PROMPT_KEY, USER_NAME_KEY } from "@/services/ReminderService";
+import {
+  NAME_PROMPT_KEY,
+  REGISTERED_PHONE_KEY,
+  STORAGE_KEY as REMINDERS_KEY,
+  USER_NAME_KEY,
+} from "@/services/ReminderService";
 
 jest.mock("expo-haptics");
+jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+// Unconfigured by default, like a Jest/dev build; the B3 block opts in.
+jest.mock("@/services/DriveBackupService", () => ({
+  getDriveBackup: jest.fn(() => ({ isConfigured: () => false })),
+}));
 
 function renderOnboarding(enabled = true) {
   return render(
@@ -99,5 +109,50 @@ describe("NameOnboarding — an install opened by an invite link", () => {
 
     expect(await findByTestId("name-sheet-input")).toBeTruthy();
     spy.mockRestore();
+  });
+});
+
+// B3: an empty install may be someone coming back; offer the Drive restore
+// there and nowhere else. An Auto-Backup-restored install is not empty.
+describe("NameOnboarding — welcome-back offer (B3)", () => {
+  const { getDriveBackup } = jest.requireMock("@/services/DriveBackupService") as {
+    getDriveBackup: jest.Mock;
+  };
+  const { router } = jest.requireMock("expo-router") as { router: { push: jest.Mock } };
+
+  beforeEach(() => {
+    getDriveBackup.mockReturnValue({ isConfigured: () => true });
+  });
+
+  it("offers a restore on an empty install and routes to welcome-back", async () => {
+    const { findByTestId } = renderOnboarding();
+    fireEvent.press(await findByTestId("name-sheet-restore"));
+
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/welcome-back"));
+    expect(await AsyncStorage.getItem(NAME_PROMPT_KEY)).toBe("1");
+  });
+
+  it("does not offer it once the install has reminders", async () => {
+    await AsyncStorage.setItem(
+      REMINDERS_KEY,
+      JSON.stringify([{ id: "a", title: "x", description: "", datetime: "2030-01-01T00:00:00.000Z", completed: false }])
+    );
+    const { findByTestId, queryByTestId } = renderOnboarding();
+    await findByTestId("name-sheet-input");
+    expect(queryByTestId("name-sheet-restore")).toBeNull();
+  });
+
+  it("does not offer it once a number is registered here", async () => {
+    await AsyncStorage.setItem(REGISTERED_PHONE_KEY, "+919876543210");
+    const { findByTestId, queryByTestId } = renderOnboarding();
+    await findByTestId("name-sheet-input");
+    expect(queryByTestId("name-sheet-restore")).toBeNull();
+  });
+
+  it("does not offer it when Drive backup is unavailable in this build", async () => {
+    getDriveBackup.mockReturnValue({ isConfigured: () => false });
+    const { findByTestId, queryByTestId } = renderOnboarding();
+    await findByTestId("name-sheet-input");
+    expect(queryByTestId("name-sheet-restore")).toBeNull();
   });
 });

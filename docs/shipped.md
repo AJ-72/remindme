@@ -18,6 +18,87 @@ advertise these until a device run logs a pass in `device-tests/`.
 
 ## 2026-09
 
+### Delivery self-check: "Will reminders reach me?" (B26) — 2026-09-26 · jest only
+
+**User-facing:** None yet (unproven on hardware). Settings now has a
+**Will reminders reach me?** screen. It checks the four things that silently
+stop reminders on Android: notification permission, whether the reminder
+channel is muted, *Alarms & reminders* access, and battery optimization. Each
+problem comes with a **Fix in Settings** button, and a **Send test reminder**
+button checks that a real notification arrives within seconds.
+
+**Technical:** `utils/deliveryHealth.ts` (pure verdict; an unreadable reading is
+`unknown`, never `ok`), `utils/deliveryTestFire.ts` (schedule, then race
+arrival against a timeout; matched by a per-run token so a real reminder firing
+meanwhile doesn't count), `services/DeliveryHealthService.ts`, a new local
+Android module `modules/delivery-health` (battery-optimization state has no
+JS API), and the `app/delivery-check.tsx` screen. The test-fire proves delivery
+only while the app is open. Device check: D103 (renumbered 2026-09-26 from
+D101, which collided with the Google Drive backup item's D101 below).
+Battery's Fix button opens the app's own "App info" page
+(`ACTION_APPLICATION_DETAILS_SETTINGS`) rather than the general
+battery-optimization list, which device-testing found led nowhere useful on
+one OEM; the detail copy also names the specific control to look for there,
+since landing on the right screen alone wasn't enough for the user to find it
+— see `system_learnings.md`, 2026-09-26.
+
+### Google Drive backup + one-tap "welcome back" restore (B3) — 2026-09-25 · jest only
+
+**User-facing:** None yet (unproven on hardware). Your reminders can now back
+themselves up to your Google Drive automatically. On a new phone — including
+one you didn't set up from your old phone's backup — tap *I've used Reminders
+before* on the first screen, sign in with Google, and one tap brings back your
+reminders, your settings, and your number, so reminders people send you
+arrive on the new phone.
+
+Before this, the only restore paths were Android Auto Backup (which D1 proved
+on 2026-09-25 does restore everything, session included — but only for an
+Android phone set up *from* the old one) and a manual paste-the-JSON export
+most people never make. The backup file (v2, `utils/reminderBackup.ts`) now
+also carries the user's name and registered number, because the server only
+keeps an irreversible hash of the number: without this copy, a fresh install
+cannot get it back except by retyping it.
+`services/DriveBackupService.ts` keeps one file in the hidden per-app Drive
+folder (`drive.appdata`, non-sensitive — no Google verification), uploads
+debounced 5 s after any change, on backgrounding, and from the existing
+BackgroundFetch task, and only when the content hash changed. Two invariants
+protect the one copy a returning user depends on: nothing auto-uploads before
+the install has settled its restore decision, and an empty install never
+replaces a backup that has reminders without an explicit confirm. The
+welcome-back flow (`app/welcome-back.tsx`, `services/welcomeBack.ts`) restores
+reminders first and then, if the box stays ticked, moves the number via
+`selfRegister` → `migrate` on `number_taken` (never `reset`); a number-move
+failure never rolls back the reminders. register-number's success path moved
+to the shared `services/registration.ts` so both flows claim invitations the
+same way. Settings → Backup gains a Drive card (connect, back up now,
+restore, stop). Spec: `docs/superpowers/specs/2026-09-25-google-drive-backup-design.md`.
+Setup: `docs/setup/google-drive-oauth.md`. Device checks:
+`device-tests/data-safety.md#d100`. iOS needs an iOS OAuth client and a build.
+
+### Home screen refresh: thumb-side check, one mic button, readable dark mode — 2026-09-23 · jest only
+
+**User-facing:** None yet (unproven on hardware). The circle that marks a
+reminder done now sits on the right, under your thumb. The quick-add row is
+simpler: one mic button that shows the language it listens in, plus repeat,
+alarm, notes and save. Circles, outlines and icons are much easier to see in
+dark mode. To delete a reminder, open it.
+
+- `ReminderCard`: complete toggle moved to the right edge, 48pt target with a
+  26pt ring, `checkbox` role and state; the trash button (and the `onDelete`
+  prop) removed. Home's single-delete confirm path removed; clear-all stays.
+- `QuickAddInput`: the mic is a pill carrying `LANGUAGE_NAMES[dictationLanguage]`
+  (`quick-add-mic-language`), label "Speak in …". `DictationLanguageChooser`
+  deleted — the listening bar's switch is the one place to change it. The
+  `quick-add-recipient` row icon removed; `quick-add-remind-someone` now
+  carries the recipient in its label and icon.
+- `constants/colors.ts`: new `control` and `icon` tokens in both palettes;
+  dark `border`, `input`, `mutedForeground`, `destructiveBorder` raised; light
+  `input` and `mutedForeground` darkened. `constants/colors.test.ts` pins WCAG
+  3:1 for controls and 4.5:1 for muted text and icons.
+- Card layout covered by a fast-check property test over any title (either
+  script), done state, time, alarm and recurrence.
+- Maestro `remind_someone_else_bolt.yaml` taps the labelled button now.
+  Device check: D100.
 ### Rename `SNOOZE_ACTION_ID` tech debt (B5) — 2026-09-25 · jest only
 
 **User-facing:** None (internal rename only, no behavior change).
@@ -42,7 +123,7 @@ Notifications fall into two cases across the upgrade:
   is tracked as B28.
 
 Device proof is pending as
-[D100](../device-tests/notifications.md#d100).
+[D104](../device-tests/notifications.md#d104).
 
 ### Phone-number collision recovery: reset or migrate on registration (B9, part 2) — 2026-09-22 · jest only
 

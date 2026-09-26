@@ -1374,8 +1374,9 @@ its next occurrence without tallying it completed or missed; "Delete
 Series" keeps today's exact delete-everything behavior.
 
 **Steps.**
-1. Create a Daily recurring reminder. From the home screen (trash icon on
-   the card) or the reminder-detail screen (Delete button), delete it.
+1. Create a Daily recurring reminder. From the reminder-detail screen
+   (Delete button), delete it. (The home-card trash icon was removed
+   2026-09-23; delete lives on the detail screen only.)
 2. Confirm the sheet shows both "Skip This Occurrence" and "Delete Series"
    (a non-recurring reminder should still show the plain single-button
    confirm, unchanged).

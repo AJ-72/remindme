@@ -7,6 +7,34 @@
 | [D8](#d8) | Dark mode, visually | `PASS` | 2026-08-24 | SEMI |
 | [D14](#d14) | Seven 2026-08-24 device fixes | `PARTIAL` | 2026-08-29 | SEMI |
 | [D94](#d94) | Ink & Coral palette, on device | `PENDING` | — | NO |
+| [D100](#d100) | Home refresh: check on the right, mic pill, dark contrast | `PASS` | 2026-09-26 | NO |
+
+---
+
+<a id="d100"></a>
+## D100 — Home refresh: check on the right, mic pill, dark contrast · `PASS` (2026-09-26, user's OEM device)
+
+Jest proves the order of the elements and the token values. It cannot prove
+what a thumb reaches or what an eye sees on a real dark screen.
+
+**Steps.**
+1. Put the phone in dark mode. Open the home screen with three or more
+   reminders, one of them done.
+2. Hold the phone in the right hand. Tap the circle on each card with the
+   thumb.
+3. Look at the unchecked circles, the "Remind someone else" outline, and the
+   repeat, alarm and notes icons.
+4. Look at the mic button. Tap it, then tap "Switch to മലയാളം" on the
+   listening bar, then tap Done.
+5. Repeat steps 1 and 3 in light mode.
+
+**Pass.** Each circle is clearly visible and sits at the right edge, in
+reach of the thumb. No card shows a trash icon. The mic button shows
+"English", then "മലയാളം" after the switch, in full, not cut off. The
+row shows only the mic, repeat, alarm, notes and save.
+
+**Fails if.** A circle or outline is hard to see on either theme, the
+Malayalam name clips, or a tap on the circle opens the card.
 
 ---
 
@@ -66,8 +94,10 @@ invisible with the app set to Light on a dark-mode phone (`017b785`). That
 fix is **not** re-verified — see D14 #2.
 
 Re-run this whole walk after any new screen lands. The screens added since
-this passed (Smart Alerts, Why tasks slip, the quiet-hours and name sheets)
-were **not** part of it. Jest asserts *token values*, not pixels.
+this passed (Smart Alerts, Why tasks slip, the quiet-hours and name sheets,
+the Google Drive backup card and welcome-back screen, and `AppDialog` — the
+in-app sheet that replaced every `Alert.alert` on 2026-09-25) were **not**
+part of it. Jest asserts *token values*, not pixels.
 
 **Setup.** System theme **dark**. Have one overdue reminder and one completed
 reminder in the list before starting, so the destructive and muted states
@@ -81,7 +111,9 @@ are on screen.
 5. About.
 6. Smart Alerts.
 7. Why tasks slip.
-8. The sheets: snooze, confirm, quiet-hours, name.
+8. The sheets: snooze, confirm, quiet-hours, name, and `AppDialog` (Settings
+   → Backup → *Stop backing up*, then Cancel; check the icon tint, the red
+   destructive button, and that tapping outside or Back dismisses it).
 9. The exact-alarm banner.
 10. The error fallback (force a crash to reach it).
 

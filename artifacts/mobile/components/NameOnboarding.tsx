@@ -1,10 +1,14 @@
+import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { Linking } from "react-native";
 
 import NameSheet from "@/components/NameSheet";
 import { useReminders } from "@/contexts/RemindersContext";
+import { getDriveBackup } from "@/services/DriveBackupService";
 import {
+  getRegisteredPhone,
   hasSeenNamePrompt,
+  loadReminders,
   markNamePromptSeen,
 } from "@/services/ReminderService";
 
@@ -47,6 +51,7 @@ interface Props {
 export default function NameOnboarding({ enabled, onSettled }: Props) {
   const { setUserName } = useReminders();
   const [visible, setVisible] = useState(false);
+  const [offerRestore, setOfferRestore] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -66,6 +71,13 @@ export default function NameOnboarding({ enabled, onSettled }: Props) {
         onSettled?.();
         return;
       }
+      // B3: an EMPTY install may be someone coming back (new phone, iOS, a
+      // fresh setup that skipped Android's own restore). An install Android
+      // Auto Backup restored is not empty, and already has everything back,
+      // so it is never offered a second restore.
+      const [reminders, phone] = await Promise.all([loadReminders(), getRegisteredPhone()]);
+      if (cancelled) return;
+      setOfferRestore(getDriveBackup().isConfigured() && reminders.length === 0 && !phone);
       setVisible(true);
     })();
     return () => {
@@ -89,6 +101,21 @@ export default function NameOnboarding({ enabled, onSettled }: Props) {
         await close();
       }}
       onDismiss={close}
+      secondaryAction={
+        offerRestore
+          ? {
+              label: "I've used Reminders before — restore",
+              testID: "name-sheet-restore",
+              // Not onSettled: the feature tour must not start over the
+              // welcome-back screen. It starts on the next launch instead.
+              onPress: async () => {
+                setVisible(false);
+                await markNamePromptSeen();
+                router.push("/welcome-back");
+              },
+            }
+          : undefined
+      }
     />
   );
 }

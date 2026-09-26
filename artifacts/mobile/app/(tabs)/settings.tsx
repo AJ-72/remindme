@@ -2,7 +2,6 @@ import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
-  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -18,6 +17,7 @@ import { tabBarContentInset } from "@/constants/tabBar";
 import { buildAppShareMessage } from "@/utils/appShare";
 import { getFontFamily } from "@/utils/getFontFamily";
 import { useReminders } from "@/contexts/RemindersContext";
+import { useAppDialog } from "@/hooks/useAppDialog";
 import { useColors } from "@/hooks/useColors";
 import { useTour, useTourTarget } from "@/contexts/TourContext";
 import { countPendingRemindersDisagreeingWithAlarm } from "@/services/ReminderService";
@@ -34,6 +34,7 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 
 export default function SettingsScreen() {
   const colors = useColors();
+  const { show, dialog } = useAppDialog();
   const [alarmIconExplained, setAlarmIconExplained] = useState(false);
   const insets = useSafeAreaInsets();
   const tour = useTour();
@@ -88,23 +89,21 @@ export default function SettingsScreen() {
     );
     if (affected === 0) return;
     const plural = affected === 1 ? "reminder" : "reminders";
-    Alert.alert(
-      enabled
+    void show({
+      title: enabled
         ? `Turn alarm on for your ${affected} existing ${plural}?`
         : `Silence your ${affected} existing ${plural} too?`,
-      enabled
+      message: enabled
         ? `${affected === 1 ? "It is" : "They are"} silent, and may arrive late. Turning alarm on makes ${affected === 1 ? "it ring" : "them ring"} out loud at the exact time.`
         : `${affected === 1 ? "It is" : "They are"} set to ring, and will keep ringing on time. Silenced reminders may arrive up to 20 minutes late.`,
-      [
-        { text: "Keep them as they are", style: "cancel" },
-        {
-          text: enabled ? `Turn on for all ${affected}` : `Silence all ${affected}`,
-          onPress: () => {
-            void setAlarmForPending(enabled);
-          },
-        },
-      ]
-    );
+      tone: "info",
+      buttons: [
+        { text: "Keep them as they are", value: "keep", style: "cancel" },
+        { text: enabled ? `Turn on for all ${affected}` : `Silence all ${affected}`, value: "apply" },
+      ],
+    }).then((choice) => {
+      if (choice === "apply") void setAlarmForPending(enabled);
+    });
   };
 
   const shareApp = async () => {
@@ -470,6 +469,18 @@ export default function SettingsScreen() {
             </View>
             <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
           </Pressable>
+
+          <Pressable
+            style={[styles.row, styles.rowDivider]}
+            onPress={() => router.push("/delivery-check")}
+            testID="delivery-check-row"
+          >
+            <Feather name="shield" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Will reminders reach me?</Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
+          </Pressable>
         </View>
 
         {/* What notifications show */}
@@ -711,6 +722,7 @@ export default function SettingsScreen() {
         }}
         onDismiss={() => setNameSheetVisible(false)}
       />
+      {dialog}
     </View>
   );
 }

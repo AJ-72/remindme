@@ -1,5 +1,5 @@
 import React from "react";
-import { Alert, Linking, Platform, Share, StyleSheet, useColorScheme } from "react-native";
+import { Linking, Platform, Share, StyleSheet, useColorScheme } from "react-native";
 import { router } from "expo-router";
 import { APP_SHARE_BLURB, buildAppShareMessage } from "@/utils/appShare";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
@@ -82,47 +82,41 @@ describe("SettingsScreen retroactive alarm prompt", () => {
     );
 
   it("offers to silence existing alarm reminders when switching off", async () => {
-    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
     await seedReminders([true, true]);
     const { findByTestId } = renderScreen();
 
     fireEvent(await findByTestId("default-alarm-switch"), "valueChange", false);
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
-    expect(alertSpy.mock.calls[0][0]).toContain("2 existing reminders");
+    expect((await findByTestId("app-dialog-title")).props.children).toContain("2 existing reminders");
   });
 
   it("offers to turn alarm on for existing silent reminders when switching on", async () => {
-    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
     await seedReminders([false]);
     const { findByTestId } = renderScreen();
 
     fireEvent(await findByTestId("default-alarm-switch"), "valueChange", true);
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
-    expect(alertSpy.mock.calls[0][0]).toContain("1 existing reminder");
+    expect((await findByTestId("app-dialog-title")).props.children).toContain("1 existing reminder");
   });
 
   it("does not prompt when no pending reminder would change", async () => {
-    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
     await seedReminders([false]);
-    const { findByTestId } = renderScreen();
+    const { findByTestId, queryByTestId } = renderScreen();
 
     fireEvent(await findByTestId("default-alarm-switch"), "valueChange", false);
 
     await waitFor(async () =>
       expect(await AsyncStorage.getItem(DEFAULT_ALARM_KEY)).toBe("false")
     );
-    expect(alertSpy).not.toHaveBeenCalled();
+    expect(queryByTestId("app-dialog")).toBeNull();
   });
 
   // The switch means "change the default" — that must happen whether or not
   // the user accepts the retroactive sweep, and before they answer.
   it("changes the default even while the prompt is unanswered", async () => {
-    jest.spyOn(Alert, "alert").mockImplementation(() => {});
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
     await seedReminders([true]);
     const { findByTestId } = renderScreen();
@@ -134,33 +128,27 @@ describe("SettingsScreen retroactive alarm prompt", () => {
     );
   });
 
-  // A dismissed alert must never mass-rewrite reminders, so the button that
-  // changes nothing carries the cancel role.
-  it("puts the cancel role on the leave-them-alone button", async () => {
-    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  // A dismissed prompt must never mass-rewrite reminders.
+  it("leaves pending reminders alone when the prompt is dismissed", async () => {
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
     await seedReminders([true]);
-    const { findByTestId } = renderScreen();
+    const { findByTestId, queryByTestId } = renderScreen();
 
     fireEvent(await findByTestId("default-alarm-switch"), "valueChange", false);
+    fireEvent.press(await findByTestId("app-dialog-overlay"));
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
-    const buttons = alertSpy.mock.calls[0][2] as { text: string; style?: string }[];
-    expect(buttons[0].style).toBe("cancel");
-    expect(buttons[0].text).toBe("Keep them as they are");
+    await waitFor(() => expect(queryByTestId("app-dialog")).toBeNull());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].alarm).toBe(true);
   });
 
   it("rewrites the pending reminders only when the sweep is accepted", async () => {
-    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
     await seedReminders([true]);
     const { findByTestId } = renderScreen();
 
     fireEvent(await findByTestId("default-alarm-switch"), "valueChange", false);
-    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
-
-    const buttons = alertSpy.mock.calls[0][2] as { onPress?: () => void }[];
-    buttons[1].onPress!();
+    fireEvent.press(await findByTestId("app-dialog-btn-apply"));
 
     await waitFor(async () => {
       const stored = JSON.parse(
@@ -672,6 +660,12 @@ describe("SettingsScreen — Smart Alerts entry", () => {
     const { findByTestId } = renderScreen();
     fireEvent.press(await findByTestId("smart-alerts-row"));
     expect(router.push).toHaveBeenCalledWith("/smart-alerts");
+  });
+
+  it("offers a row into the delivery self-check (B26)", async () => {
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("delivery-check-row"));
+    expect(router.push).toHaveBeenCalledWith("/delivery-check");
   });
 });
 
