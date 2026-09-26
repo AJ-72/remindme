@@ -9,6 +9,26 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-26 — Stryker's Babel 8 hoisted over Babel 7 and broke every Metro bundle
+
+**Symptom:** after a reinstall, every Android bundle (debug via Metro, and the release Gradle bundle) fails with `WorkletsBabelPluginError: [Worklets] Babel plugin exception`. The failing file varies between runs (`reanimated/src/isSharedValue.ts`: "Cannot read properties of undefined (reading 'length')"; `gesture-handler/.../hoverGesture.ts`: "NumericLiterals must be non-negative finite numbers"). `expo start --clear` does not help: it is not a cache problem.
+
+**ROOT CAUSE:** `react-native-worklets`' Babel plugin `require`s `@babel/types`, `@babel/generator` and `@babel/traverse` without declaring them, so it gets whatever pnpm hoists into `node_modules/.pnpm/node_modules/@babel/*`. Stryker 10 (added in PR #31 for the mutation-testing pilot) depends on Babel 8, and Babel 8 won that hoist. The plugin then ran Babel 8 `types`/`traverse` against Expo's Babel 7 `@babel/core` AST. To diagnose, check what the plugin resolves: `require.resolve('@babel/types/package.json', {paths: [<worklets dir>]})`.
+
+**FIX:** add `packageExtensions` in `pnpm-workspace.yaml` that pins the three to Babel 7 for `react-native-worklets`. Commit it **together with** `pnpm-lock.yaml`: the lockfile carries a `packageExtensionsChecksum`, and a frozen install (EAS, CI) fails if the two disagree. **Rule:** any new devDependency that brings a different Babel major can break the app bundle without a single test failing, because Jest uses its own transform and the suite stays green. After adding a toolchain devDependency, bundle once (`curl localhost:3011/artifacts/mobile/index.ts.bundle?platform=android` with Metro running). **WHERE:** `pnpm-workspace.yaml` (`packageExtensions`), `pnpm-lock.yaml`.
+
+---
+
+## 2026-09-26 — chrono-node silently misreads common English date phrases; normalize before parsing
+
+**WHAT:** `parseNaturalLanguage.ts` now runs `normalizeEnglishDatePhrases()` before chrono, rewriting phrases chrono-node@2.9.1 gets wrong into forms it parses correctly. It also post-corrects bare "day after tomorrow", and returns an AM/PM ambiguity (`ParsedAmbiguity.kind: "meridiem"`) that reuses QuickAddInput's existing choice sheet.
+
+**WHY (non-obvious):** chrono fails *silently*. It doesn't return "no match"; it matches a sub-span and returns a plausible wrong date. Bare "day after tomorrow" matches only "tomorrow" (a day early, with "day after" left in the title). "end of the month" matches only "the month". "a week from tomorrow" splits into two matches. "next to next week" reads as next week. "at 5" becomes 5 AM. Probe with `chrono.parse(...)` and check the matched `text` span, not just whether a date came back. To detect AM/PM ambiguity, use `start.isCertain("hour") && !start.isCertain("meridiem")`, excluding hours past 12, a leading zero ("08:00") and any period word in the text. Decisions the user made: "eod" = start of quiet hours (`eodMinute` option; the rewrite emits an explicit am/pm so it never trips the ambiguity check); "coming <weekday>" said on that weekday = next week's. Keep each rewrite target a phrase chrono is verified to parse, and only rewrite words that get stripped from the title anyway.
+
+**Not covered:** `app/add-reminder.tsx` still takes chrono's AM guess without asking (it shows the parsed time for the user to check). **WHERE:** `utils/parseNaturalLanguage.ts`, `utils/malayalamDateParser.ts` (`ParsedAmbiguity.kind`), `components/QuickAddInput.tsx`, `app/add-reminder.tsx`.
+
+---
+
 ## 2026-09-23 — Mark Done from the tray with the app open wrote storage, but the list never re-read it
 
 **Symptom:** with the app open, a reminder fires, the user pulls down the tray and presses **Mark Done**. Nothing appears to happen: the reminder stays pending in the list.

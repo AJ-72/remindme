@@ -199,3 +199,14 @@ allowBuilds:
 
 patchedDependencies:
   expo-notifications@0.32.17: patches/expo-notifications@0.32.17.patch
+
+# react-native-worklets' Babel plugin requires @babel/types, /generator and
+# /traverse without declaring them, so it takes whatever pnpm hoists. Stryker 10
+# pulls in Babel 8, which then wins the hoist and crashes the plugin at bundle
+# time ("[Worklets] Babel plugin exception"). Pin it to Babel 7, like @babel/core.
+packageExtensions:
+  react-native-worklets:
+    dependencies:
+      '@babel/types': ^7.25.2
+      '@babel/generator': ^7.25.0
+      '@babel/traverse': ^7.25.3

@@ -145,6 +145,8 @@ overrides:
   esbuild: 0.27.3
   uuid: ^9.0.0
 
+packageExtensionsChecksum: sha256-/w/wobbwRHdctHIFSy/bNfHm45kjxDd9pCcQ6noNZAY=
+
 patchedDependencies:
   expo-notifications@0.32.17: f391a27704a69bb6a9478126ae18ccc169734e9e323ff7ed5b65327bcba74d62
 
@@ -14524,6 +14526,7 @@ snapshots:
   react-native-worklets@0.5.1(@babel/core@7.29.0(supports-color@8.1.1))(react-native@0.81.5(@babel/core@7.29.0(supports-color@8.1.1))(@types/react@19.1.17)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0)(supports-color@8.1.1):
     dependencies:
       '@babel/core': 7.29.0(supports-color@8.1.1)
+      '@babel/generator': 7.29.7
       '@babel/plugin-transform-arrow-functions': 7.29.7(@babel/core@7.29.0(supports-color@8.1.1))
       '@babel/plugin-transform-class-properties': 7.29.7(@babel/core@7.29.0(supports-color@8.1.1))(supports-color@8.1.1)
       '@babel/plugin-transform-classes': 7.29.7(@babel/core@7.29.0(supports-color@8.1.1))(supports-color@8.1.1)
@@ -14533,6 +14536,8 @@ snapshots:
       '@babel/plugin-transform-template-literals': 7.29.7(@babel/core@7.29.0(supports-color@8.1.1))
       '@babel/plugin-transform-unicode-regex': 7.29.7(@babel/core@7.29.0(supports-color@8.1.1))
       '@babel/preset-typescript': 7.29.7(@babel/core@7.29.0(supports-color@8.1.1))(supports-color@8.1.1)
+      '@babel/traverse': 7.29.7(supports-color@8.1.1)
+      '@babel/types': 7.29.7
       convert-source-map: 2.0.0
       react: 19.1.0
       react-native: 0.81.5(@babel/core@7.29.0(supports-color@8.1.1))(@types/react@19.1.17)(react@19.1.0)(supports-color@8.1.1)

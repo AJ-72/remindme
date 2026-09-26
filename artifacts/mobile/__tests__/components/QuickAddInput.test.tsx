@@ -282,6 +282,27 @@ describe("QuickAddInput", () => {
     expect(new Date(stored[0].datetime).getHours()).toBe(5);
   });
 
+  // English "at 5" with no AM/PM: chrono silently reads 5 AM. Ask instead.
+  it("asks AM or PM for an English time that doesn't say, and saves the PM choice", async () => {
+    const { findByTestId, findByText } = renderComponent();
+
+    fireEvent.changeText(await findByTestId("quick-add-input"), "Call mom tomorrow at 5");
+    fireEvent.press(await findByTestId("quick-add-save"));
+
+    expect(await findByText("5 in the morning or evening?")).toBeTruthy();
+    expect(await AsyncStorage.getItem(STORAGE_KEY)).toBeNull();
+
+    fireEvent.press(await findByTestId("ambiguity-choice-text"));
+
+    await waitFor(async () => {
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored).toHaveLength(1);
+    });
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].title).toBe("Call mom");
+    expect(new Date(stored[0].datetime).getHours()).toBe(17);
+  });
+
   it("parses a Malayalam speech-transcript-shaped spelled-out-number string via the mic result path", async () => {
     const { findByTestId, findByText } = renderComponent();
     const titleInput = await findByTestId("quick-add-input");
