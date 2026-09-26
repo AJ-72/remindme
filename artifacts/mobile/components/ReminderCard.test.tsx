@@ -1,7 +1,10 @@
 import React from "react";
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import ReminderCard from "./ReminderCard";
+import colors from "@/constants/colors";
+import fc from "fast-check";
 import { RemindersProvider } from "@/contexts/RemindersContext";
 import type { Reminder } from "@/services/ReminderService";
 import { getPermissionsAsync } from "expo-notifications";
@@ -31,7 +34,7 @@ function renderCard(reminder: Reminder) {
       }}
     >
       <RemindersProvider>
-        <ReminderCard reminder={reminder} onDelete={jest.fn()} />
+        <ReminderCard reminder={reminder} />
       </RemindersProvider>
     </SafeAreaProvider>
   );
@@ -307,5 +310,116 @@ describe("ReminderCard — recurring reminders", () => {
     );
     expect(await findByTestId("will-not-ring-chip")).toBeTruthy();
     expect(getByTestId("repeat-marker")).toBeTruthy();
+  });
+});
+
+// Most people hold the phone in the right hand, and the check sat under the
+// left edge, the far side of the screen from the thumb. The trash button that
+// used to sit on the right went to the detail screen at the same time: a
+// destructive control next to the one people tap most is a mis-tap waiting.
+describe("ReminderCard — complete toggle on the thumb side", () => {
+  it("puts the complete toggle last in the card, on the right", () => {
+    const { getByTestId } = renderCard(makeReminder());
+    // Host nodes in document order: in a row, later means further right.
+    const order = getByTestId("reminder-card-r1")
+      .findAll((n: any) => typeof n.type === "string")
+      .map((n: any) => n.props.testID ?? (n.props.children === "English title" ? "title" : null))
+      .filter(Boolean);
+    expect(order.indexOf("complete-toggle")).toBeGreaterThan(order.indexOf("title"));
+    expect(order.indexOf("title")).toBeGreaterThanOrEqual(0);
+  });
+
+  it("has no delete button on the card", () => {
+    const { queryByTestId } = renderCard(makeReminder());
+    expect(queryByTestId("delete-reminder-r1")).toBeNull();
+  });
+
+  it("gives the toggle a 48pt touch target", () => {
+    const { getByTestId } = renderCard(makeReminder());
+    const style = StyleSheet.flatten(getByTestId("complete-toggle").props.style);
+    expect(style.width).toBeGreaterThanOrEqual(48);
+    expect(style.height).toBeGreaterThanOrEqual(48);
+  });
+
+  it("draws the unchecked ring in the control colour, not the quiet border", () => {
+    const { getByTestId } = renderCard(makeReminder());
+    const ring = StyleSheet.flatten(getByTestId("complete-toggle-ring").props.style);
+    expect(ring.borderColor).toBe(colors.light.control);
+    expect(ring.backgroundColor).toBe("transparent");
+  });
+
+  it("fills the ring once done", () => {
+    const { getByTestId } = renderCard(makeReminder({ completed: true }));
+    const ring = StyleSheet.flatten(getByTestId("complete-toggle-ring").props.style);
+    expect(ring.borderColor).toBe(colors.light.primary);
+    expect(ring.backgroundColor).toBe(colors.light.primary);
+  });
+
+  it("says what it is and what state it is in to a screen reader", () => {
+    const open = renderCard(makeReminder());
+    const toggle = open.getByTestId("complete-toggle");
+    expect(toggle.props.accessibilityRole).toBe("checkbox");
+    expect(toggle.props.accessibilityState).toEqual({ checked: false });
+    expect(toggle.props.accessibilityLabel).toBe("Mark English title as done");
+    open.unmount();
+
+    const done = renderCard(makeReminder({ completed: true }));
+    expect(done.getByTestId("complete-toggle").props.accessibilityState).toEqual({
+      checked: true,
+    });
+  });
+});
+
+// The examples above pin one reminder each. The layout rules must hold for
+// every reminder the list can show: any title in either script, done or not,
+// overdue or not, alarm or silent, one-shot or repeating.
+describe("ReminderCard — toggle properties over any reminder", () => {
+  const malayalamChar = fc.integer({ min: 0x0d05, max: 0x0d39 }).map((c) => String.fromCharCode(c));
+  const title = fc.oneof(
+    fc.string({ minLength: 1, maxLength: 40 }).filter((t) => t.trim().length > 0),
+    fc.array(malayalamChar, { minLength: 1, maxLength: 20 }).map((cs) => cs.join(""))
+  );
+  const reminderArb = fc.record({
+    title,
+    completed: fc.boolean(),
+    hoursFromNow: fc.integer({ min: -72, max: 72 }).filter((h) => h !== 0),
+    alarm: fc.boolean(),
+    repeats: fc.boolean(),
+  });
+
+  it("keeps the toggle right of the title, with no trash, and a state that matches the reminder", () => {
+    fc.assert(
+      fc.property(reminderArb, (r) => {
+        const utils = renderCard(
+          makeReminder({
+            title: r.title,
+            completed: r.completed,
+            datetime: new Date(Date.now() + r.hoursFromNow * 3600_000).toISOString(),
+            alarm: r.alarm,
+            recurrence: r.repeats ? { freq: "daily", interval: 1 } : undefined,
+          })
+        );
+        try {
+          const order = utils
+            .getByTestId("reminder-card-r1")
+            .findAll((n: any) => typeof n.type === "string")
+            .map((n: any) => n.props.testID ?? (n.props.children === r.title ? "title" : null))
+            .filter(Boolean);
+          expect(order.indexOf("title")).toBeGreaterThanOrEqual(0);
+          expect(order.indexOf("complete-toggle")).toBeGreaterThan(order.indexOf("title"));
+          expect(utils.queryByTestId("delete-reminder-r1")).toBeNull();
+
+          const toggle = utils.getByTestId("complete-toggle");
+          expect(toggle.props.accessibilityState).toEqual({ checked: r.completed });
+          expect(toggle.props.accessibilityLabel).toContain(r.title);
+
+          const ring = StyleSheet.flatten(utils.getByTestId("complete-toggle-ring").props.style);
+          expect(ring.borderColor).toBe(r.completed ? colors.light.primary : colors.light.control);
+        } finally {
+          utils.unmount();
+        }
+      }),
+      { numRuns: 40 }
+    );
   });
 });

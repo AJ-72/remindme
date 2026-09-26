@@ -540,7 +540,9 @@ describe("QuickAddInput — mic toggle", () => {
       const flatStyle = Array.isArray(micButton.props.style)
         ? Object.assign({}, ...micButton.props.style)
         : micButton.props.style;
-      expect(flatStyle.backgroundColor).toBeUndefined();
+      // Idle, the mic pill carries the primary fill; only listening turns it
+      // to the destructive "stop" colour.
+      expect(flatStyle.backgroundColor).toBe("#E85C3C");
     });
   });
 
@@ -632,10 +634,18 @@ describe("QuickAddInput — remind someone", () => {
       });
   });
 
+  // The row had a small user-plus icon AND the big labelled button below it,
+  // two ways in to one thing. The row keeps only what has no other home.
+  it("has no recipient icon in the action row, only the labelled button", async () => {
+    const { findByTestId, queryByTestId } = renderComponent();
+    expect(await findByTestId("quick-add-remind-someone")).toBeTruthy();
+    expect(queryByTestId("quick-add-recipient")).toBeNull();
+  });
+
   it("saves the picked contact as the reminder's recipient", async () => {
     const { findByTestId, findByText } = renderComponent();
 
-    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
     fireEvent.press(await findByText("Priya"));
 
     fireEvent.changeText(
@@ -663,7 +673,7 @@ describe("QuickAddInput — remind someone", () => {
   it("names the chosen contact on a chip", async () => {
     const { findByTestId, findByText } = renderComponent();
 
-    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
     fireEvent.press(await findByText("Priya"));
 
     const chip = await findByTestId("quick-add-recipient-chip");
@@ -674,7 +684,7 @@ describe("QuickAddInput — remind someone", () => {
   it("removes the recipient from the chip", async () => {
     const { findByTestId, findByText, queryByTestId } = renderComponent();
 
-    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
     fireEvent.press(await findByText("Priya"));
     await findByTestId("quick-add-recipient-chip");
 
@@ -687,7 +697,7 @@ describe("QuickAddInput — remind someone", () => {
   it("hides the chip again after a save", async () => {
     const { findByTestId, findByText, queryByTestId } = renderComponent();
 
-    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
     fireEvent.press(await findByText("Priya"));
     await findByTestId("quick-add-recipient-chip");
 
@@ -710,11 +720,11 @@ describe("QuickAddInput — remind someone", () => {
   it("clears the recipient after a save", async () => {
     const { findByTestId, findByText } = renderComponent();
 
-    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
     fireEvent.press(await findByText("Priya"));
     await waitFor(async () =>
       expect(
-        (await findByTestId("quick-add-recipient")).props.accessibilityLabel
+        (await findByTestId("quick-add-remind-someone")).props.accessibilityLabel
       ).toBe("Remind Priya")
     );
 
@@ -726,8 +736,8 @@ describe("QuickAddInput — remind someone", () => {
 
     await waitFor(async () =>
       expect(
-        (await findByTestId("quick-add-recipient")).props.accessibilityLabel
-      ).toBe("Remind someone")
+        (await findByTestId("quick-add-remind-someone")).props.accessibilityLabel
+      ).toBe("Remind someone else")
     );
   });
 
@@ -741,7 +751,7 @@ describe("QuickAddInput — remind someone", () => {
       .mockResolvedValue({ ok: true, invitationId: "inv-1" });
 
     const { findByTestId, findByText } = renderComponent();
-    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
     fireEvent.press(await findByText("Priya"));
     await findByTestId("recipient-in-app-badge");
 
@@ -767,7 +777,7 @@ describe("QuickAddInput — remind someone", () => {
       .mockResolvedValue({ ok: false, error: "network_error" });
 
     const { findByTestId, findByText } = renderComponent();
-    fireEvent.press(await findByTestId("quick-add-recipient"));
+    fireEvent.press(await findByTestId("quick-add-remind-someone"));
     fireEvent.press(await findByText("Priya"));
     await findByTestId("recipient-in-app-badge");
 
@@ -1180,49 +1190,47 @@ describe("QuickAddInput — the listening surface", () => {
   // a reminder to dictate is not looking at. Nothing on this screen said
   // whether the mic expected English or Malayalam.
   describe("which language the mic is listening for", () => {
-    it("names both languages, in their own scripts, before the user speaks", () => {
+    // One control, not two: the mic button carries the language it will
+    // listen in, written out in full in its own script. Tapping anywhere on
+    // it starts dictation; the language changes on the listening bar.
+    it("names the language on the mic button, in its own script", async () => {
       const utils = renderComponent();
-      expect(utils.getByTestId("dictation-language-en-US").props.children).toBeTruthy();
-      expect(utils.getByTestId("dictation-language-ml-IN")).toBeTruthy();
-    });
-
-    it("marks the active language as selected", async () => {
-      const utils = renderComponent();
-      const en = utils.getByTestId("dictation-language-en-US");
-      const ml = utils.getByTestId("dictation-language-ml-IN");
-      expect(en.props.accessibilityState.selected).toBe(true);
-      expect(ml.props.accessibilityState.selected).toBe(false);
-    });
-
-    it("says it is about dictation to a screen reader, where the icon says nothing", () => {
-      const utils = renderComponent();
-      expect(utils.getByTestId("dictation-language").props.accessibilityLabel).toBe(
-        "Dictation language"
-      );
       expect(
-        utils.getByTestId("dictation-language-ml-IN").props.accessibilityLabel
-      ).toBe("Dictate in മലയാളം");
+        (await utils.findByTestId("quick-add-mic-language")).props.children
+      ).toBe("English");
     });
 
-    it("persists the change, so the next mic session uses it too", async () => {
+    it("says what the button does, and in which language, to a screen reader", async () => {
       const utils = renderComponent();
-      fireEvent.press(utils.getByTestId("dictation-language-ml-IN"));
-      await waitFor(async () =>
-        expect(await AsyncStorage.getItem(DICTATION_LANGUAGE_KEY)).toBe("ml-IN")
-      );
+      expect(
+        (await utils.findByTestId("quick-add-mic")).props.accessibilityLabel
+      ).toBe("Speak in English");
     });
 
-    it("hands the chosen language to the recognizer", async () => {
+    it("has no separate language row next to the mic", () => {
       const utils = renderComponent();
-      fireEvent.press(utils.getByTestId("dictation-language-ml-IN"));
-      await waitFor(async () =>
-        expect(await AsyncStorage.getItem(DICTATION_LANGUAGE_KEY)).toBe("ml-IN")
-      );
-      fireEvent.press(utils.getByTestId("quick-add-mic"));
+      expect(utils.queryByTestId("dictation-language")).toBeNull();
+    });
+
+    it("shows a stored Malayalam choice on the mic button", async () => {
+      await AsyncStorage.setItem(DICTATION_LANGUAGE_KEY, "ml-IN");
+      const utils = renderComponent();
       await waitFor(() =>
-        expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledWith(
-          expect.objectContaining({ lang: "ml-IN" })
-        )
+        expect(utils.getByTestId("quick-add-mic-language").props.children).toBe("മലയാളം")
+      );
+      expect(utils.getByTestId("quick-add-mic").props.accessibilityLabel).toBe(
+        "Speak in മലയാളം"
+      );
+    });
+
+    it("persists a switch made on the listening bar, and the mic button follows it", async () => {
+      const utils = await startMic();
+      fireEvent.press(await utils.findByTestId("listening-language-switch"));
+      await waitFor(async () =>
+        expect(await AsyncStorage.getItem(DICTATION_LANGUAGE_KEY)).toBe("ml-IN")
+      );
+      await waitFor(() =>
+        expect(utils.getByTestId("quick-add-mic-language").props.children).toBe("മലയാളം")
       );
     });
 
@@ -1250,15 +1258,7 @@ describe("QuickAddInput — the listening surface", () => {
       );
       expect(ExpoSpeechRecognitionModule.abort).toHaveBeenCalled();
     });
-
-    // Two controls for one setting on one screen is a question, not an answer.
-    it("hides the row control while the listening card carries its own switch", async () => {
-      const utils = await startMic();
-      await utils.findByTestId("listening-surface");
-      expect(utils.queryByTestId("dictation-language")).toBeNull();
-    });
   });
-
 });
 
 // The first-run "Add your number" modal was removed, and the action-row icon

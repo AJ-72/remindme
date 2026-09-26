@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React, { useRef } from "react";
 import {
@@ -24,7 +23,6 @@ function isOverdue(iso: string, completed: boolean): boolean {
 
 interface Props {
   reminder: Reminder;
-  onDelete: (id: string) => void;
 }
 
 // Static across every card and every render — hoisted out of the component
@@ -33,17 +31,26 @@ interface Props {
 // (see dynamicCardStyles below) are computed inline.
 const staticStyles = StyleSheet.create({
   card: {
-    padding: 16,
+    paddingVertical: 12,
+    paddingLeft: 16,
+    paddingRight: 4,
     marginBottom: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     borderWidth: 1,
   },
+  // The Pressable is the 48pt touch target; the ring inside it is what shows.
   checkButton: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkRing: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 2,
     alignItems: "center",
     justifyContent: "center",
@@ -107,12 +114,9 @@ const staticStyles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Inter_500Medium",
   },
-  deleteBtn: {
-    padding: 6,
-  },
 });
 
-function ReminderCard({ reminder, onDelete }: Props) {
+function ReminderCard({ reminder }: Props) {
   const colors = useColors();
   const { toggleComplete } = useReminders();
   const { granted: notificationsGranted } = useNotificationPermission();
@@ -163,8 +167,10 @@ function ReminderCard({ reminder, onDelete }: Props) {
           elevation: 2,
         }),
   };
-  const dynamicCheckButtonStyle = {
-    borderColor: reminder.completed ? colors.primary : colors.border,
+  const dynamicCheckRingStyle = {
+    // `control`, not `border`: the quiet card border sat at 1.2:1 on a dark
+    // card, which left the unchecked circle invisible.
+    borderColor: reminder.completed ? colors.primary : colors.control,
     backgroundColor: reminder.completed ? colors.primary : "transparent",
   };
   const dynamicTitleStyle: { color: string; textDecorationLine: "line-through" | "none" } = {
@@ -177,7 +183,7 @@ function ReminderCard({ reminder, onDelete }: Props) {
   const styles = {
     ...staticStyles,
     card: [staticStyles.card, dynamicCardStyle],
-    checkButton: [staticStyles.checkButton, dynamicCheckButtonStyle],
+    checkRing: [staticStyles.checkRing, dynamicCheckRingStyle],
     title: [staticStyles.title, dynamicTitleStyle],
     recipientChip: [staticStyles.recipientChip, { backgroundColor: colors.primary + "1A" }],
     recipientChipText: [staticStyles.recipientChipText, { color: colors.primary }],
@@ -199,19 +205,9 @@ function ReminderCard({ reminder, onDelete }: Props) {
       <Pressable
         style={styles.card}
         onPress={handlePress}
+        testID={`reminder-card-${reminder.id}`}
         android_ripple={{ color: colors.muted }}
       >
-        <Pressable
-          testID="complete-toggle"
-          style={styles.checkButton}
-          onPress={handleToggle}
-          hitSlop={8}
-        >
-          {reminder.completed && (
-            <Feather name="check" size={14} color={colors.primaryForeground} />
-          )}
-        </Pressable>
-
         <View style={styles.content}>
           <View style={styles.titleRow}>
             <Text
@@ -325,16 +321,25 @@ function ReminderCard({ reminder, onDelete }: Props) {
           </View>
         </View>
 
+        {/* On the right, under the thumb of the hand most people hold the
+            phone in. Delete lives on the detail screen, away from it. */}
         <Pressable
-          testID={`delete-reminder-${reminder.id}`}
-          style={styles.deleteBtn}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            onDelete(reminder.id);
-          }}
-          hitSlop={8}
+          testID="complete-toggle"
+          style={styles.checkButton}
+          onPress={handleToggle}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: reminder.completed }}
+          accessibilityLabel={
+            reminder.completed
+              ? `Mark ${reminder.title} as not done`
+              : `Mark ${reminder.title} as done`
+          }
         >
-          <Feather name="trash-2" size={17} color={colors.mutedForeground} />
+          <View testID="complete-toggle-ring" style={styles.checkRing}>
+            {reminder.completed && (
+              <Feather name="check" size={14} color={colors.primaryForeground} />
+            )}
+          </View>
         </Pressable>
       </Pressable>
     </Animated.View>
