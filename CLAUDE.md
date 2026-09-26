@@ -123,6 +123,8 @@ Android builds use EAS: `pnpm --filter @workspace/mobile run build:android` (pre
    After changing the CMake version, delete stale caches or the old absolute paths / broken ninja manifests persist: `android/app/.cxx`, `android/app/build`, `android/build`, `android/.gradle`.
 3. **pnpm's `.pnpm` store path adds nesting that makes marginal path-length cases worse** (not the root cause — real cause is #2 above — but it lowers the threshold at which the Ninja bug bites). If still hitting path-length issues after fixing CMake/Ninja, a repo living under a very long path (e.g. deeply nested user folders) compounds the problem further.
 
+**Standalone release APK (no Metro) on one device:** `.\scripts\build-release-android.ps1 [-Device <serial>]` — sets JDK/SDK/CMake env, builds only the device's own ABI, installs in place, and refuses to overwrite an EAS/Play-signed install (that would need a data-wiping uninstall). Release bundling relies on the `export:embed` server-root pin in `artifacts/mobile/metro.config.js`; see `system_learnings.md` 2026-08-24.
+
 Order of operations for a clean local build: fix JDK → fix CMake/Ninja version → clean `.cxx`/`build` caches → `npx expo run:android`.
 
 **Deploying from a local machine (not Replit):** `EXPO_TOKEN` used to come from a Replit Secret and isn't present outside Replit. Get a token from expo.dev → your account → Settings → Access Tokens, then:

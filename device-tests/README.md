@@ -16,7 +16,7 @@ ships it.**
 | File | Covers | IDs |
 | --- | --- | --- |
 | [cross-cutting.md](cross-cutting.md) | Alarm delivery mechanics — the OEM battery/Doze/AlarmManager behavior everything else depends on | D1, D7, D19-D20, D22, D25-D26 |
-| [notifications.md](notifications.md) | Notification actions, channels, dedupe, recurrence re-arm | D2-D4, D15-D16, D85-D90, D100 |
+| [notifications.md](notifications.md) | Notification actions, channels, dedupe, recurrence re-arm | D2-D4, D15-D16, D85-D90, D102-D103 |
 | [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9-D13, D40-D43, D45, D47-D78, D78b, D82-D84, D91-D93, D95 |
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14, D94 |
 | [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete, telemetry privacy | D17-D18, D21, D23, D79-D81, D101 |
@@ -49,7 +49,9 @@ ships it.**
 per-file heading is the source of truth for a scenario's status, not this
 table.
 
-**5 `PARTIAL` · 55 `PENDING` · 14 `BLOCKED` · 17 `PASS` · 2 `INFO`.**
+**6 `PARTIAL` · 54 `PENDING` · 14 `BLOCKED` · 18 `PASS` · 2 `INFO`.** (Updated
+2026-09-26 for D100/D103 only — the base counts above were not independently
+re-verified this session; regenerate fully before trusting them elsewhere.)
 
 Sorted by status (most-actionable first), then by ID. `PARTIAL` rows are the
 highest-value ones to finish: the setup and driving already work, only the
@@ -128,7 +130,8 @@ places when this table was last regenerated.
 | [D88](notifications.md#d88) | Several missed occurrences catch up to the next future one, no burst | `PENDING` | — | notifications |
 | [D89](notifications.md#d89) | Marking done from the notification tray advances the series | `PENDING` | — | notifications |
 | [D90](notifications.md#d90) | Daily 8am reminder survives a DST transition at 8am wall-clock | `PENDING` | — | notifications |
-| [D100](notifications.md#d100) | Mark Done / Snooze from the tray while the app is open | `PENDING` | — | notifications |
+| [D102](notifications.md#d102) | Mark Done / Snooze from the tray while the app is open | `PENDING` | — | notifications |
+| [D103](notifications.md#d103) | Delivery self-check reads real device state (B26) | `PARTIAL` | 2026-09-26 | notifications |
 | [D93](feature-e2e.md#d93) | System-wide "Remind Me" text-selection menu | `PENDING` | — | feature-e2e |
 | [D94](visual-layout.md#d94) | Ink & Coral palette, on device | `PENDING` | — | visual-layout |
 | [D95](feature-e2e.md#d95) | Parsed date/time/recurrence chips are editable in place | `PENDING` | — | feature-e2e |
@@ -316,7 +319,10 @@ the UI* or *press a notification action*: D3, D11, D12, D15.
   was both the Ink & Coral palette and Tier 2 registration — in each case
   because a new item continued from the highest ID *in its own file*. The
   colliders were renumbered to `D93`/`D94`; the widely-cited meanings kept
-  their numbers. The highest ID in use is now **D94**. One command settles it:
+  their numbers. The highest ID in use is now **D103** (2026-09-26: D100/D101
+  collided again in notifications.md against visual-layout.md/data-safety.md's
+  older D100/D101 — renumbered notifications.md's two items to D102/D103; see
+  system_learnings.md). One command settles it:
 
   ```bash
   grep -rhoE '^#+ +D[0-9]+b? ' device-tests/*.md | grep -oE 'D[0-9]+b?' \

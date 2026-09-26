@@ -469,6 +469,18 @@ export default function SettingsScreen() {
             </View>
             <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
           </Pressable>
+
+          <Pressable
+            style={[styles.row, styles.rowDivider]}
+            onPress={() => router.push("/delivery-check")}
+            testID="delivery-check-row"
+          >
+            <Feather name="shield" size={18} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Will reminders reach me?</Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} style={styles.chevron} />
+          </Pressable>
         </View>
 
         {/* What notifications show */}
