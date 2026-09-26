@@ -17,7 +17,7 @@ const STOPPING_AT = 0.5;
  * Each language written in its own script. A user who reads only Malayalam
  * gains nothing from the word "Malayalam".
  */
-const LANGUAGE_NAMES: Record<DictationLanguage, string> = {
+export const LANGUAGE_NAMES: Record<DictationLanguage, string> = {
   "en-US": "English",
   "ml-IN": "മലയാളം",
 };

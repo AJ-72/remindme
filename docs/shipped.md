@@ -51,6 +51,31 @@ restore, stop). Spec: `docs/superpowers/specs/2026-09-25-google-drive-backup-des
 Setup: `docs/setup/google-drive-oauth.md`. Device checks:
 `device-tests/data-safety.md#d100`. iOS needs an iOS OAuth client and a build.
 
+### Home screen refresh: thumb-side check, one mic button, readable dark mode — 2026-09-23 · jest only
+
+**User-facing:** None yet (unproven on hardware). The circle that marks a
+reminder done now sits on the right, under your thumb. The quick-add row is
+simpler: one mic button that shows the language it listens in, plus repeat,
+alarm, notes and save. Circles, outlines and icons are much easier to see in
+dark mode. To delete a reminder, open it.
+
+- `ReminderCard`: complete toggle moved to the right edge, 48pt target with a
+  26pt ring, `checkbox` role and state; the trash button (and the `onDelete`
+  prop) removed. Home's single-delete confirm path removed; clear-all stays.
+- `QuickAddInput`: the mic is a pill carrying `LANGUAGE_NAMES[dictationLanguage]`
+  (`quick-add-mic-language`), label "Speak in …". `DictationLanguageChooser`
+  deleted — the listening bar's switch is the one place to change it. The
+  `quick-add-recipient` row icon removed; `quick-add-remind-someone` now
+  carries the recipient in its label and icon.
+- `constants/colors.ts`: new `control` and `icon` tokens in both palettes;
+  dark `border`, `input`, `mutedForeground`, `destructiveBorder` raised; light
+  `input` and `mutedForeground` darkened. `constants/colors.test.ts` pins WCAG
+  3:1 for controls and 4.5:1 for muted text and icons.
+- Card layout covered by a fast-check property test over any title (either
+  script), done state, time, alarm and recurrence.
+- Maestro `remind_someone_else_bolt.yaml` taps the labelled button now.
+  Device check: D100.
+
 ### Phone-number collision recovery: reset or migrate on registration (B9, part 2) — 2026-09-22 · jest only
 
 **User-facing:** None yet (unproven on hardware). If you register your number

@@ -7,6 +7,34 @@
 | [D8](#d8) | Dark mode, visually | `PASS` | 2026-08-24 | SEMI |
 | [D14](#d14) | Seven 2026-08-24 device fixes | `PARTIAL` | 2026-08-29 | SEMI |
 | [D94](#d94) | Ink & Coral palette, on device | `PENDING` | — | NO |
+| [D100](#d100) | Home refresh: check on the right, mic pill, dark contrast | `PENDING` | — | NO |
+
+---
+
+<a id="d100"></a>
+## D100 — Home refresh: check on the right, mic pill, dark contrast · `PENDING`
+
+Jest proves the order of the elements and the token values. It cannot prove
+what a thumb reaches or what an eye sees on a real dark screen.
+
+**Steps.**
+1. Put the phone in dark mode. Open the home screen with three or more
+   reminders, one of them done.
+2. Hold the phone in the right hand. Tap the circle on each card with the
+   thumb.
+3. Look at the unchecked circles, the "Remind someone else" outline, and the
+   repeat, alarm and notes icons.
+4. Look at the mic button. Tap it, then tap "Switch to മലയാളം" on the
+   listening bar, then tap Done.
+5. Repeat steps 1 and 3 in light mode.
+
+**Pass.** Each circle is clearly visible and sits at the right edge, in
+reach of the thumb. No card shows a trash icon. The mic button shows
+"English", then "മലയാളം" after the switch, in full, not cut off. The
+row shows only the mic, repeat, alarm, notes and save.
+
+**Fails if.** A circle or outline is hard to see on either theme, the
+Malayalam name clips, or a tap on the circle opens the card.
 
 ---
 

@@ -257,6 +257,10 @@ export interface ParsedReading {
 }
 
 export interface ParsedAmbiguity {
+  // "numeral" (default): is the number the hour or part of the text?
+  // "meridiem" (English only): a clock time with no AM/PM — `asTime` is then
+  // the AM reading and `asText` the PM reading, both with the same title.
+  kind?: "numeral" | "meridiem";
   // The numeral in question, e.g. "5".
   numberText: string;
   // Reading it as the hour: 05:00, numeral removed from the title.

@@ -66,6 +66,7 @@ export default function AddReminderScreen() {
     attachInvitationId,
     editReminder,
     defaultAlarmEnabled,
+    quietHours,
   } = useReminders();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const isEditing = !!id;
@@ -145,7 +146,7 @@ export default function AddReminderScreen() {
   // Re-parse whenever input changes (add mode)
   useEffect(() => {
     if (isEditing) return;
-    const { title, date, recurrence: parsedRecurrence } = parseNaturalLanguage(input);
+    const { title, date, recurrence: parsedRecurrence } = parseNaturalLanguage(input, new Date(), { eodMinute: quietHours.startMinute });
     setParsedTitle(title);
     if (date) {
       setParsedDate(date);
@@ -155,7 +156,7 @@ export default function AddReminderScreen() {
     }
     setRecurrence(parsedRecurrence);
     setRecurrenceWasParsed(parsedRecurrence !== undefined);
-  }, [input, isEditing]);
+  }, [input, isEditing, quietHours.startMinute]);
 
   // Re-parse the title in edit mode too, so typing e.g. "...tomorrow at 5pm"
   // into an existing reminder's title updates the Date/Time preview instead
@@ -168,7 +169,7 @@ export default function AddReminderScreen() {
   // and blanking it would be destructive rather than helpful.
   useEffect(() => {
     if (!isEditing || !seededFromExisting.current) return;
-    const { date, recurrence: parsedRecurrence } = parseNaturalLanguage(editTitle);
+    const { date, recurrence: parsedRecurrence } = parseNaturalLanguage(editTitle, new Date(), { eodMinute: quietHours.startMinute });
     if (date) {
       setParsedDate(date);
       setDateWasParsed(true);
@@ -187,7 +188,7 @@ export default function AddReminderScreen() {
     } else {
       setRecurrenceWasParsed(false);
     }
-  }, [editTitle, isEditing]);
+  }, [editTitle, isEditing, quietHours.startMinute]);
 
   const handlePickerChange = (event: DateTimePickerEvent, selected: Date | undefined) => {
     if (Platform.OS === "android") setPickerMode(null);

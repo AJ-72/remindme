@@ -110,11 +110,13 @@ Pure functions. Heavily tested.
 
 ## Components — `artifacts/mobile/components/`
 
-`QuickAddInput.tsx` is the largest and most complex: title field, mic button,
+`QuickAddInput.tsx` is the largest and most complex: title field, mic pill
+(names the dictation language; switch it on the listening bar),
 live parse preview, date and time picker, ambiguous-numeral sheet, tour
 target. Treat it with care.
 
-Others worth knowing: `ReminderCard.tsx` (list item and sender chip),
+Others worth knowing: `ReminderCard.tsx` (list item, sender chip, complete toggle on the right;
+no delete — that is on the detail screen),
 `NotificationResponseHandler.tsx` (listeners), `ExactAlarmBanner.tsx`
 (Android), `RecurrencePicker.tsx`, `SnoozeSheet.tsx`, `ErrorBoundary.tsx`.
 
