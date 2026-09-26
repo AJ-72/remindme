@@ -673,6 +673,12 @@ describe("SettingsScreen — Smart Alerts entry", () => {
     fireEvent.press(await findByTestId("smart-alerts-row"));
     expect(router.push).toHaveBeenCalledWith("/smart-alerts");
   });
+
+  it("offers a row into the delivery self-check (B26)", async () => {
+    const { findByTestId } = renderScreen();
+    fireEvent.press(await findByTestId("delivery-check-row"));
+    expect(router.push).toHaveBeenCalledWith("/delivery-check");
+  });
 });
 
 

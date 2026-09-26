@@ -18,6 +18,27 @@ advertise these until a device run logs a pass in `device-tests/`.
 
 ## 2026-09
 
+### Delivery self-check: "Will reminders reach me?" (B26) — 2026-09-26 · jest only
+
+**User-facing:** None yet (unproven on hardware). Settings now has a
+**Will reminders reach me?** screen. It checks the four things that silently
+stop reminders on Android: notification permission, whether the reminder
+channel is muted, *Alarms & reminders* access, and battery optimization. Each
+problem comes with a **Fix in Settings** button, and a **Send test reminder**
+button checks that a real notification arrives within seconds.
+
+**Technical:** `utils/deliveryHealth.ts` (pure verdict; an unreadable reading is
+`unknown`, never `ok`), `utils/deliveryTestFire.ts` (schedule, then race
+arrival against a timeout; matched by a per-run token so a real reminder firing
+meanwhile doesn't count), `services/DeliveryHealthService.ts`, a new local
+Android module `modules/delivery-health` (battery-optimization state has no
+JS API), and the `app/delivery-check.tsx` screen. The test-fire proves delivery
+only while the app is open. Device check: D101.
+
+Also fixed on the way, unrelated to B26: when no day was given, "at 5"'s PM
+reading landed on *tomorrow* afternoon whenever it was already past 5 am. The
+test only failed in the afternoon, so it is now pinned to fixed hours.
+
 ### Phone-number collision recovery: reset or migrate on registration (B9, part 2) — 2026-09-22 · jest only
 
 **User-facing:** None yet (unproven on hardware). If you register your number

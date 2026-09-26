@@ -65,6 +65,7 @@ function RootLayoutNav() {
         options={{ headerShown: false, presentation: "modal" }}
       />
       <Stack.Screen name="smart-alerts" options={{ headerShown: false }} />
+      <Stack.Screen name="delivery-check" options={{ headerShown: false }} />
       <Stack.Screen name="backup" options={{ headerShown: false }} />
       <Stack.Screen name="why-tasks-slip" options={{ headerShown: false }} />
       <Stack.Screen name="bind-invite" options={{ headerShown: false }} />

@@ -426,3 +426,27 @@ snoozed time.
 **Fails if.** The reminder still shows as pending at step 3, or it goes back
 to pending after step 4 (the stale-list overwrite).
 
+
+## D101 — Delivery self-check reads real device state (B26) · `PENDING`
+
+*Added 2026-09-26.* Jest covers the verdict logic and the screen with the
+readings mocked. It cannot check that the native readings are true: that
+`PowerManager.isIgnoringBatteryOptimizations` (new local module
+`modules/delivery-health`) and the channel importance match what system
+settings show, that each **Fix in Settings** button lands on the right system
+page, or that the test reminder really arrives through the OS.
+
+**Steps.**
+1. Settings → **Will reminders reach me?**
+2. In system settings turn off *Alarms & reminders* for the app, and leave
+   battery optimization on (the default). Go back to the app.
+3. Tap each **Fix in Settings** button, grant the access, and press back.
+4. Tap **Send test reminder** and wait, keeping the app open.
+5. Turn notifications for the app off in system settings, return, and repeat step 4.
+
+**Pass.** At step 2 the screen shows both items as problems without a manual
+refresh. Step 3 opens *Alarms & reminders* and the *battery optimization* list,
+and on return each item turns green. At step 4 a "Test reminder" notification
+appears within about 5 s and the screen says it arrived. At step 5 the
+permission item shows as a problem and the test reports that it did not arrive
+or could not be scheduled. The screen never says it passed.
