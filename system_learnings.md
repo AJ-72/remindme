@@ -48,6 +48,19 @@ Newest entries at the top.
 **Also on this branch, as hardening only:** `markDoneById` is now inside `withWriteLock`, like `markNotifiedById`/`markOpenedById`. A test shows it can lose a write if it starts in the same tick as the mount-time `rescheduleAllFutureReminders()`. That window is milliseconds, so it is **not** the cause of this report. An earlier version of this entry claimed it was, and called the report "intermittent" — the user never said that. Both claims were withdrawn after review.
 
 **Why regression testing missed it:** every existing handler test rendered `NotificationResponseHandler` *without* `RemindersProvider`, so they checked the storage write and never the screen. And no device test covered the app-open case: D3 closes the app, D15 leaves it before pressing the action. Separately, D3/D15 were marked `PASS` in the `device-tests/notifications.md` summary table on 2026-09-20 (commit `119ba573`) while their detail sections still read `PENDING` with no `Result` recorded — that status should not be trusted until a real run is written up. **Rule:** a test for a handler that writes storage behind a context must render the context and assert on what the context shows. **WHERE:** `components/NotificationResponseHandler.tsx`, `contexts/RemindersContext.tsx` (`useOptionalReminders`), `components/NotificationResponseHandler.test.tsx`, `services/ReminderService.ts` (`markDoneById`), `device-tests/notifications.md` (D102, renumbered 2026-09-26 — was D100, collided with visual-layout.md's D100).
+## 2026-09-25 — B5: renaming a notification action id needs a fallback, because posted notifications keep the old one
+
+**WHAT:** Renamed `SNOOZE_ACTION_ID` from `"SNOOZE_10"` to `"SNOOZE_ACTION"`. `handleNotificationResponse` keeps accepting `"SNOOZE_10"` as `LEGACY_SNOOZE_ACTION_ID` for one release (removal is B28).
+
+**WHY:** across an upgrade there are two kinds of notification, and they behave differently:
+- **Scheduled, not yet displayed.** expo-notifications' Android builder (`ExpoNotificationBuilder.kt`) looks up the notification's `categoryIdentifier` in its own category store when it *displays* the notification. `setupSnoozeCategory()` re-registers that category on launch (`RemindersContext`, plus the boot reschedule path), so these get the new id without any help. Source: an AI summary of that file, not a line-by-line read. D104 checks it on a device.
+- **Already posted to the tray.** The buttons, and the action ids inside them, were fixed when Android posted the notification, and Android never rebuilds it. Pressing Snooze still delivers `"SNOOZE_10"`.
+
+The first version of this change covered only the first case and dropped the old id. The handler compares `actionIdentifier` against each known id and has no else branch, so `"SNOOZE_10"` fell through with no snooze, no error and no log. The backlog's original worry ("already sitting in a user's tray") was right. Review caught it before merge, and a test that sends a literal `"SNOOZE_10"` response now pins the fallback. The test failed before the fix, which showed the silent no-op.
+
+**Rule for any future action-id rename** (`SNOOZE_MORE_ACTION_ID`, `MARK_DONE_ACTION_ID`, or a new one): a new category definition is not enough. Accept the old id in the handler for at least one release. Renaming `SNOOZE_CATEGORY_ID` itself is riskier still: every scheduled notification points at that id, so a pending notification whose category no longer exists loses all its buttons.
+
+**WHERE:** `artifacts/mobile/services/ReminderService.ts` (both constants), `services/notificationResponseHandler.ts` (the snooze branch), `services/notificationResponseHandler.test.ts` (the legacy-id test), `device-tests/notifications.md#d104`.
 
 ---
 

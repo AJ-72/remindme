@@ -17,6 +17,7 @@
 | [D90](#d90) | Daily 8am reminder survives a DST transition at 8am wall-clock | `PENDING` | — | SEMI |
 | [D102](#d102) | Mark Done / Snooze from the tray, app open | `PENDING` | — | SEMI |
 | [D103](#d103) | Delivery self-check reads real device state (B26) | `PARTIAL` | 2026-09-26 | MANUAL |
+| [D104](#d104) | Snooze on a notification posted before the B5 upgrade still works | `PENDING` | — | SEMI |
 
 ## Known ColorOS harness limitation (affects D3 and D15)
 
@@ -464,3 +465,34 @@ and on return each item turns green. At step 4 a "Test reminder" notification
 appears within about 5 s and the screen says it arrived. At step 5 the
 permission item shows as a problem and the test reports that it did not arrive
 or could not be scheduled. The screen never says it passed.
+<a id="d104"></a>
+## D104 — Snooze on a notification posted before the B5 upgrade still works · `PENDING`
+
+*Added 2026-09-25 (B5).* The quick-Snooze action id was renamed from
+`SNOOZE_10` to `SNOOZE_ACTION`. A notification already in the tray when the
+app is upgraded keeps the old id on its button, because Android never rebuilds
+a posted notification. `handleNotificationResponse` accepts both ids, and Jest
+covers that with a synthetic response. What Jest cannot show is that a real
+posted notification survives an in-place upgrade and still delivers its old id.
+
+**Steps.**
+1. Install a build from **before** B5 (any `main` before the rename commit).
+   Create a reminder a minute out and let it fire. **Do not touch it.**
+2. With the notification still in the tray, upgrade in place to the B5 build:
+   `adb install -r <b5-build>.apk`. Do not clear data and do not open the app.
+3. Press **Snooze** on the notification that is still posted.
+4. Open the app and look at the reminder.
+
+**Pass.** The reminder shows as snoozed to the preset target, and a new
+notification fires at that time.
+
+**Fails if.** Nothing happens: the reminder keeps its original time and no
+snoozed notification fires. That is the silent fall-through the legacy id
+exists to prevent.
+
+**Also check (the case the rename relies on):** a reminder scheduled on the
+old build that fires only **after** the upgrade should show the Snooze button,
+and pressing it should snooze. expo-notifications builds the buttons when the
+notification displays, from the category `setupSnoozeCategory()` re-registers
+on launch. This case assumes the app was launched at least once after the
+upgrade and before the notification fires.

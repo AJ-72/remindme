@@ -99,6 +99,31 @@ dark mode. To delete a reminder, open it.
   script), done state, time, alarm and recurrence.
 - Maestro `remind_someone_else_bolt.yaml` taps the labelled button now.
   Device check: D100.
+### Rename `SNOOZE_ACTION_ID` tech debt (B5) — 2026-09-25 · jest only
+
+**User-facing:** None (internal rename only, no behavior change).
+
+`SNOOZE_ACTION_ID` in `artifacts/mobile/services/ReminderService.ts` was
+`"SNOOZE_10"`, left over from when snooze was a fixed 10 minutes. That name is
+misleading now that the presets are user-configurable (5/15/30/60
+min/tomorrow). It is now `"SNOOZE_ACTION"`.
+
+The old value is still accepted for one release as `LEGACY_SNOOZE_ACTION_ID`.
+Notifications fall into two cases across the upgrade:
+
+- **Scheduled but not yet fired.** expo-notifications builds a notification's
+  buttons when it displays, looking up the category that
+  `setupSnoozeCategory()` re-registers on every launch. These pick up the new id
+  with no extra work.
+- **Already posted to the tray.** Android never rebuilds a posted
+  notification, so its Snooze button still sends `"SNOOZE_10"`. Without the
+  fallback the handler matched no branch and the tap silently did nothing.
+  A first version of this change shipped without the fallback. Review caught
+  it before merge. `handleNotificationResponse` now accepts both ids. Removal
+  is tracked as B28.
+
+Device proof is pending as
+[D104](../device-tests/notifications.md#d104).
 
 ### Phone-number collision recovery: reset or migrate on registration (B9, part 2) — 2026-09-22 · jest only
 

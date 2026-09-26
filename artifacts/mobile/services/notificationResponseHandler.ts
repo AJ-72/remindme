@@ -1,4 +1,5 @@
 import {
+  LEGACY_SNOOZE_ACTION_ID,
   MARK_DONE_ACTION_ID,
   SNOOZE_ACTION_ID,
   SNOOZE_MORE_ACTION_ID,
@@ -187,7 +188,10 @@ export async function handleNotificationResponse(
     return;
   }
 
-  if (response.actionIdentifier === SNOOZE_ACTION_ID) {
+  if (
+    response.actionIdentifier === SNOOZE_ACTION_ID ||
+    response.actionIdentifier === LEGACY_SNOOZE_ACTION_ID
+  ) {
     const preset = await deps.getSnoozePreset();
     // "tomorrow" needs the reminder's own scheduled time, which the
     // notification payload doesn't carry — look it up. Falling back to now

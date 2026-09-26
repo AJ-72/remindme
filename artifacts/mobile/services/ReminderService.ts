@@ -77,16 +77,14 @@ export const NAME_PROMPT_KEY = "@name_prompt_v1";
 // have it silently marked seen by some other onboarding flag settling.
 export const FEATURE_TOUR_KEY = "@feature_tour_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
-// NOTE: the value must stay "SNOOZE_10" even though snooze is now
-// user-configurable. It is written into the categoryIdentifier of every
-// scheduled notification, so notifications already sitting in a user's tray
-// across an upgrade carry this exact string — changing it makes their Snooze
-// button silently do nothing. Renaming needs a dual-registration migration
-// (backlog item 17).
-export const SNOOZE_ACTION_ID = "SNOOZE_10";
+export const SNOOZE_ACTION_ID = "SNOOZE_ACTION";
+// Pre-B5 value. A notification already posted to the tray before the upgrade
+// keeps this id on its Snooze button (Android never rebuilds a posted
+// notification), so the handler must still accept it. Drop after one release.
+export const LEGACY_SNOOZE_ACTION_ID = "SNOOZE_10";
 // Opens the app to the snooze sheet instead of snoozing directly. Android
 // notification actions can't show a sub-menu, so the full preset list is only
-// reachable in-app. Unlike SNOOZE_ACTION_ID this value has no legacy baggage.
+// reachable in-app.
 export const SNOOZE_MORE_ACTION_ID = "SNOOZE_MORE";
 export const MARK_DONE_ACTION_ID = "MARK_DONE";
 
