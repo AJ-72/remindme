@@ -230,8 +230,11 @@ export function parseNaturalLanguage(
   ) {
     const reading = (h24: number) => {
       const d = new Date(date);
+      // An unstated day means the next time it comes round, per reading. Start
+      // from today: chrono has already rolled its own (AM) reading forward, so
+      // building PM on top of that date would skip today's PM entirely.
+      if (!start.isCertain("day")) d.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
       d.setHours(h24, d.getMinutes(), 0, 0);
-      // An unstated day means the next time it comes round, per reading.
       if (!start.isCertain("day") && d.getTime() <= now.getTime()) d.setDate(d.getDate() + 1);
       return { ...result, date: d };
     };

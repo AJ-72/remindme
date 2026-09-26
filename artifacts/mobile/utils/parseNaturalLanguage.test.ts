@@ -282,6 +282,19 @@ describe("parseNaturalLanguage — AM/PM left unsaid", () => {
     }
   });
 
+  // The test above depends on the wall-clock hour it happens to run at; it
+  // only caught the PM-lands-tomorrow bug in the afternoon. Pin the hours.
+  it.each([3, 13, 20])("keeps both readings within a day when it is %i:00", (h) => {
+    const at = new Date();
+    at.setHours(h, 0, 0, 0);
+    const { ambiguity } = parseNaturalLanguage("Call mom at 5", at);
+    for (const reading of [ambiguity!.asTime, ambiguity!.asText]) {
+      const d = reading.date!;
+      expect(d.getTime()).toBeGreaterThan(at.getTime());
+      expect(d.getTime() - at.getTime()).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+    }
+  });
+
   it.each([
     "at 5pm",
     "at 5 am",
