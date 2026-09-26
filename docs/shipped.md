@@ -18,6 +18,22 @@ advertise these until a device run logs a pass in `device-tests/`.
 
 ## 2026-09
 
+### Notification buttons always registered on start — 2026-09-26 · jest + dumpsys
+
+**User-facing:** Fixes reminders arriving without their **Snooze**, **More…**
+and **Mark Done** buttons.
+
+The button set (the `REMINDER_SNOOZE` category) was registered only when the
+app asked for notification permission, or when the snooze preset changed. If
+permission was already granted another way (push registration for "remind
+someone else", system settings) or the app's data was wiped, the buttons never
+came back. `initNotifications()` now registers them on every start.
+
+Seen on a OnePlus CPH2569: a notification from the old build had no actions in
+`dumpsys notification`, and one from the fixed build showed all three. Nobody
+has pressed the buttons on that build yet, so this is not announce-ready; see
+[D105](../device-tests/notifications.md#d105).
+
 ### Delivery self-check: "Will reminders reach me?" (B26) — 2026-09-26 · jest only
 
 **User-facing:** None yet (unproven on hardware). Settings now has a
@@ -113,8 +129,9 @@ Notifications fall into two cases across the upgrade:
 
 - **Scheduled but not yet fired.** expo-notifications builds a notification's
   buttons when it displays, looking up the category that
-  `setupSnoozeCategory()` re-registers on every launch. These pick up the new id
-  with no extra work.
+  `setupSnoozeCategory()` re-registers on every start. That was only true once
+  the tray-buttons fix below landed; before it, registration happened on a
+  permission prompt only. These pick up the new id with no extra work.
 - **Already posted to the tray.** Android never rebuilds a posted
   notification, so its Snooze button still sends `"SNOOZE_10"`. Without the
   fallback the handler matched no branch and the tap silently did nothing.

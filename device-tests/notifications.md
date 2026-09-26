@@ -18,6 +18,7 @@
 | [D102](#d102) | Mark Done / Snooze from the tray, app open | `PENDING` | — | SEMI |
 | [D103](#d103) | Delivery self-check reads real device state (B26) | `PARTIAL` | 2026-09-26 | MANUAL |
 | [D104](#d104) | Snooze on a notification posted before the B5 upgrade still works | `PENDING` | — | SEMI |
+| [D105](#d105) | Notifications carry their buttons with permission already granted | `PENDING` | — | SEMI |
 
 ## Known ColorOS harness limitation (affects D3 and D15)
 
@@ -494,5 +495,41 @@ exists to prevent.
 old build that fires only **after** the upgrade should show the Snooze button,
 and pressing it should snooze. expo-notifications builds the buttons when the
 notification displays, from the category `setupSnoozeCategory()` re-registers
-on launch. This case assumes the app was launched at least once after the
+on every start. This case assumes the app was launched at least once after the
 upgrade and before the notification fires.
+
+**Setup gotcha (found 2026-09-26).** A pre-B5 build (`88b34d1` or earlier)
+registers the buttons only on a permission prompt or a snooze-preset change.
+If permission is already granted, its notifications post with **no buttons**,
+and there is nothing to press. After installing the pre-B5 build, change the
+snooze preset once in Settings → Smart Alerts before creating the step-1
+reminder, then confirm the posted notification has buttons.
+
+---
+
+<a id="d105"></a>
+## D105 — Notifications carry their buttons with permission already granted · `PENDING`
+
+*Added 2026-09-26.* The tray buttons used to be registered only on a
+permission prompt, so a phone whose permission was granted another way, or
+whose app data was wiped, got notifications with no buttons at all.
+`initNotifications()` now registers them on every start.
+
+**Observed, not yet a pass (2026-09-26, OnePlus CPH2569):** `dumpsys
+notification` showed no actions on the old build and `actions=3` (`Snooze 15
+min`, `More…`, `Mark Done`) on the fixed build. The buttons were not pressed.
+
+**Steps.**
+1. Start with notification permission already granted.
+2. Wipe app data without revoking permission:
+   `adb shell am force-stop com.curios.remindme` then
+   `adb shell run-as com.curios.remindme rm -rf shared_prefs`. `run-as`
+   needs a debuggable build; on a release build, clear storage in system
+   settings and re-grant the permission there.
+3. Open the app once, create a reminder 2 minutes out, and leave the app.
+4. When it fires, expand the notification.
+5. Press **Snooze**, then on a second reminder press **Mark Done**.
+
+**Pass.** All three buttons are visible, and each action takes effect.
+
+**Fails if.** The notification has no buttons, or a button does nothing.

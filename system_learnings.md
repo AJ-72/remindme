@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-26 — Tray buttons missing: the snooze category was registered only on a permission prompt
+
+**WHAT:** Notifications on a real device (OnePlus CPH2569, pre-B5 release build `88b34d1`) posted with **no** Snooze / More… / Mark Done buttons — `dumpsys notification` showed no `actions=` at all. `setupSnoozeCategory()` had exactly two callers: `requestNotificationPermissions()` and `setSnoozePreset()`. `initNotifications()` (runs on every start) set up channels but not the category. Fixed by registering the category in `initNotifications()` too. After the fix, the same phone's next notification showed `actions=3` (`Snooze 15 min`, `More…`, `Mark Done`) in `dumpsys`.
+
+**WHY:** expo-notifications attaches buttons at display time from its own category store (SharedPreferences). Anything that leaves notification permission granted but that store empty means buttons never come back, because `ensureNotificationPermission()` returns early once granted and never reaches `requestNotificationPermissions()`. Known ways in: permission granted by `DeviceRegistrationService` (calls `requestPermissionsAsync()` directly) or in system settings, and wiping app data with `run-as … rm -rf shared_prefs` (the recipe in CLAUDE.md's B3 note), which clears the store but not the OS permission. That last one is the likely cause on this phone; not proven. The B5 docs had claimed the category was re-registered "on launch" — wrong until this fix; they came from reasoning, not from reading the call sites. **Rule:** any state expo-notifications keeps (categories, channels) must be re-asserted on every start, not only inside a one-time permission flow.
+
+**WHERE:** `artifacts/mobile/services/ReminderService.ts` (`initNotifications`), `services/ReminderService.test.ts` ("registers the tray actions on every start, without a permission request" — failed with 0 calls before the fix).
+
+---
+
 ## 2026-09-26 — Stryker's Babel 8 hoisted over Babel 7 and broke every Metro bundle
 
 **Symptom:** after a reinstall, every Android bundle (debug via Metro, and the release Gradle bundle) fails with `WorkletsBabelPluginError: [Worklets] Babel plugin exception`. The failing file varies between runs (`reanimated/src/isSharedValue.ts`: "Cannot read properties of undefined (reading 'length')"; `gesture-handler/.../hoverGesture.ts`: "NumericLiterals must be non-negative finite numbers"). `expo start --clear` does not help: it is not a cache problem.
@@ -53,7 +63,7 @@ Newest entries at the top.
 **WHAT:** Renamed `SNOOZE_ACTION_ID` from `"SNOOZE_10"` to `"SNOOZE_ACTION"`. `handleNotificationResponse` keeps accepting `"SNOOZE_10"` as `LEGACY_SNOOZE_ACTION_ID` for one release (removal is B28).
 
 **WHY:** across an upgrade there are two kinds of notification, and they behave differently:
-- **Scheduled, not yet displayed.** expo-notifications' Android builder (`ExpoNotificationBuilder.kt`) looks up the notification's `categoryIdentifier` in its own category store when it *displays* the notification. `setupSnoozeCategory()` re-registers that category on launch (`RemindersContext`, plus the boot reschedule path), so these get the new id without any help. Source: an AI summary of that file, not a line-by-line read. D104 checks it on a device.
+- **Scheduled, not yet displayed.** expo-notifications' Android builder (`ExpoNotificationBuilder.kt`) looks up the notification's `categoryIdentifier` in its own category store when it *displays* the notification. `setupSnoozeCategory()` re-registers that category on every start (`initNotifications()`, since 2026-09-26 — **before that it did not**, see the entry above), so these get the new id without any help. Source: an AI summary of that file, not a line-by-line read. D104 checks it on a device.
 - **Already posted to the tray.** The buttons, and the action ids inside them, were fixed when Android posted the notification, and Android never rebuilds it. Pressing Snooze still delivers `"SNOOZE_10"`.
 
 The first version of this change covered only the first case and dropped the old id. The handler compares `actionIdentifier` against each known id and has no else branch, so `"SNOOZE_10"` fell through with no snooze, no error and no log. The backlog's original worry ("already sitting in a user's tray") was right. Review caught it before merge, and a test that sends a literal `"SNOOZE_10"` response now pins the fallback. The test failed before the fix, which showed the silent no-op.

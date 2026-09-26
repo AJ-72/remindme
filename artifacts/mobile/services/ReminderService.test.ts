@@ -53,6 +53,7 @@ import {
   markOpenedById,
   MAX_SNOOZE_HISTORY_ENTRIES,
   requestNotificationPermissions,
+  initNotifications,
   rescheduleAllFutureReminders,
   setAlarmForPendingReminders,
   countPendingRemindersDisagreeingWithAlarm,
@@ -1390,6 +1391,27 @@ describe("notification permission ladder", () => {
       (a: { identifier: string }) => a.identifier === SNOOZE_ACTION_ID
     );
     expect(snoozeAction.buttonTitle).toBe("Snooze to tomorrow");
+  });
+
+  // Permission can be granted without requestNotificationPermissions() ever
+  // running (push registration, system settings, a wiped category store), and
+  // a notification whose category is unregistered at display time has no
+  // buttons at all. So every start must register it, not just the first ask.
+  it("registers the tray actions on every start, without a permission request", async () => {
+    await setSnoozePreset({ kind: "minutes", minutes: 30 });
+    (setNotificationCategoryAsync as jest.Mock).mockClear();
+    (requestPermissionsAsync as jest.Mock).mockClear();
+
+    await initNotifications();
+
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(setNotificationCategoryAsync).toHaveBeenCalledWith(
+      SNOOZE_CATEGORY_ID,
+      expect.arrayContaining([
+        expect.objectContaining({ identifier: SNOOZE_ACTION_ID, buttonTitle: "Snooze 30 min" }),
+        expect.objectContaining({ identifier: MARK_DONE_ACTION_ID }),
+      ])
+    );
   });
 
   it("labels the snooze action from a stored minutes preset on permission setup", async () => {

@@ -16,7 +16,7 @@ ships it.**
 | File | Covers | IDs |
 | --- | --- | --- |
 | [cross-cutting.md](cross-cutting.md) | Alarm delivery mechanics — the OEM battery/Doze/AlarmManager behavior everything else depends on | D1, D7, D19-D20, D22, D25-D26 |
-| [notifications.md](notifications.md) | Notification actions, channels, dedupe, recurrence re-arm | D2-D4, D15-D16, D85-D90, D102-D104 |
+| [notifications.md](notifications.md) | Notification actions, channels, dedupe, recurrence re-arm | D2-D4, D15-D16, D85-D90, D102-D105 |
 | [feature-e2e.md](feature-e2e.md) | Full user-facing flows | D6, D9-D13, D40-D43, D45, D47-D78, D78b, D82-D84, D91-D93, D95 |
 | [visual-layout.md](visual-layout.md) | Theming, screen layout | D8, D14, D94 |
 | [data-safety.md](data-safety.md) | Storage integrity, backup, re-arm-on-launch/un-complete, telemetry privacy | D17-D18, D21, D23, D79-D81, D101 |
@@ -133,6 +133,7 @@ places when this table was last regenerated.
 | [D102](notifications.md#d102) | Mark Done / Snooze from the tray while the app is open | `PENDING` | — | notifications |
 | [D103](notifications.md#d103) | Delivery self-check reads real device state (B26) | `PARTIAL` | 2026-09-26 | notifications |
 | [D104](notifications.md#d104) | Snooze on a notification posted before the B5 upgrade still works | `PENDING` | — | notifications |
+| [D105](notifications.md#d105) | Notifications carry their buttons with permission already granted | `PENDING` | — | notifications |
 | [D93](feature-e2e.md#d93) | System-wide "Remind Me" text-selection menu | `PENDING` | — | feature-e2e |
 | [D94](visual-layout.md#d94) | Ink & Coral palette, on device | `PENDING` | — | visual-layout |
 | [D95](feature-e2e.md#d95) | Parsed date/time/recurrence chips are editable in place | `PENDING` | — | feature-e2e |
