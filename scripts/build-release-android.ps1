@@ -44,9 +44,23 @@ if (-not $abi) { Fail "Could not read CPU ABI from $Device" }
 Write-Host "Device $Device, ABI $abi"
 
 # --- refuse to clobber a store-signed install -----------------------------------
-$dump = adb -s $Device shell dumpsys package $pkg
-if ($dump -match 'versionName=' -and -not ($dump -match 'DEBUGGABLE')) {
-  Fail "$pkg on $Device is a non-debuggable (EAS/Play) build; a locally-signed APK cannot update it without an uninstall that erases all data. Back up and uninstall manually if that is really intended."
+# Compare signing certs, not the DEBUGGABLE flag: this script's own output is a
+# non-debuggable release build signed with the local key, and must be updatable.
+$installedPath = (adb -s $Device shell pm path $pkg) -replace '^package:', '' | Select-Object -First 1
+if ($installedPath) {
+  $apksigner = Get-ChildItem "$env:ANDROID_HOME\build-tools\*\apksigner.bat" | Sort-Object FullName | Select-Object -Last 1
+  if (-not $apksigner) { Fail "apksigner not found under $env:ANDROID_HOME\build-tools" }
+  $pulled = Join-Path $env:TEMP 'remindme-installed.apk'
+  adb -s $Device pull $installedPath.Trim() $pulled | Out-Null
+  if ($LASTEXITCODE -ne 0) { Fail "Could not pull the installed APK to compare signatures." }
+  $installedCert = (& $apksigner.FullName verify --print-certs $pulled | Select-String 'certificate SHA-256 digest: (\w+)' | Select-Object -First 1).Matches.Groups[1].Value
+  $keytool = Join-Path $env:JAVA_HOME 'bin\keytool.exe'
+  $localCert = ((& $keytool -list -v -keystore "$mobile\android\app\debug.keystore" -storepass android | Select-String 'SHA256: (.+)$').Matches.Groups[1].Value -replace ':', '').ToLower()
+  if (-not $installedCert -or -not $localCert) { Fail "Could not read signing certificates to compare." }
+  if ($installedCert.ToLower() -ne $localCert) {
+    Fail "$pkg on $Device is signed with a different key (EAS/Play?); installing would need an uninstall that erases all data. Back up and uninstall manually if that is really intended."
+  }
+  Write-Host "Installed build is signed with the local key - in-place update is safe."
 }
 
 # --- build ---------------------------------------------------------------------

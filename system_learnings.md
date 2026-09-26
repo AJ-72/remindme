@@ -1112,7 +1112,15 @@ root, so `index.ts` resolves against the repo root. (`EXPO_NO_METRO_WORKSPACE_RO
 is not a fix: the entry then resolves but root `node_modules` disappear —
 `Unable to resolve module expo-router/entry`.) Fix: `metro.config.js` pins the
 server root to the app folder only when `process.argv` contains `export:embed`
-(the release-bundling command; no dev server). Local release builds now go
+(the release-bundling command; no dev server). A second, hidden trap:
+Gradle runs `@expo/cli` straight from the pnpm store, not via the `.bin` shim
+that `npx expo` uses — and only the shim puts `node_modules/.pnpm/node_modules`
+on `NODE_PATH`. So `babel.config.js`'s `babel-preset-expo` (then only a
+transitive dependency of `expo`) was unresolvable under Gradle
+(`Cannot find module 'babel-preset-expo'`) while every manual `npx expo
+export:embed` succeeded. Fixed by declaring `babel-preset-expo` as a direct
+devDependency. Watch for this shape generally: *works via npx, fails under
+Gradle* = an undeclared transitive dependency. Local release builds now go
 through `scripts/build-release-android.ps1`, which also builds only the
 device's CPU ABI (~4x less native work) and refuses to replace a store-signed
 install.
