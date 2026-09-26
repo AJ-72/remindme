@@ -9,6 +9,16 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-26 — Stryker's Babel 8 hoisted over Babel 7 and broke every Metro bundle
+
+**Symptom:** after a reinstall, every Android bundle (debug via Metro, and the release Gradle bundle) fails with `WorkletsBabelPluginError: [Worklets] Babel plugin exception`. The failing file varies between runs (`reanimated/src/isSharedValue.ts`: "Cannot read properties of undefined (reading 'length')"; `gesture-handler/.../hoverGesture.ts`: "NumericLiterals must be non-negative finite numbers"). `expo start --clear` does not help: it is not a cache problem.
+
+**ROOT CAUSE:** `react-native-worklets`' Babel plugin `require`s `@babel/types`, `@babel/generator` and `@babel/traverse` without declaring them, so it gets whatever pnpm hoists into `node_modules/.pnpm/node_modules/@babel/*`. Stryker 10 (added in PR #31 for the mutation-testing pilot) depends on Babel 8, and Babel 8 won that hoist. The plugin then ran Babel 8 `types`/`traverse` against Expo's Babel 7 `@babel/core` AST. To diagnose, check what the plugin resolves: `require.resolve('@babel/types/package.json', {paths: [<worklets dir>]})`.
+
+**FIX:** add `packageExtensions` in `pnpm-workspace.yaml` that pins the three to Babel 7 for `react-native-worklets`. Commit it **together with** `pnpm-lock.yaml`: the lockfile carries a `packageExtensionsChecksum`, and a frozen install (EAS, CI) fails if the two disagree. **Rule:** any new devDependency that brings a different Babel major can break the app bundle without a single test failing, because Jest uses its own transform and the suite stays green. After adding a toolchain devDependency, bundle once (`curl localhost:3011/artifacts/mobile/index.ts.bundle?platform=android` with Metro running). **WHERE:** `pnpm-workspace.yaml` (`packageExtensions`), `pnpm-lock.yaml`.
+
+---
+
 ## 2026-09-26 — chrono-node silently misreads common English date phrases; normalize before parsing
 
 **WHAT:** `parseNaturalLanguage.ts` now runs `normalizeEnglishDatePhrases()` before chrono, rewriting phrases chrono-node@2.9.1 gets wrong into forms it parses correctly. It also post-corrects bare "day after tomorrow", and returns an AM/PM ambiguity (`ParsedAmbiguity.kind: "meridiem"`) that reuses QuickAddInput's existing choice sheet.
