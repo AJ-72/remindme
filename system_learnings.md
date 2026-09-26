@@ -1096,9 +1096,18 @@ APK onto a device. None are in `CLAUDE.md`'s existing Windows section.
 entry against the **repo root** instead of `artifacts/mobile`, even though
 `react.root` is correctly left at its default. The same bundle succeeds
 standalone via `npx expo export` from `artifacts/mobile`, so it is the
-Gradle-invoked path specifically. **Release APKs come from EAS. Use
-`--variant debug` locally** — unresolved, and not worth debugging unless local
-release builds become necessary.
+Gradle-invoked path specifically. ~~Release APKs come from EAS. Use `--variant debug` locally — unresolved.~~
+**Resolved 2026-09-26.** Root cause: the RN Gradle plugin passes the entry as
+`entryFile.cliPath(root)` — a path *relative* to `artifacts/mobile` — and in a
+pnpm monorepo Expo sets Metro's `server.unstable_serverRoot` to the workspace
+root, so `index.ts` resolves against the repo root. (`EXPO_NO_METRO_WORKSPACE_ROOT=1`
+is not a fix: the entry then resolves but root `node_modules` disappear —
+`Unable to resolve module expo-router/entry`.) Fix: `metro.config.js` pins the
+server root to the app folder only when `process.argv` contains `export:embed`
+(the release-bundling command; no dev server). Local release builds now go
+through `scripts/build-release-android.ps1`, which also builds only the
+device's CPU ABI (~4x less native work) and refuses to replace a store-signed
+install.
 
 **2. `react-native-worklets` needs `CMAKE_VERSION` in the environment.**
 `CLAUDE.md` notes the `:app` module needs an explicit
