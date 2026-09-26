@@ -18,6 +18,17 @@ advertise these until a device run logs a pass in `device-tests/`.
 
 ## 2026-09
 
+### Dropped the legacy pre-B5 snooze action id — 2026-09-26 · jest
+
+**User-facing:** No visible change — internal cleanup.
+
+B5 renamed the quick-Snooze notification action id; the old `"SNOOZE_10"`
+value was kept in `notificationResponseHandler.ts` as a compatibility branch
+for notifications posted before that release, since Android never rebuilds a
+posted notification. Removed `LEGACY_SNOOZE_ACTION_ID`, its handler branch,
+and its test now that a release carrying B5's rename has shipped, so no
+pre-B5 notification can still be sitting in a tray.
+
 ### Notification buttons always registered on start — 2026-09-26 · jest + dumpsys
 
 **User-facing:** Fixes reminders arriving without their **Snooze**, **More…**

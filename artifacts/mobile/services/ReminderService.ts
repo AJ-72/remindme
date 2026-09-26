@@ -78,10 +78,6 @@ export const NAME_PROMPT_KEY = "@name_prompt_v1";
 export const FEATURE_TOUR_KEY = "@feature_tour_v1";
 export const SNOOZE_CATEGORY_ID = "REMINDER_SNOOZE";
 export const SNOOZE_ACTION_ID = "SNOOZE_ACTION";
-// Pre-B5 value. A notification already posted to the tray before the upgrade
-// keeps this id on its Snooze button (Android never rebuilds a posted
-// notification), so the handler must still accept it. Drop after one release.
-export const LEGACY_SNOOZE_ACTION_ID = "SNOOZE_10";
 // Opens the app to the snooze sheet instead of snoozing directly. Android
 // notification actions can't show a sub-menu, so the full preset list is only
 // reachable in-app.
