@@ -7,12 +7,12 @@
 | [D8](#d8) | Dark mode, visually | `PASS` | 2026-08-24 | SEMI |
 | [D14](#d14) | Seven 2026-08-24 device fixes | `PARTIAL` | 2026-08-29 | SEMI |
 | [D94](#d94) | Ink & Coral palette, on device | `PENDING` | — | NO |
-| [D100](#d100) | Home refresh: check on the right, mic pill, dark contrast | `PENDING` | — | NO |
+| [D100](#d100) | Home refresh: check on the right, mic pill, dark contrast | `PASS` | 2026-09-26 | NO |
 
 ---
 
 <a id="d100"></a>
-## D100 — Home refresh: check on the right, mic pill, dark contrast · `PENDING`
+## D100 — Home refresh: check on the right, mic pill, dark contrast · `PASS` (2026-09-26, user's OEM device)
 
 Jest proves the order of the elements and the token values. It cannot prove
 what a thumb reaches or what an eye sees on a real dark screen.

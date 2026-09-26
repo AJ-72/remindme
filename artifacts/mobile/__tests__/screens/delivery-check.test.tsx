@@ -1,4 +1,5 @@
 import React from "react";
+import { AppState } from "react-native";
 import { act, fireEvent, render } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -85,5 +86,26 @@ describe("DeliveryCheckScreen", () => {
     fireEvent.press(await findByTestId("delivery-test-fire"));
     expect(await findByTestId("delivery-test-timeout")).toBeTruthy();
     expect(mockGetInputs.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
+
+  it("an arrived test-fire clears an unknown check to ok, and it stays ok after the app resumes", async () => {
+    let foregroundListener: ((state: string) => void) | undefined;
+    jest.spyOn(AppState, "addEventListener").mockImplementation((event, listener) => {
+      if (event === "change") foregroundListener = listener as (state: string) => void;
+      return { remove: jest.fn() } as any;
+    });
+    mockGetInputs.mockResolvedValue({ ...allGood, exactAlarm: null });
+    mockTestFire.mockResolvedValue("arrived");
+    const { findByTestId } = renderScreen();
+    expect(await findByTestId("delivery-overall-unknown")).toBeTruthy();
+
+    fireEvent.press(await findByTestId("delivery-test-fire"));
+    expect(await findByTestId("delivery-status-exact_alarm-ok")).toBeTruthy();
+    expect(await findByTestId("delivery-overall-ok")).toBeTruthy();
+
+    // Simulate the app backgrounding and resuming - the confirmation must survive it.
+    await act(async () => foregroundListener?.("active"));
+    expect(await findByTestId("delivery-status-exact_alarm-ok")).toBeTruthy();
+    expect(await findByTestId("delivery-overall-ok")).toBeTruthy();
   });
 });

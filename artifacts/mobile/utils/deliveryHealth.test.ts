@@ -68,6 +68,26 @@ describe("assessDelivery", () => {
     expect(r.overall).toBe("problem");
   });
 
+  it("resolves an unknown reading to ok when confirmed by a successful test fire", () => {
+    const r = assessDelivery(
+      { ...allGood, exactAlarm: null, ignoringBatteryOptimizations: null },
+      true
+    );
+    expect(r.checks.find((c) => c.id === "exact_alarm")?.status).toBe("ok");
+    expect(r.checks.find((c) => c.id === "battery")?.status).toBe("ok");
+    expect(r.overall).toBe("ok");
+  });
+
+  it("does not let a test-fire confirmation upgrade a confirmed problem", () => {
+    const r = assessDelivery(
+      { ...allGood, ignoringBatteryOptimizations: false, exactAlarm: null },
+      true
+    );
+    expect(r.checks.find((c) => c.id === "battery")?.status).toBe("problem");
+    expect(r.checks.find((c) => c.id === "exact_alarm")?.status).toBe("ok");
+    expect(r.overall).toBe("problem");
+  });
+
   it("gives every problem a fix action", () => {
     const r = assessDelivery({
       notificationsGranted: false,

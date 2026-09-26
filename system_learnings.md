@@ -47,7 +47,7 @@ Newest entries at the top.
 
 **Also on this branch, as hardening only:** `markDoneById` is now inside `withWriteLock`, like `markNotifiedById`/`markOpenedById`. A test shows it can lose a write if it starts in the same tick as the mount-time `rescheduleAllFutureReminders()`. That window is milliseconds, so it is **not** the cause of this report. An earlier version of this entry claimed it was, and called the report "intermittent" — the user never said that. Both claims were withdrawn after review.
 
-**Why regression testing missed it:** every existing handler test rendered `NotificationResponseHandler` *without* `RemindersProvider`, so they checked the storage write and never the screen. And no device test covered the app-open case: D3 closes the app, D15 leaves it before pressing the action. Separately, D3/D15 were marked `PASS` in the `device-tests/notifications.md` summary table on 2026-09-20 (commit `119ba573`) while their detail sections still read `PENDING` with no `Result` recorded — that status should not be trusted until a real run is written up. **Rule:** a test for a handler that writes storage behind a context must render the context and assert on what the context shows. **WHERE:** `components/NotificationResponseHandler.tsx`, `contexts/RemindersContext.tsx` (`useOptionalReminders`), `components/NotificationResponseHandler.test.tsx`, `services/ReminderService.ts` (`markDoneById`), `device-tests/notifications.md` (D100).
+**Why regression testing missed it:** every existing handler test rendered `NotificationResponseHandler` *without* `RemindersProvider`, so they checked the storage write and never the screen. And no device test covered the app-open case: D3 closes the app, D15 leaves it before pressing the action. Separately, D3/D15 were marked `PASS` in the `device-tests/notifications.md` summary table on 2026-09-20 (commit `119ba573`) while their detail sections still read `PENDING` with no `Result` recorded — that status should not be trusted until a real run is written up. **Rule:** a test for a handler that writes storage behind a context must render the context and assert on what the context shows. **WHERE:** `components/NotificationResponseHandler.tsx`, `contexts/RemindersContext.tsx` (`useOptionalReminders`), `components/NotificationResponseHandler.test.tsx`, `services/ReminderService.ts` (`markDoneById`), `device-tests/notifications.md` (D102, renumbered 2026-09-26 — was D100, collided with visual-layout.md's D100).
 
 ---
 
@@ -1866,3 +1866,60 @@ where that step found something the author's own process missed. See
 `docs/superpowers/plans/2026-08-30-remind-someone-else-tier2.md` (search
 "an independent review found two real bugs") for the full incident writeup
 and the fixed SQL/tests.
+
+---
+
+## 2026-09-26 — Battery-optimization "Fix in Settings" opened a dead-end page; two device-test IDs collided again
+
+**Bug found live-testing B26 (D103, `device-tests/notifications.md`).**
+`DeliveryHealthModule.kt`'s `openBatteryOptimizationSettings()` opened
+`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS` — Android's general list of
+every app's battery-optimization state — deliberately, per the existing code
+comment, to avoid `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`'s Play-policy
+restricted permission. On the user's OEM device this landed at Settings →
+Apps → Battery usage → Reminders, a page with **no toggle for this setting at
+all** — a dead end with no way to complete the fix the button promised.
+**First fix attempt was itself wrong** — it called
+`Settings.ACTION_APP_BATTERY_USAGE_SETTINGS`, a plausible-sounding constant
+name that does not exist in the Android SDK; the Kotlin build failed
+(`Unresolved reference`). Caught by actually trying the rebuild rather than
+trusting the edit, then confirmed the constant's absence directly against
+`android.jar` for this project's compileSdk with `javap` before picking a
+replacement, instead of guessing a second name. **Real fix:** try
+`Settings.ACTION_APPLICATION_DETAILS_SETTINGS` (verified to exist the same
+way) with a `package:` URI first — no special permission needed, opens the
+app's own "App info" page — falling back to the general list only if that
+intent fails to resolve. Rebuilt and confirmed on-device: the deep link now
+lands correctly (`lastUpdateTime` on the device matched the rebuild, checked
+via `adb shell dumpsys package`).
+
+**Landing correctly wasn't the whole fix.** The App info page has no toggle
+literally labeled "battery optimization" — the relevant control lives under an
+OEM-specific "Battery" / "Battery usage" sub-item that isn't obvious, so the
+user still had to explore the page to find it. The button landing somewhere
+real does not mean the user knows what to do once there. Fixed by adding that
+guidance directly into `utils/deliveryHealth.ts`'s battery detail copy (what
+to look for, what to choose), so the in-app text — not trial and error on an
+unfamiliar settings page — tells the user the next step. **General rule for
+any "Fix in Settings"-style deep link:** landing on the right *screen* is
+necessary but not sufficient evidence the fix is usable; the copy needs to
+name the specific control, since OEM settings UIs are not self-describing and
+wording/location varies by manufacturer.
+
+**Also found while updating the device-tests record for this run: D100 and
+D101 had each silently drifted into meaning two different things again** —
+notifications.md's "Mark Done/Snooze from the tray, app open" (added
+2026-09-23) and B26's delivery-self-check (added 2026-09-26) reused D100/D101,
+which visual-layout.md (home refresh) and data-safety.md (Google Drive backup)
+already owned from the same two dates. This is the third occurrence of the
+exact collision `device-tests/README.md` already has a documented rule and a
+grep one-liner for (see its "Keep IDs stable" section) — the rule was
+apparently not checked before either of the two new items was added. Renumbered
+the two notifications.md items to D102/D103 (the older, more-cited assignments
+kept their numbers) and updated every citing file (`docs/features.md` was
+already correct — it cites D100 for home refresh, unaffected;
+`docs/shipped.md`, `system_learnings.md`'s own tray-open-bug entry, and
+`device-tests/README.md`'s index all needed the rename). **Rule going forward:**
+before assigning a new device-test ID, actually run the collision-check grep
+`device-tests/README.md` documents, not just "highest number I can see in the
+file I'm editing" — that's the exact mistake this has now repeated three times.

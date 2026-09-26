@@ -33,7 +33,14 @@ arrival against a timeout; matched by a per-run token so a real reminder firing
 meanwhile doesn't count), `services/DeliveryHealthService.ts`, a new local
 Android module `modules/delivery-health` (battery-optimization state has no
 JS API), and the `app/delivery-check.tsx` screen. The test-fire proves delivery
-only while the app is open. Device check: D101.
+only while the app is open. Device check: D103 (renumbered 2026-09-26 from
+D101, which collided with the Google Drive backup item's D101 below).
+Battery's Fix button opens the app's own "App info" page
+(`ACTION_APPLICATION_DETAILS_SETTINGS`) rather than the general
+battery-optimization list, which device-testing found led nowhere useful on
+one OEM; the detail copy also names the specific control to look for there,
+since landing on the right screen alone wasn't enough for the user to find it
+— see `system_learnings.md`, 2026-09-26.
 
 ### Google Drive backup + one-tap "welcome back" restore (B3) — 2026-09-25 · jest only
 

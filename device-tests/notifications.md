@@ -15,7 +15,8 @@
 | [D88](#d88) | Several missed occurrences catch up to the next future one, no burst | `PENDING` | — | SEMI |
 | [D89](#d89) | Marking done from the notification tray advances the series | `PENDING` | — | SEMI |
 | [D90](#d90) | Daily 8am reminder survives a DST transition at 8am wall-clock | `PENDING` | — | SEMI |
-| [D100](#d100) | Mark Done / Snooze from the tray, app open | `PENDING` | — | SEMI |
+| [D102](#d102) | Mark Done / Snooze from the tray, app open | `PENDING` | — | SEMI |
+| [D103](#d103) | Delivery self-check reads real device state (B26) | `PARTIAL` | 2026-09-26 | MANUAL |
 
 ## Known ColorOS harness limitation (affects D3 and D15)
 
@@ -398,8 +399,8 @@ instead of local calendar components.
 
 ---
 
-<a id="d100"></a>
-## D100 — Mark Done / Snooze from the tray while the app is open · `PENDING`
+<a id="d102"></a>
+## D102 — Mark Done / Snooze from the tray while the app is open · `PENDING`
 
 *Added 2026-09-23.* D3 covers the app fully closed (headless task) and D15
 leaves the app before pressing the action. Neither covers the case that was
@@ -412,11 +413,11 @@ RemindersProvider"), but the claim that the tray pull leaves AppState alone is
 an Android fact Jest cannot check.
 
 **Steps.**
-1. Create a reminder 2 minutes out, titled `D100 open`. Stay on the home list.
+1. Create a reminder 2 minutes out, titled `D102 open`. Stay on the home list.
 2. When it fires, pull down the tray **without leaving the app** and press
    **Mark Done**.
 3. Close the tray. Look at the list.
-4. Tick any other reminder's checkbox, then look at `D100 open` again.
+4. Tick any other reminder's checkbox, then look at `D102 open` again.
 5. Repeat steps 1–3 with a fresh reminder, pressing **Snooze** at step 2.
 
 **Pass.** At step 3 the reminder is already under **Completed**, with no
@@ -427,7 +428,7 @@ snoozed time.
 to pending after step 4 (the stale-list overwrite).
 
 
-## D101 — Delivery self-check reads real device state (B26) · `PENDING`
+## D103 — Delivery self-check reads real device state (B26) · `PARTIAL` (2026-09-26, user's OEM device)
 
 *Added 2026-09-26.* Jest covers the verdict logic and the screen with the
 readings mocked. It cannot check that the native readings are true: that
@@ -442,6 +443,19 @@ page, or that the test reminder really arrives through the OS.
    battery optimization on (the default). Go back to the app.
 3. Tap each **Fix in Settings** button, grant the access, and press back.
 4. Tap **Send test reminder** and wait, keeping the app open.
+
+**Run 2026-09-26.**
+
+| Check | Result |
+| --- | --- |
+| Battery optimization reading | Correctly read as on (red/problem). |
+| Battery **Fix in Settings** (1st attempt) | **Bug.** Opened the general battery-optimization app list (`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`), landing on Settings → Apps → Battery usage → Reminders — a page with no actual toggle on this OEM. Dead end. First fix attempt referenced a fabricated API (`ACTION_APP_BATTERY_USAGE_SETTINGS`, which does not exist — confirmed against `android.jar` — and failed to compile); replaced with the real `ACTION_APPLICATION_DETAILS_SETTINGS`. |
+| Battery **Fix in Settings** (2nd attempt, after rebuild) | **Lands correctly** — opens the app's own "App info" page. **But the button gave no guidance once there**: the user had to work out on their own which property on that page controls this (an OEM-specific "Battery" / "Battery usage" sub-item, not obviously labeled). Fixed same day: `utils/deliveryHealth.ts`'s battery detail text now names what to look for ("Battery" / "Battery usage" → Unrestricted / Don't optimize) directly in the app, so the destination page doesn't need figuring out live. **Verified the deep link only** — the added copy itself hasn't had a fresh device read since the wording change (JS-only change, low risk, but not yet re-observed on screen). |
+| Alarms & reminders reading | Showed amber/unknown with "Not needed or not readable on this Android version" — correct per `deliveryHealth.ts`'s unknown-status branch, not a bug, though the amber treatment reads like a warning rather than an informational state. |
+| Send test reminder | Worked — arrived while app open. |
+| Top banner after test-fire | Still read "something on this phone can stop reminders from reaching you" — correct, since the battery-optimization problem above was still unresolved at the time. |
+
+**Still open:** re-run the battery card after the latest rebuild to confirm the new in-app copy actually reads clearly against the real destination page (screen not yet re-observed since the wording change); the "Alarms & reminders" amber-vs-informational distinction is a possible future copy tweak, not tracked as a bug.
 5. Turn notifications for the app off in system settings, return, and repeat step 4.
 
 **Pass.** At step 2 the screen shows both items as problems without a manual

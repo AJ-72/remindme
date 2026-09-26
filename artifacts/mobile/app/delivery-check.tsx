@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -45,9 +45,16 @@ export default function DeliveryCheckScreen() {
   const insets = useSafeAreaInsets();
   const [assessment, setAssessment] = useState<DeliveryAssessment | null>(null);
   const [test, setTest] = useState<TestState>("idle");
+  // Once a test reminder arrives, every later refresh (including from
+  // AppState resuming) keeps treating unresolved checks as confirmed - a
+  // positive delivery proof shouldn't be re-doubted a few seconds later just
+  // because the app was backgrounded. A ref (not state) because `refresh`
+  // reads it without wanting to be redefined - and re-subscribed to
+  // AppState - every time it flips.
+  const confirmedByTestFireRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    setAssessment(assessDelivery(await getDeliveryInputs()));
+    setAssessment(assessDelivery(await getDeliveryInputs(), confirmedByTestFireRef.current));
   }, []);
 
   // Re-read on return from a system settings screen the user was sent to.
@@ -63,6 +70,7 @@ export default function DeliveryCheckScreen() {
     setTest("waiting");
     const result = await testFireNotification();
     setTest(result);
+    if (result === "arrived") confirmedByTestFireRef.current = true;
     refresh();
   };
 
