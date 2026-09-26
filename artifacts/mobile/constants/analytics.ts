@@ -85,6 +85,11 @@ export const EVENTS = {
   INSIGHTS_VIEWED: "insights_viewed",
   BACKUP_EXPORTED: "backup_exported",
   BACKUP_IMPORTED: "backup_imported",
+  // B3 Drive backup. Counts and error codes only - never the account email
+  // or the registered number that the backup file carries.
+  DRIVE_SIGNIN_RESULT: "drive_signin_result",
+  DRIVE_BACKUP_RESULT: "drive_backup_result",
+  DRIVE_RESTORE_RESULT: "drive_restore_result",
   SETTING_CHANGED: "setting_changed",
   TELEMETRY_OPT_OUT: "telemetry_opt_out",
 } as const;

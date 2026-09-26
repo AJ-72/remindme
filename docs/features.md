@@ -28,6 +28,8 @@ design, see [docs/roadmap.md](roadmap.md).
 | Home list: chronological, completed newest-first | `app/(tabs)/index.tsx` | `device` |
 | Home card: complete toggle on the right edge (48pt target); delete from the detail screen only | `components/ReminderCard.tsx` | `jest only` (D100) |
 | Manual JSON backup / restore (Settings → Back up) | Settings | `device` |
+| Android Auto Backup restores reminders, settings, name, number and session on an Android → Android transfer (no code — D1) | OS | `device` |
+| Automatic Google Drive backup (Settings → Backup), plus one-tap "welcome back" restore of reminders + registered number on a fresh install | `services/DriveBackupService.ts`, `app/welcome-back.tsx` | `jest` |
 | 12-hour AM/PM time display everywhere | `utils/formatDatetime.ts` | `jest` |
 
 ## Recurring reminders (M2)

@@ -94,8 +94,10 @@ invisible with the app set to Light on a dark-mode phone (`017b785`). That
 fix is **not** re-verified — see D14 #2.
 
 Re-run this whole walk after any new screen lands. The screens added since
-this passed (Smart Alerts, Why tasks slip, the quiet-hours and name sheets)
-were **not** part of it. Jest asserts *token values*, not pixels.
+this passed (Smart Alerts, Why tasks slip, the quiet-hours and name sheets,
+the Google Drive backup card and welcome-back screen, and `AppDialog` — the
+in-app sheet that replaced every `Alert.alert` on 2026-09-25) were **not**
+part of it. Jest asserts *token values*, not pixels.
 
 **Setup.** System theme **dark**. Have one overdue reminder and one completed
 reminder in the list before starting, so the destructive and muted states
@@ -109,7 +111,9 @@ are on screen.
 5. About.
 6. Smart Alerts.
 7. Why tasks slip.
-8. The sheets: snooze, confirm, quiet-hours, name.
+8. The sheets: snooze, confirm, quiet-hours, name, and `AppDialog` (Settings
+   → Backup → *Stop backing up*, then Cancel; check the icon tint, the red
+   destructive button, and that tapping outside or Back dismisses it).
 9. The exact-alarm banner.
 10. The error fallback (force a crash to reach it).
 

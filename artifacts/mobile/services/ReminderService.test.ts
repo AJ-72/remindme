@@ -12,6 +12,9 @@ import {
   shouldOfferNumberRegistration,
   setRegisteredPhone,
   clearRegisteredPhone,
+  getRegisteredPhone,
+  getUserName,
+  setUserName,
   SNOOZE_CATEGORY_ID,
   SNOOZE_ACTION_ID,
   MARK_DONE_ACTION_ID,
@@ -1896,6 +1899,48 @@ describe("buildBackupJson", () => {
     const result = await importRemindersFromJson(json);
     expect(result.ok).toBe(true);
     expect((await loadReminders())[0].title).toBe("Renew passport");
+  });
+
+  // B3: the file carries who the user is, so a Drive restore on a fresh
+  // install can bring back the registered number.
+  it("carries the user's name and registered number", async () => {
+    await setUserName("Anand");
+    await setRegisteredPhone("+919876543210");
+
+    const parsed = JSON.parse(await buildBackupJson());
+    expect(parsed.identity).toEqual({ userName: "Anand", registeredPhone: "+919876543210" });
+  });
+});
+
+describe("importRemindersFromJson identity (B3)", () => {
+  const withIdentity = (identity: object) =>
+    JSON.stringify({
+      format: "curiousmind.reminders.backup",
+      version: 2,
+      exportedAt: "2026-09-25T00:00:00.000Z",
+      reminders: [],
+      settings: {},
+      identity,
+    });
+
+  it("restores the name when this install has none", async () => {
+    await setUserName("");
+    await importRemindersFromJson(withIdentity({ userName: "Anand" }));
+    expect(await getUserName()).toBe("Anand");
+  });
+
+  it("never overwrites a name the user already set here", async () => {
+    await setUserName("Anu");
+    await importRemindersFromJson(withIdentity({ userName: "Anand" }));
+    expect(await getUserName()).toBe("Anu");
+  });
+
+  // Moving a number is an explicit, confirmed server-side action (welcome
+  // back / register-number), never a side effect of opening a file.
+  it("never sets the registered number", async () => {
+    await clearRegisteredPhone();
+    await importRemindersFromJson(withIdentity({ registeredPhone: "+919876543210" }));
+    expect(await getRegisteredPhone()).toBeNull();
   });
 });
 
