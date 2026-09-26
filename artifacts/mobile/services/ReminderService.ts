@@ -1299,6 +1299,11 @@ export async function initNotifications(): Promise<void> {
   // the legacy "reminders" channel is removed as soon as the user upgrades,
   // without waiting for a scheduling flow to trigger requestPermissions().
   await setupNotificationChannel();
+  // Same reasoning for the tray buttons: expo attaches them at display time
+  // from its category store, and permission can be granted without
+  // requestNotificationPermissions() ever running (push registration, system
+  // settings, a wiped store) - leaving every notification with no buttons.
+  await setupSnoozeCategory(await getSnoozePreset());
 }
 
 export async function addReminder(
