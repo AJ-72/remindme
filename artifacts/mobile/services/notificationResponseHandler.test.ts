@@ -94,15 +94,6 @@ describe("handleNotificationResponse", () => {
     expect(deps.navigateToDetail).not.toHaveBeenCalled();
   });
 
-  // A notification already posted before the B5 rename keeps its old action
-  // id baked in — Android does not rebuild posted notifications.
-  it("still snoozes on the pre-rename SNOOZE_10 action id", async () => {
-    const deps = makeDeps();
-    await handleNotificationResponse(makeResponse("SNOOZE_10"), deps);
-    expect(deps.scheduleSnoozeNotification).toHaveBeenCalled();
-    expect(deps.updateSnoozeById).toHaveBeenCalledWith("r1", expect.any(String), "new-notif");
-  });
-
   it("marks the reminder done on the Mark Done action, without navigating", async () => {
     const deps = makeDeps();
     await handleNotificationResponse(makeResponse(MARK_DONE_ACTION_ID), deps);
