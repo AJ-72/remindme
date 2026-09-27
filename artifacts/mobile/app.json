@@ -26,6 +26,7 @@
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.USE_EXACT_ALARM",
+        "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.RECORD_AUDIO",
@@ -89,7 +90,8 @@
           "speechRecognitionPermission": "Allow Reminders to transcribe speech into reminder text."
         }
       ],
-      "./plugins/withProcessText"
+      "./plugins/withProcessText",
+      "./plugins/withIncomingCall"
     ],
     "experiments": {
       "typedRoutes": true,

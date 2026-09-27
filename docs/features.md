@@ -21,7 +21,7 @@ design, see [docs/roadmap.md](roadmap.md).
 | --- | --- | --- |
 | Create/edit/delete reminders, stored on-device (AsyncStorage, no account) | `services/ReminderService.ts`, `contexts/RemindersContext.tsx` | `device` |
 | Local notifications at the reminder time, incl. Android channels | `ReminderService.ts` (`setupNotificationChannel`) | `device` |
-| Alarm-style reminders (`setAlarmClock`, exact-alarm permission banner) | `ReminderService.ts`, `components/ExactAlarmBanner.tsx` | `device` |
+| Alarm-style reminders (`setAlarmClock`, exact-alarm permission banner; full-screen lock-screen takeover, B24 — `jest`/unverified on device) | `ReminderService.ts`, `components/ExactAlarmBanner.tsx` | `device` |
 | Delivery self-check: permission / channel / exact-alarm / battery-optimization status with fix buttons, plus a real test-fire (B26) | `app/delivery-check.tsx`, `services/DeliveryHealthService.ts`, `modules/delivery-health` | `jest` |
 | Snooze (5/15/30/60 min, "tomorrow") from the notification tray | `services/notificationResponseHandler.ts` | `device` |
 | Mark done from the tray; un-completing re-arms the notification | `notificationResponseHandler.ts`, `toggleComplete` | `device` |

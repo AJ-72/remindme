@@ -9,6 +9,21 @@ Newest entries at the top.
 
 ---
 
+## 2026-09-27 — Full-screen intent drew behind the lock screen; singleInstance swallowed the snoozed ring
+
+**WHAT:** B24 (commit `ba6ab60`). Five non-obvious points:
+1. **expo-notifications 0.32 has no JS option for a full-screen intent.** It's added in the native builder inside `patches/expo-notifications@0.32.17.patch`.
+2. **A full-screen intent only wakes the screen and launches the activity.** The activity itself needs `showWhenLocked`/`turnScreenOn`, or it draws **behind** the lock screen. Device symptom (D106): the screen woke, and the reminder was only visible after unlocking. Deliberately NOT fixed by adding the flags to MainActivity, since that would expose the whole app without unlocking. Instead, a dedicated `IncomingCallActivity` (lock-screen-only, `exported=false`) is the one screen allowed over the lock screen.
+3. **The call screen is `singleInstance`, and a later full-screen launch goes to `onNewIntent`.** A snoozed ring arriving while an earlier call screen was still alive (the user unlocked without pressing Answer or Decline) was silently ignored until `onNewIntent` re-armed it.
+4. **Android only takes over the screen when the phone is locked or the screen is off.** In use, the full-screen intent shows as a heads-up banner. That's Android's rule, not a bug.
+5. **The repo `.gitignore`'s `android/` rule matches ANY folder named `android`.** Native sources for a config plugin must not live under `plugins/android/`, or git never tracks them and a clean checkout breaks the build. They're in `plugins/native/` instead.
+
+**WHY:** Points 2 and 3 only appeared on a real device: Jest has no lock screen or activity lifecycle. Verify with `dumpsys activity activities | grep IncomingCall` (look for top-resumed) plus `dumpsys window | grep isKeyguardShowing`.
+
+**WHERE:** `artifacts/mobile/plugins/native/IncomingCallActivity.kt`, `plugins/withIncomingCall.js`, `patches/expo-notifications@0.32.17.patch`, `device-tests/notifications.md` (D106/D107).
+
+---
+
 ## 2026-09-26 — Tray buttons missing: the snooze category was registered only on a permission prompt
 
 **WHAT:** Notifications on a real device (OnePlus CPH2569, pre-B5 release build `88b34d1`) posted with **no** Snooze / More… / Mark Done buttons — `dumpsys notification` showed no `actions=` at all. `setupSnoozeCategory()` had exactly two callers: `requestNotificationPermissions()` and `setSnoozePreset()`. `initNotifications()` (runs on every start) set up channels but not the category. Fixed by registering the category in `initNotifications()` too. After the fix, the same phone's next notification showed `actions=3` (`Snooze 15 min`, `More…`, `Mark Done`) in `dumpsys`.

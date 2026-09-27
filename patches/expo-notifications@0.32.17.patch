@@ -1,5 +1,86 @@
+diff --git a/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt b/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
+index 610d3039cefd589647538ad8ba14587d29fab338..7fc0e4a99957543d0802be7b2605127cc4d1a9e2 100644
+--- a/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
++++ b/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
+@@ -7,6 +7,7 @@ import android.graphics.Bitmap
+ import android.graphics.BitmapFactory
+ import android.os.Build
+ import android.os.Bundle
++import android.app.PendingIntent
+ import android.os.Parcel
+ import android.provider.Settings
+ import android.util.Log
+@@ -139,13 +140,62 @@ open class ExpoNotificationBuilder(
+ 
+     val defaultAction =
+       NotificationAction(NotificationResponse.DEFAULT_ACTION_IDENTIFIER, null, true)
+-    builder.setContentIntent(
+-      createNotificationResponseIntent(
+-        context,
+-        notification,
+-        defaultAction
+-      )
++    val contentIntent = createNotificationResponseIntent(
++      context,
++      notification,
++      defaultAction
+     )
++    builder.setContentIntent(contentIntent)
++
++    // PATCH (remindme, backlog B24, device-tests D106). An alarm reminder
++    // (JS `data.alarm`, mapped onto `body`) takes over a locked/off screen
++    // like an incoming call instead of only posting a heads-up banner.
++    // On S+ the default action is already an Activity PendingIntent (the
++    // trampoline-free path above), so reusing it routes the takeover exactly
++    // like a tap. Below S it is a broadcast, which a full-screen intent cannot
++    // show, so fall back to the launcher Activity.
++    // Needs USE_FULL_SCREEN_INTENT in the manifest; on Android 14+ that is a
++    // user-revocable special access, and without it Android silently degrades
++    // this to the ordinary heads-up notification, never an error.
++    val payload = content.body
++    if (payload != null && payload.optBoolean("alarm", false)) {
++      // B24 "Ring like a call": open the app's own IncomingCallActivity (a
++      // lock-screen-only call screen, installed by plugins/withIncomingCall.js)
++      // instead of the app itself. Looked up by name because this library
++      // cannot see the app's classes; if the class is missing (a build without
++      // the plugin) this falls through to the plain takeover below.
++      val callIntent = if (payload.optBoolean("ringLikeCall", false)) {
++        val intent = android.content.Intent()
++          .setClassName(context.packageName, "${context.packageName}.IncomingCallActivity")
++          .putExtra("remindme.call.title", content.title)
++          .putExtra("remindme.call.reminderId", payload.optString("reminderId", null))
++          .putExtra("remindme.call.notificationTag", notification.notificationRequest.identifier)
++          .putExtra("remindme.call.notificationId", 0)
++          .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
++        if (intent.resolveActivity(context.packageManager) != null) {
++          PendingIntent.getActivity(
++            context,
++            notification.notificationRequest.identifier.hashCode(),
++            intent,
++            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
++          )
++        } else null
++      } else null
++      val fullScreenIntent = callIntent ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
++        contentIntent
++      } else {
++        context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
++          PendingIntent.getActivity(
++            context,
++            notification.notificationRequest.identifier.hashCode(),
++            it,
++            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
++          )
++        }
++      }
++      fullScreenIntent?.let { builder.setFullScreenIntent(it, true) }
++      builder.setCategory(NotificationCompat.CATEGORY_ALARM)
++    }
+ 
+     if (notificationContent.containsImage()) {
+       val bitmap = notificationContent.getImage(context)
 diff --git a/android/src/main/java/expo/modules/notifications/service/delegates/ExpoSchedulingDelegate.kt b/android/src/main/java/expo/modules/notifications/service/delegates/ExpoSchedulingDelegate.kt
-index eddd1422c5048da9aa2cecb6445d4781b62767c4..eb5d9fb3041b771639557b28c9a90f6c023db562 100644
+index eddd1422c5048da9aa2cecb6445d4781b62767c4..a3e5e349799b2af5b6ba645919f29b928bf584ee 100644
 --- a/android/src/main/java/expo/modules/notifications/service/delegates/ExpoSchedulingDelegate.kt
 +++ b/android/src/main/java/expo/modules/notifications/service/delegates/ExpoSchedulingDelegate.kt
 @@ -64,7 +64,11 @@ class ExpoSchedulingDelegate(protected val context: Context) : SchedulingDelegat

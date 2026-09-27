@@ -142,6 +142,9 @@ export default function QuickAddInput({ onSaved }: Props) {
   const [pinnedRecurrence, setPinnedRecurrence] = useState<RecurrenceRule | undefined>(undefined);
   const [showRepeatSheet, setShowRepeatSheet] = useState(false);
   const [alarm, setAlarm] = useState(defaultAlarmEnabled);
+  // B24 "Ring like a call". Per reminder, never a default; only meaningful
+  // with the alarm on (the payload drops it otherwise, see scheduleNotification).
+  const [ringLikeCall, setRingLikeCall] = useState(false);
   // Tracks whether the user has overridden the alarm for the reminder they're
   // currently composing, so the sync effect below doesn't undo that.
   const alarmTouchedRef = useRef(false);
@@ -412,6 +415,7 @@ export default function QuickAddInput({ onSaved }: Props) {
         description: trimmedDescription,
         datetime: datetimeIso,
         alarm,
+        ...(alarm && ringLikeCall ? { ringLikeCall: true } : {}),
         // Spread rather than `recipient` so an unset value omits the key
         // entirely - `'recipient' in obj` is true even when it holds undefined,
         // which is what isSendReminder would otherwise trip over.
@@ -453,6 +457,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       // to true left a lit bell after every save even with sound turned off.
       alarmTouchedRef.current = false;
       setAlarm(defaultAlarmEnabled);
+      setRingLikeCall(false);
       setDescription("");
       setNotesVisible(false);
       setRecipient(undefined);
@@ -880,7 +885,7 @@ export default function QuickAddInput({ onSaved }: Props) {
     actionRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 8,
+      gap: 4,
       minHeight: 32,
       marginTop: 10,
     },
@@ -955,8 +960,10 @@ export default function QuickAddInput({ onSaved }: Props) {
       ...(Platform.OS === "web" ? { outlineStyle: "none" } as any : {}),
     },
     // 40x44: a thumb-sized target for each row icon.
+    // 36 wide (hitSlop brings the touch target to 52): five toggles plus the
+    // mic and Save must fit a 360dp phone's card without pushing Save out.
     alarmBtn: {
-      width: 40,
+      width: 36,
       height: 44,
       alignItems: "center",
       justifyContent: "center",
@@ -966,11 +973,13 @@ export default function QuickAddInput({ onSaved }: Props) {
       height: 32,
       borderRadius: 16,
       backgroundColor: canSave ? colors.primary : colors.muted,
+      flexShrink: 0,
       alignItems: "center",
       justifyContent: "center",
     },
     micBtn: {
       flexDirection: "row",
+      flexShrink: 1,
       height: 44,
       paddingLeft: 12,
       paddingRight: 14,
@@ -981,6 +990,7 @@ export default function QuickAddInput({ onSaved }: Props) {
       backgroundColor: colors.primary,
     },
     micLanguage: {
+      flexShrink: 1,
       fontSize: 13,
       color: colors.primaryForeground,
     },
@@ -1338,6 +1348,7 @@ export default function QuickAddInput({ onSaved }: Props) {
                 ),
               },
             ]}
+            numberOfLines={1}
             testID="quick-add-mic-language"
           >
             {LANGUAGE_NAMES[dictationLanguage]}
@@ -1387,6 +1398,28 @@ export default function QuickAddInput({ onSaved }: Props) {
             color={alarm ? colors.primary : colors.icon}
           />
         </Pressable>
+        {/* Android only: the call screen is a native Activity. Hidden while
+            silent, like the detail screen's switch. */}
+        {Platform.OS === "android" && alarm && (
+          <Pressable
+            style={styles.alarmBtn}
+            onPress={() => {
+              setRingLikeCall((v) => !v);
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Ring like a call"
+            accessibilityState={{ selected: ringLikeCall }}
+            testID="quick-add-call-toggle"
+          >
+            <Feather
+              name="phone-call"
+              size={16}
+              color={ringLikeCall ? colors.primary : colors.icon}
+            />
+          </Pressable>
+        )}
         <View style={styles.actionSpacer} />
         <Pressable
           style={styles.saveBtn}
