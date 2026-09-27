@@ -533,3 +533,69 @@ min`, `More…`, `Mark Done`) on the fixed build. The buttons were not pressed.
 **Pass.** All three buttons are visible, and each action takes effect.
 
 **Fails if.** The notification has no buttons, or a button does nothing.
+
+## D106 — Alarm reminder takes over a locked screen · `PENDING`
+
+*Added 2026-09-26.* B24: alarm-on reminders now post with a full-screen
+intent (a patch to `expo-notifications`' builder), so a locked or off screen
+is taken over rather than only showing a banner. Jest cannot see any of this.
+
+**Steps.**
+1. Install a native build containing the B24 patch.
+2. On Android 14+, check Settings → Apps → Special app access → Full screen
+   intents shows Reminders as allowed.
+3. Create a reminder 2 minutes out with the alarm **on**, then lock the phone
+   with the screen off.
+4. Repeat with the alarm **off**.
+5. Repeat step 3 with the phone unlocked and the app in the background.
+
+**Pass.** Step 3: the screen wakes and the app opens straight to that
+reminder's detail over the lock screen, with the alarm sound. Step 4: only the
+usual silent notification, and the screen stays off. Step 5: a heads-up
+banner, not a takeover (Android's rule when the user is active).
+
+## D107 — "Ring like a call" shows an incoming-call screen over the lock screen · `PASS`
+
+**Result 2026-09-27, device `b81a371a` (Android 15), reported by the user.**
+Steps 1–6 PASS: call screen over the lock screen (confirmed via `dumpsys`:
+IncomingCallActivity top-resumed with `isKeyguardShowing=true`), Decline and
+Answer behaved as described, and a snoozed call reminder rang as a call again.
+Steps 7–8 PASS (same day, user-reported): edit-screen switch works; quick-add
+Save button fits inside the card in Malayalam mode.
+
+*Added 2026-09-26.* B24 follow-up. A reminder with **Ring like a call** on
+(detail screen, alarm on, Android only) opens `IncomingCallActivity` from its
+full-screen intent instead of the app. That activity is the only screen allowed
+over the lock screen. D106 showed the plain takeover waking the screen but
+drawing behind the lock screen, because MainActivity deliberately lacks
+`showWhenLocked`.
+
+**Steps.**
+1. Create a reminder 2 minutes out with the alarm on, open it, and switch on
+   **Ring like a call**.
+2. Lock the phone with the screen off, and wait.
+3. Press **Decline** and check the tray.
+4. Repeat, and press **Answer**. Unlock when asked.
+5. Repeat, and leave the screen ringing for over 60 seconds.
+
+**Pass.** Step 2: the screen turns on and shows "Incoming reminder" with the
+title, **over** the lock screen, ringing and vibrating in a loop. Step 3: the
+ringing stops and the notification is still in the tray. Step 4: after
+unlocking, the reminder's detail screen opens and the notification is gone.
+Step 5: the ringing stops by itself after about a minute.
+
+**Added 2026-09-27 (snooze + edit follow-up).**
+6. Let one ring, unlock **without** pressing Answer or Decline, then snooze it
+   from the tray (or the detail screen) and lock the phone again.
+7. On the edit screen (pencil icon), check the **Ring like a call** switch
+   shows the saved value, and that switching it off then saving gives a normal
+   alarm next time.
+8. In quick-add, with the phone icon visible, check the Save (✓) button sits
+   fully inside the card, in both English and Malayalam dictation modes.
+
+**Pass (6–8).** Step 6: the snoozed ring shows the call screen again, ringing
+(it used to be swallowed by the still-open earlier call screen). Step 7: the
+switch reflects and changes the setting. Step 8: nothing overflows. Note the
+call screen only appears when the phone is locked or its screen is off — while
+you are using the phone, Android shows a heads-up banner instead; that is
+Android's rule, not a failure.

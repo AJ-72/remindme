@@ -1,4 +1,5 @@
 import React from "react";
+import { Platform } from "react-native";
 import { render, waitFor, fireEvent, act } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -162,6 +163,41 @@ describe("ReminderDetailScreen", () => {
       expect(stored[0].title).toBe("Test reminder");
       expect(stored[0].description).toBe("Some details");
       expect(stored[0].datetime).toBe(FUTURE);
+    });
+  });
+
+  describe("ring like a call (B24)", () => {
+    beforeEach(() => {
+      jest.replaceProperty(Platform, "OS", "android");
+    });
+
+    it("persists ringLikeCall when switched on", async () => {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder()]));
+      const { findByTestId } = renderScreen();
+      const switchEl = await findByTestId("detail-ring-like-call-switch");
+
+      await act(async () => {
+        fireEvent(switchEl, "valueChange", true);
+      });
+
+      await waitFor(async () => {
+        const stored = JSON.parse(
+          (await AsyncStorage.getItem(STORAGE_KEY)) as string
+        );
+        expect(stored[0].ringLikeCall).toBe(true);
+        expect(stored[0].title).toBe("Test reminder");
+      });
+    });
+
+    // A silent reminder has nothing to ring, so the switch would be inert.
+    it("hides the switch on a silent reminder", async () => {
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([makeReminder({ alarm: false })])
+      );
+      const { findByTestId, queryByTestId } = renderScreen();
+      await findByTestId("detail-exact-timing-switch");
+      expect(queryByTestId("detail-ring-like-call-switch")).toBeNull();
     });
   });
 

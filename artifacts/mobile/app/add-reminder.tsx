@@ -105,6 +105,7 @@ export default function AddReminderScreen() {
   const [recurrenceWasParsed, setRecurrenceWasParsed] = useState(false);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [alarm, setAlarm] = useState<boolean>(defaultAlarmEnabled);
+  const [ringLikeCall, setRingLikeCall] = useState(false);
   const [saving, setSaving] = useState(false);
   /**
    * Dismissal is per-visit, not persisted. A suggestion the user waved off
@@ -139,6 +140,7 @@ export default function AddReminderScreen() {
     setParsedTitle(existing.title);
     setParsedDate(new Date(existing.datetime));
     setAlarm(existing.alarm !== false);
+    setRingLikeCall(existing.ringLikeCall === true);
     setRecipient(existing.recipient);
     setRecurrence(existing.recurrence);
   }, [isEditing, existing]);
@@ -260,6 +262,9 @@ export default function AddReminderScreen() {
         description: trimmedDescription,
         datetime: datetimeIso,
         alarm,
+        // Always sent (not spread) so an edit can switch it OFF; a silent
+        // reminder has nothing to ring, so it never keeps the flag.
+        ringLikeCall: alarm && ringLikeCall,
         // Spread rather than `recipient` so an unset value omits the key
         // entirely - `'recipient' in obj` is true even when it holds undefined.
         ...(recipient ? { recipient } : {}),
@@ -1002,6 +1007,37 @@ export default function AddReminderScreen() {
               thumbColor={alarm ? colors.primary : colors.mutedForeground}
             />
           </View>
+
+          {/* B24: Android only (the call screen is a native Activity), and
+              hidden while silent - same rule as quick-add and the detail
+              screen. */}
+          {Platform.OS === "android" && alarm && (
+            <View style={styles.alarmCard}>
+              <Feather
+                name="phone-call"
+                size={18}
+                color={ringLikeCall ? colors.primary : colors.mutedForeground}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.alarmLabel}>Ring like a call</Text>
+                <Text style={styles.alarmSubLabel}>
+                  {ringLikeCall
+                    ? "Takes over the lock screen with Answer / Decline"
+                    : "Normal alarm notification"}
+                </Text>
+              </View>
+              <Switch
+                value={ringLikeCall}
+                onValueChange={(v) => {
+                  setRingLikeCall(v);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }}
+                trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+                thumbColor={ringLikeCall ? colors.primary : colors.mutedForeground}
+                testID="edit-ring-like-call-switch"
+              />
+            </View>
+          )}
 
           {/* Sending - deliberately worded as "message someone", never
               "remind someone else": Tier 1 rings the SENDER's phone and the

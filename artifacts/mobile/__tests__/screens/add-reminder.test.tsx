@@ -1,4 +1,5 @@
 import React from "react";
+import { Platform } from "react-native";
 import { render, waitFor, fireEvent } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -86,6 +87,55 @@ describe("AddReminderScreen — editing", () => {
     const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
     expect(stored[0].title).toBe("Updated title");
     expect(stored[0].description).toBe("Updated description");
+  });
+});
+
+// B24: the edit screen must offer the same per-reminder "Ring like a call"
+// choice as quick-add and the detail screen, and be able to turn it OFF.
+describe("AddReminderScreen — ring like a call", () => {
+  beforeEach(() => {
+    jest.replaceProperty(Platform, "OS", "android");
+  });
+
+  // The screen seeds its fields from storage after the first render.
+  async function waitForSeed(findByTestId: (id: string) => Promise<any>) {
+    const title = await findByTestId("edit-title-input");
+    await waitFor(() => expect(title.props.value).toBe("Original title"));
+  }
+
+  it("shows the existing value and saves it switched off", async () => {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([makeReminder({ alarm: true, ringLikeCall: true })])
+    );
+    const { findByTestId } = renderScreen();
+    await waitForSeed(findByTestId);
+    const sw = await findByTestId("edit-ring-like-call-switch");
+    // Android's native switch carries the value as `on`.
+    expect(sw.props.on).toBe(true);
+    fireEvent(sw, "valueChange", false);
+    fireEvent.press(await findByTestId("save-button"));
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].ringLikeCall).toBe(false);
+  });
+
+  it("saves it switched on", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder({ alarm: true })]));
+    const { findByTestId } = renderScreen();
+    await waitForSeed(findByTestId);
+    fireEvent(await findByTestId("edit-ring-like-call-switch"), "valueChange", true);
+    fireEvent.press(await findByTestId("save-button"));
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+    const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+    expect(stored[0].ringLikeCall).toBe(true);
+  });
+
+  it("is hidden when the alarm is off", async () => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([makeReminder({ alarm: false })]));
+    const { findByTestId, queryByTestId } = renderScreen();
+    await waitForSeed(findByTestId);
+    expect(queryByTestId("edit-ring-like-call-switch")).toBeNull();
   });
 });
 

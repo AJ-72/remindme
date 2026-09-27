@@ -570,6 +570,40 @@ describe("notification scheduling", () => {
     expect(call.content.data.exactTiming).toBe(true);
   });
 
+  // `ringLikeCall` is what the native patch reads to open the call screen
+  // (B24) instead of the plain full-screen notification. Invisible to Jest
+  // past this point, so pin the payload.
+  it("carries ringLikeCall through to the notification payload", async () => {
+    await addReminder([], {
+      title: "A",
+      description: "",
+      datetime: FUTURE,
+      alarm: true,
+      ringLikeCall: true,
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.data.ringLikeCall).toBe(true);
+  });
+
+  it("never rings a silent reminder like a call", async () => {
+    await addReminder([], {
+      title: "A",
+      description: "",
+      datetime: FUTURE,
+      alarm: false,
+      ringLikeCall: true,
+    });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls[0][0];
+    expect(call.content.data.ringLikeCall).toBe(false);
+  });
+
+  it("keeps ringLikeCall on a snoozed notification", async () => {
+    const r = makeReminder({ datetime: FUTURE, alarm: true, ringLikeCall: true });
+    await snoozeReminder([r], r.id, { kind: "minutes", minutes: 15 });
+    const call = (scheduleNotificationAsync as jest.Mock).mock.calls.at(-1)[0];
+    expect(call.content.data.ringLikeCall).toBe(true);
+  });
+
   // exactTiming and alarm are independent: a silent reminder is still punctual.
   it("keeps a silent reminder exact", async () => {
     await addReminder([], {

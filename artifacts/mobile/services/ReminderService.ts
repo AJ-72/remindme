@@ -121,6 +121,12 @@ export interface Reminder {
    * record predating this field keeps working with no migration.
    */
   exactTiming?: boolean;
+  /**
+   * Ring like an incoming call (B24): the notification opens a call-style
+   * screen over the lock screen instead of the plain full-screen alert.
+   * Only takes effect with `alarm` on. Absent means off.
+   */
+  ringLikeCall?: boolean;
   recipient?: ReminderRecipient;
   /** When the reminder was created. Absent on records predating instrumentation. */
   createdAt?: string;
@@ -382,6 +388,8 @@ export interface NotificationData {
   body: string;
   alarm: boolean;
   exactTiming: boolean;
+  /** Absent on payloads built before B24; the native side reads it as false. */
+  ringLikeCall?: boolean;
   channelId: string;
 }
 
@@ -1093,7 +1101,7 @@ export function channelIdForAlarm(alarm: boolean, vibrate: boolean = true): stri
 export async function scheduleNotification(
   reminder: Pick<
     Reminder,
-    "title" | "description" | "datetime" | "alarm" | "exactTiming" | "recipient"
+    "title" | "description" | "datetime" | "alarm" | "exactTiming" | "ringLikeCall" | "recipient"
   >,
   reminderId: string
 ): Promise<string | undefined> {
@@ -1132,6 +1140,7 @@ export async function scheduleNotification(
           body,
           alarm: alarmOn,
           exactTiming: exactOn,
+          ringLikeCall: alarmOn && reminder.ringLikeCall === true,
           channelId,
         } satisfies NotificationData,
         ...(Platform.OS === "ios" && !alarmOn ? { sound: false } : {}),
@@ -1610,6 +1619,7 @@ export async function snoozeReminder(
           body,
           alarm: alarmOn,
           exactTiming: target.exactTiming !== false,
+          ringLikeCall: alarmOn && target.ringLikeCall === true,
           channelId: channelIdForAlarm(alarmOn, await getVibrationEnabled()),
         },
         snoozeTarget

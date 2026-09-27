@@ -18,6 +18,30 @@ advertise these until a device run logs a pass in `device-tests/`.
 
 ## 2026-09
 
+### Alarm reminders take over the lock screen — 2026-09-26 · jest (native unverified)
+
+**User-facing:** A reminder with its alarm on now wakes a locked phone and
+fills the screen, like an incoming call, instead of only showing a banner.
+
+B24. `expo-notifications` 0.32 has no full-screen-intent API, so the existing
+`patches/expo-notifications@0.32.17.patch` now also patches
+`ExpoNotificationBuilder.build()`: when the payload's `alarm` flag is true it
+calls `setFullScreenIntent()` with the notification's own tap intent (so the
+takeover opens the reminder exactly like a tap) and sets `CATEGORY_ALARM`.
+Silent reminders are unchanged. `USE_FULL_SCREEN_INTENT` was added to
+`app.json`. On Android 14+ that permission is a special access the user can
+revoke; without it Android shows the ordinary heads-up notification instead,
+with no error. Needs a native rebuild. D106.
+
+**Ring like a call** (per reminder, detail screen, Android, alarm on only)
+opens `IncomingCallActivity` instead: a native call-style screen that shows
+over the lock screen, rings and vibrates in a loop for up to a minute, and has
+Answer (unlock, then open the reminder) and Decline (the notification stays in
+the tray). It is installed by `plugins/withIncomingCall.js`. This is a
+separate screen because putting `showWhenLocked` on MainActivity would expose
+every reminder over the lock screen. D107. A real carrier phone call (server
+dialling via a paid voice API, as the "Call Me Reminder" app does) is not built.
+
 ### Dropped the legacy pre-B5 snooze action id — 2026-09-26 · jest
 
 **User-facing:** No visible change — internal cleanup.

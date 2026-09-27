@@ -132,6 +132,15 @@ export default function ReminderDetailScreen() {
     await editReminder(reminder.id, { ...rest, exactTiming: value });
   };
 
+  // B24. Same re-arm-through-editReminder route as exact timing: the flag
+  // lives in the scheduled payload, so an already-armed notification must be
+  // replaced for the change to reach the native call screen.
+  const handleToggleRingLikeCall = async (value: boolean) => {
+    if (!reminder) return;
+    const { id: _id, completed, notificationId, ...rest } = reminder;
+    await editReminder(reminder.id, { ...rest, ringLikeCall: value });
+  };
+
   const handleToggleDisableExactAlarm = (disable: boolean) =>
     handleToggleExactTiming(!disable);
 
@@ -533,6 +542,39 @@ export default function ReminderDetailScreen() {
               />
             </View>
           )}
+
+          {/* Android only (the call screen is a native Activity), and only
+              with the alarm on: a silent reminder has nothing to ring. */}
+          {!reminder.completed &&
+            reminder.alarm !== false &&
+            Platform.OS === "android" && (
+              <View style={styles.settingRow}>
+                <Feather
+                  name="phone-call"
+                  size={14}
+                  color={
+                    reminder.ringLikeCall ? colors.primary : colors.mutedForeground
+                  }
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.settingLabel}>Ring like a call</Text>
+                  <Text style={styles.settingSubLabel}>
+                    {reminder.ringLikeCall
+                      ? "Shows an incoming-call screen, even on the lock screen"
+                      : "Rings as a normal alarm notification"}
+                  </Text>
+                </View>
+                <Switch
+                  testID="detail-ring-like-call-switch"
+                  value={reminder.ringLikeCall === true}
+                  onValueChange={handleToggleRingLikeCall}
+                  trackColor={{ false: colors.muted, true: colors.primary + "66" }}
+                  thumbColor={
+                    reminder.ringLikeCall ? colors.primary : colors.mutedForeground
+                  }
+                />
+              </View>
+            )}
 
           <View style={styles.actionsWrap}>
             <Pressable

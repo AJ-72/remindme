@@ -160,6 +160,40 @@ describe("QuickAddInput", () => {
     expect(stored[0].alarm).toBe(false);
   });
 
+  describe("ring like a call toggle (B24)", () => {
+    beforeEach(() => {
+      jest.replaceProperty(Platform, "OS", "android");
+    });
+
+    it("saves ringLikeCall when the phone toggle is on, then resets it", async () => {
+      await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(true));
+      const { findByTestId } = renderComponent();
+
+      fireEvent.changeText(await findByTestId("quick-add-input"), "Call mom tomorrow at 3pm");
+      fireEvent.press(await findByTestId("quick-add-call-toggle"));
+      fireEvent.press(await findByTestId("quick-add-save"));
+
+      await waitFor(async () => {
+        const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+        expect(stored).toHaveLength(1);
+      });
+      const stored = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) as string);
+      expect(stored[0].ringLikeCall).toBe(true);
+      const toggle = await findByTestId("quick-add-call-toggle");
+      await waitFor(() =>
+        expect(toggle.props.accessibilityState?.selected).toBe(false)
+      );
+    });
+
+    // A silent reminder has nothing to ring, matching the detail screen.
+    it("hides the phone toggle while the alarm is off", async () => {
+      await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
+      const { findByTestId, queryByTestId } = renderComponent();
+      await findByTestId("quick-add-silent-hint");
+      expect(queryByTestId("quick-add-call-toggle")).toBeNull();
+    });
+  });
+
   it("returns the alarm to the stored default after saving, not to on", async () => {
     await AsyncStorage.setItem(DEFAULT_ALARM_KEY, JSON.stringify(false));
     const { findByTestId } = renderComponent();

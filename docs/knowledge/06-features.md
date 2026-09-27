@@ -125,7 +125,7 @@ flowchart TB
     subgraph T1["Tier 1 — needs a native build"]
         B7["B7 · ship audio-transcription fixes"]
         B8["B8 · Tier 1 device sign-off"]
-        B24["B24 · Android home-screen widgets"]
+        B29["B29 · Android home-screen widgets"]
     end
 
     subgraph T2["Tier 2 — builds on the live backend"]
@@ -140,7 +140,7 @@ flowchart TB
     T2 -.inherits.-> BE["Supabase remindme-tier2 (live)"]
 
     style B9 fill:#6b3d3d,color:#fff
-    style B24 fill:#2d5f8a,color:#fff
+    style B29 fill:#2d5f8a,color:#fff
 ```
 
 </details>
@@ -156,7 +156,7 @@ the real reasoning, including the two items that are most likely to bite:
 - **B9** — an ambiguous phone number silently misses. The user sees a bare
   "not reachable" badge, which looks the same as the recipient not having the
   app. Workaround: type the number with a leading `+` and country code.
-- **B24** — widgets need native Android code. React Native cannot render a
+- **B29** — widgets need native Android code. React Native cannot render a
   widget, and the widget process cannot read AsyncStorage.
 
 ## The work-tracking rule
